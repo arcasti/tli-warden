@@ -1,0 +1,29 @@
+{
+  "v": 1,
+  "day": 12,
+  "maxDays": 20,
+  "step": "choice",
+  "warden": 5,
+  "devourUsed": true,
+  "choice": { "kind": "cell", "options": [] },
+  "tools": ["saw"],
+  "vault": ["wolf"],
+  "cells": [
+    { "kind": "office" },
+    { "kind": "inmate", "beast": "wolf", "tier": 3 },
+    { "kind": "sealed", "event": null },
+    { "kind": "inmate", "beast": "lion", "tier": 3, "event": "unknown" },
+    { "kind": "sealed", "event": "chain" },
+    { "kind": "empty", "event": "execution" },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "inmate", "beast": "mammoth", "tier": 2 },
+    { "kind": "sealed", "event": null },
+    { "kind": "scratch", "tier": 2, "event": null },
+    { "kind": "inmate", "beast": "wolf", "tier": 3 },
+    { "kind": "empty" },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "inmate", "beast": "lion", "tier": 4 }
+  ]
+}

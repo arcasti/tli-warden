@@ -1,0 +1,29 @@
+{
+  "v": 1,
+  "day": 4,
+  "maxDays": 20,
+  "step": "choice",
+  "warden": 7,
+  "swapUsed": true,
+  "choice": { "kind": "tool", "options": ["whip", "saw", "keys", "saw"] },
+  "tools": ["saw"],
+  "vault": [],
+  "cells": [
+    { "kind": "office" },
+    { "kind": "inmate", "beast": "lion", "tier": 0 },
+    { "kind": "sealed", "event": null },
+    { "kind": "inmate", "beast": "wolf", "tier": 1 },
+    { "kind": "sealed", "event": "chain" },
+    { "kind": "inmate", "beast": "rat", "tier": 1 },
+    { "kind": "sealed", "event": null },
+    { "kind": "inmate", "beast": "mammoth", "tier": 2 },
+    { "kind": "sealed", "event": null },
+    { "kind": "empty" },
+    { "kind": "inmate", "beast": "rat", "tier": 0 },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "inmate", "beast": "wolf", "tier": 0 },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "v": 1,
+  "day": 6,
+  "maxDays": 20,
+  "step": "patrol",
+  "warden": 3,
+  "dest": [9, 5, 14],
+  "tools": ["saw", "muzzle"],
+  "vault": ["wolf"],
+  "cells": [
+    { "kind": "office" },
+    { "kind": "inmate", "beast": "mammoth", "tier": 1 },
+    { "kind": "inmate", "beast": "lion", "tier": 1, "prey": { "cell": 4, "rounds": 2 } },
+    { "kind": "inmate", "beast": "rat", "tier": 2 },
+    { "kind": "inmate", "beast": "wolf", "tier": 1 },
+    { "kind": "sealed", "event": "unknown" },
+    { "kind": "inmate", "beast": "mammoth", "tier": 0, "ivory": true },
+    { "kind": "scratch", "tier": 1, "event": null },
+    { "kind": "nest", "due": 8 },
+    { "kind": "sealed", "event": null },
+    { "kind": "inmate", "beast": "wolf", "tier": 2 },
+    { "kind": "scouted", "beast": "rat", "tier": 2, "event": "execution" },
+    { "kind": "empty" },
+    { "kind": "inmate", "beast": "rat", "tier": 0 },
+    { "kind": "sealed", "event": "chain" },
+    { "kind": "sealed", "event": null }
+  ]
+}

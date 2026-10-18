@@ -1,0 +1,29 @@
+{
+  "v": 1,
+  "day": 9,
+  "maxDays": 20,
+  "step": "event",
+  "warden": 7,
+  "eventKind": "execution",
+  "swapUsed": true,
+  "tools": ["collar"],
+  "vault": [],
+  "cells": [
+    { "kind": "office" },
+    { "kind": "inmate", "beast": "rat", "tier": 1 },
+    { "kind": "inmate", "beast": "lion", "tier": 2 },
+    { "kind": "scratch", "tier": 2, "event": "unknown" },
+    { "kind": "empty" },
+    { "kind": "inmate", "beast": "wolf", "tier": 2 },
+    { "kind": "inmate", "beast": "mammoth", "tier": 3 },
+    { "kind": "sealed", "event": null },
+    { "kind": "scratch", "tier": 0, "event": null },
+    { "kind": "inmate", "beast": "wolf", "tier": 0 },
+    { "kind": "sealed", "event": "execution" },
+    { "kind": "empty" },
+    { "kind": "inmate", "beast": "mammoth", "tier": 1 },
+    { "kind": "sealed", "event": null },
+    { "kind": "nest", "due": 10 },
+    { "kind": "sealed", "event": null }
+  ]
+}

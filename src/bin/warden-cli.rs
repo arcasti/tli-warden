@@ -1,0 +1,228 @@
+//! The command line: `warden-cli` is the console build, so it prints to the
+//! terminal it runs from and the shell waits for its exit code. `warden` is
+//! the window.
+//!
+//!   warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id]
+//!   warden-cli read <frame.png> [--tools id,id]
+//!   warden-cli capture [--frames N] <title text> <out.png>
+//!   warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T]
+//!   warden-cli --version
+
+use std::path::Path;
+use std::process::ExitCode;
+use warden::board::{Model, build_state};
+use warden::engine::data::Tool;
+use warden::reader::{read_model, save_png};
+use warden::solver::TUNED;
+use warden::solver::bench::{bench, summarize};
+use warden::solver::solve::{FollowUp, follow_up, instant, solve};
+
+/// println! that ignores a closed pipe (`| head`) instead of aborting.
+macro_rules! out {
+    () => { out!("") };
+    ($($t:tt)*) => {{
+        use std::io::Write;
+        let _ = writeln!(std::io::stdout(), $($t)*);
+    }};
+}
+
+const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] | warden-cli --version";
+
+fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some("--version") if args.len() == 1 => {
+            out!("warden {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
+        Some(cmd @ ("solve" | "read" | "capture" | "bench")) => {
+            let run = match cmd {
+                "solve" => run_solve(&args[1..]),
+                "read" => run_read(&args[1..]),
+                "bench" => run_bench(&args[1..]),
+                _ => run_capture(&args[1..]),
+            };
+            run.unwrap_or_else(|message| {
+                eprintln!("{message}");
+                ExitCode::from(1)
+            })
+        }
+        _ => {
+            eprintln!("{USAGE}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn number<T: std::str::FromStr>(flag: &str, value: Option<&String>) -> Result<T, String> {
+    value.and_then(|v| v.parse().ok()).ok_or_else(|| format!("{flag} needs a number; {USAGE}"))
+}
+
+/// `--tools id,id`: instrument keys such as coin or chains.
+fn tools(value: Option<&String>) -> Result<Vec<Tool>, String> {
+    let value = value.ok_or_else(|| format!("--tools needs instrument ids; {USAGE}"))?;
+    value
+        .split(',')
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| Tool::from_key(s.trim()).ok_or_else(|| format!("unknown instrument id {s}")))
+        .collect()
+}
+
+fn is_png(file: &str) -> bool {
+    Path::new(file).extension().is_some_and(|e| e.eq_ignore_ascii_case("png"))
+}
+
+/// `capture [--frames N] <title text> <out.png>`: saves the client area of the
+/// first visible window whose title contains the text, as the reader takes it.
+/// With `--frames` it grabs N frames through one capture session, as auto read
+/// does, and prints the mean time per frame after the first.
+fn run_capture(args: &[String]) -> Result<ExitCode, String> {
+    let (mut frames, mut rest) = (None, Vec::new());
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--frames" => frames = Some(number::<usize>("--frames", it.next())?),
+            _ => rest.push(arg),
+        }
+    }
+    let [title, out] = rest[..] else {
+        return Err(USAGE.to_string());
+    };
+    let img = match frames {
+        None => warden::app::capture::capture(title)?,
+        Some(n) => {
+            let (img, times) = warden::app::capture::time_frames(title, n)?;
+            let ms = |d: &std::time::Duration| d.as_secs_f64() * 1000.0;
+            let after = &times[1..];
+            out!("first frame {:.1} ms (opens the session)", ms(&times[0]));
+            if !after.is_empty() {
+                out!("{} more frames, {:.1} ms per frame (grab and fingerprint)", after.len(), after.iter().map(ms).sum::<f64>() / after.len() as f64);
+            }
+            img
+        }
+    };
+    save_png(Path::new(out), &img)?;
+    out!("{}x{} saved to {out}", img.w, img.h);
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `bench`: Chromatics per run for the strategy alone and following the
+/// advice, on the same seeds; see `warden::solver::bench`.
+fn run_bench(args: &[String]) -> Result<ExitCode, String> {
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let (mut games, mut rollouts, mut seed, mut threads) = (100u32, 400usize, 1u32, threads);
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--games" => games = number("--games", it.next())?,
+            "--rollouts" => rollouts = number("--rollouts", it.next())?,
+            "--seed" => seed = number("--seed", it.next())?,
+            "--threads" => threads = number("--threads", it.next())?,
+            _ => return Err(format!("unexpected argument {arg}; {USAGE}")),
+        }
+    }
+    if games == 0 || rollouts == 0 || threads == 0 {
+        return Err(format!("--games, --rollouts and --threads must be at least 1; {USAGE}"));
+    }
+    let clock = std::time::Instant::now();
+    let s = summarize(&bench(games, rollouts, seed, threads));
+    let secs = clock.elapsed().as_secs_f64();
+    out!("strategy  {:.3} +- {:.3} Chromatics per run", s.strategy.0, s.strategy.1);
+    out!("advice    {:.3} +- {:.3}", s.advice.0, s.advice.1);
+    out!("advice - strategy  {:+.3} +- {:.3} (paired)", s.gain.0, s.gain.1);
+    out!("advice overruled the strategy at {} of {} decisions with 2+ options", s.overruled, s.decisions);
+    out!("{games} games, {rollouts} playouts per option, seed {seed}, {threads} threads, {secs:.1} s");
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_read(args: &[String]) -> Result<ExitCode, String> {
+    let (mut file, mut held) = (None, Vec::new());
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--tools" => held = tools(it.next())?,
+            _ if file.is_none() && !arg.starts_with("--") => file = Some(arg),
+            _ => return Err(format!("unexpected argument {arg}; {USAGE}")),
+        }
+    }
+    let (model, warnings) = read_model(Path::new(file.ok_or(USAGE)?), &held)?;
+    for w in &warnings {
+        eprintln!("{w}");
+    }
+    out!("{}", serde_json::to_string_pretty(&model).map_err(|e| e.to_string())?);
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_solve(args: &[String]) -> Result<ExitCode, String> {
+    let (mut file, mut rollouts, mut seed, mut held) = (None, 400usize, 1u32, Vec::new());
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--rollouts" => rollouts = number("--rollouts", it.next())?,
+            "--seed" => seed = number("--seed", it.next())?,
+            "--tools" => held = tools(it.next())?,
+            _ if file.is_none() && !arg.starts_with("--") => file = Some(arg),
+            _ => return Err(format!("unexpected argument {arg}; {USAGE}")),
+        }
+    }
+    let file = file.ok_or(USAGE)?;
+    if rollouts == 0 {
+        return Err(format!("--rollouts must be at least 1; {USAGE}"));
+    }
+    let model: Model = if is_png(file) {
+        let (model, warnings) = read_model(Path::new(file), &held)?;
+        for w in &warnings {
+            out!("{w}");
+        }
+        if !warnings.is_empty() {
+            out!();
+        }
+        model
+    } else {
+        let text = std::fs::read_to_string(file).map_err(|e| format!("cannot read {file}: {e}"))?;
+        let mut model: Model = serde_json::from_str(&text).map_err(|e| format!("{file} is not JSON: {e}"))?;
+        if !held.is_empty() {
+            model.tools = held;
+        }
+        model
+    };
+    let (st, problems) = build_state(&model, seed);
+    if !problems.is_empty() {
+        for p in &problems {
+            out!("{p}");
+        }
+        return Ok(ExitCode::from(2));
+    }
+
+    match instant(&st) {
+        Some(pick) => {
+            out!("Pick: {}\n  {}", pick.label, pick.why);
+            if let Some(next) = follow_up(&st, &pick.action) {
+                match next {
+                    FollowUp::Move(next) => out!("Then: {}\n  {}", next.label, next.why),
+                    FollowUp::Depends => out!("Then: depends on what this move reveals; read the board again."),
+                }
+            }
+        }
+        None => out!("No move: the run is over."),
+    }
+    let options = solve(&st, rollouts, seed, &TUNED);
+    if options.is_empty() {
+        return Ok(ExitCode::SUCCESS);
+    }
+    let width = options.iter().map(|o| o.label.chars().count()).max().unwrap_or(0).max(6);
+    out!("\n{:>4}  {:<width$}  {:>6}  {:>6}  {:>5}", "rank", "option", "mean", "gap", "best");
+    for (i, o) in options.iter().enumerate() {
+        let gap = if i == 0 {
+            "-".to_string()
+        } else if o.gap_se.is_finite() {
+            format!("{:.3}", o.gap_se)
+        } else {
+            "inf".to_string()
+        };
+        let mark = if o.policy { " *" } else { "" };
+        out!("{:>4}  {:<width$}  {:>6.3}  {:>6}  {:>5.2}{mark}", i + 1, o.label, o.mean, gap, o.best);
+    }
+    out!("\n{rollouts} playouts per option; gap is the paired standard error of the margin to the leader; * is the strategy's pick.");
+    Ok(ExitCode::SUCCESS)
+}

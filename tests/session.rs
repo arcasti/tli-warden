@@ -1,0 +1,1026 @@
+//! The app session on a saved frame: the reading matches `read_model`, the
+//! solve run in rounds on the worker matches one `solve` call, and cell edits
+//! and held instruments change the model and re-solve. Skips when
+//! trainingdata/s16 (git-ignored) is missing.
+
+use std::path::Path;
+mod common;
+use warden::app::runlog::RunLog;
+use warden::app::session::{CellEdit, DaysClock, HELD_BLOCKS, MAX_WAIT, ROUND, Reading, SETTLE, Session, Watch, differs, fingerprint};
+use warden::board::{CellModel, ChoiceKind, EventMark, Step, build_state};
+use warden::engine::data::{Beast, OPULENCE, Tool};
+use warden::engine::devour::{devour_options, start_options};
+use warden::engine::{Action, ChoiceId};
+use warden::reader::{Rgba, load_png, read_model};
+use warden::reader::panels::Screen;
+use warden::solver::TUNED;
+use warden::solver::solve::{Rollouts, follow_up, solve};
+
+const ROLLOUTS: usize = 400;
+
+#[test]
+fn session_on_t087() {
+    let frame = common::frames().join("rec1-t087.png");
+    if !frame.is_file() {
+        println!("skipped: {} is missing", frame.display());
+        return;
+    }
+    let mut s = Session::new(ROLLOUTS, Vec::new(), None, None);
+    s.read_in_background(load_png(&frame).unwrap());
+    s.wait();
+    let (model, warnings) = read_model(&frame, &[]).unwrap();
+    let reading = s.reading.clone().unwrap();
+    assert_eq!(reading.model, model);
+    assert_eq!(reading.warnings, warnings);
+    assert!(s.problems.is_empty(), "{:?}", s.problems);
+    assert!(s.pick.is_some());
+
+    // The worker's rounds add up to one solve call with the same rollouts.
+    s.wait();
+    assert_eq!(s.rounds, ROLLOUTS);
+    let (st, _) = build_state(&model, 1);
+    let whole = solve(&st, ROLLOUTS, 1, &TUNED);
+    assert!(whole.len() > 1);
+    assert_eq!(s.ranking, whole);
+    println!("ranking: {} options, leader {} {:.3}", whole.len(), whole[0].label, whole[0].mean);
+
+    // A partial ranking ranks the rounds so far.
+    let mut r = Rollouts::new(&st, 1, &TUNED);
+    r.run(ROUND);
+    assert!(r.ranking().iter().all(|o| o.n <= ROUND));
+    assert_eq!(r.ranking(), solve(&st, ROUND, 1, &TUNED));
+
+    // Edit a locked door into a Wolf.
+    let n = model.cells.iter().position(|c| matches!(c, CellModel::Sealed { .. })).expect("a locked cell");
+    s.edit_cell(n as u8 + 1, CellEdit::Inmate { beast: Beast::Wolf, tier: 2 }).unwrap();
+    let edited = s.reading.clone().unwrap().model;
+    assert_eq!(edited.cells[n], CellModel::Inmate { beast: Beast::Wolf, tier: 2, ivory: false, prey: None, event: model.cells[n].event() });
+    assert_ne!(edited, model);
+    s.wait();
+    assert!(s.problems.is_empty(), "{:?}", s.problems);
+    assert!(!s.ranking.is_empty());
+    assert!(s.edit_cell(1, CellEdit::Empty).is_err(), "the Interrogation Room is not a cell to edit");
+
+    // Held instruments go into the built state; the edit stays.
+    let held = vec![Tool::ALL[0]];
+    s.set_tools(held.clone());
+    let with_tools = s.reading.clone().unwrap().model;
+    assert_eq!(with_tools.tools, held);
+    assert_eq!(with_tools.cells[n], edited.cells[n]);
+    assert_ne!(build_state(&with_tools, 1).0.tools, build_state(&edited, 1).0.tools);
+    s.wait();
+    assert!(!s.ranking.is_empty());
+    println!("warnings: {}", reading.warnings.len());
+
+    // A read of the same scene keeps the edit and the solve: no restart.
+    let at = reading.at;
+    assert_eq!(s.reading.as_ref().unwrap().at, at, "corrections keep the read time");
+    s.set_tools(Vec::new());
+    s.wait();
+    let (kept, rounds) = (s.ranking.clone(), s.rounds);
+    s.read_in_background(load_png(&frame).unwrap());
+    while s.scanning() {
+        s.poll();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(!s.solving);
+    assert_eq!((s.rounds, &s.ranking), (rounds, &kept));
+    let same = s.reading.clone().unwrap();
+    assert_eq!(same.model, edited);
+    assert_eq!(same.warnings, warnings);
+    assert!(same.at > at);
+
+    // Another frame drops the edit and restarts the solve.
+    let pick = frame.with_file_name("rec1-t031.png");
+    s.read_in_background(load_png(&pick).unwrap());
+    s.wait();
+    assert_ne!(s.reading.as_ref().unwrap().model, edited);
+    assert_ne!(s.ranking, kept);
+
+    // Back on the board: the reading without the edit, solved again.
+    let at = same.at;
+    s.read_in_background(load_png(&frame).unwrap());
+    assert!(s.scanning());
+    s.wait();
+    assert!(!s.scanning());
+    // The pick's advised instrument is held now; without it, the board as before.
+    assert_eq!(s.tools.len(), 1);
+    s.set_tools(Vec::new());
+    s.wait();
+    let again = s.reading.clone().unwrap();
+    assert_eq!(again.model, model);
+    assert_eq!(again.warnings, warnings);
+    assert_eq!((again.screen, again.days_left), (reading.screen, reading.days_left));
+    assert!(again.at > at);
+    assert_eq!(s.rounds, ROLLOUTS);
+    assert_eq!(s.ranking, whole);
+}
+
+/// A Then line for the advised move: the session's follow-up is the
+/// solver's for the action it advises after the solve.
+#[test]
+fn session_follows_the_advised_move() {
+    let Some(s) = read_all(Vec::new(), &["rec1-t087.png"]) else { return };
+    let advised = s.advice().expect("an advised move");
+    let (st, _) = build_state(&s.reading.as_ref().unwrap().model, 1);
+    let expected = follow_up(&st, &advised.action);
+    assert!(expected.is_some(), "the run goes on after {}", advised.label);
+    assert_eq!(s.follow_up(), expected.as_ref());
+}
+
+/// A live frame of another 16:9 size reads as the reference size does; a
+/// window of another shape is not read and says why, then keeps the
+/// reading on show with the same line.
+#[test]
+fn frame_size_is_scaled_or_refused() {
+    let Some(reference) = read_all(Vec::new(), &["rec1-t087.png"]) else { return };
+    let frame = load_png(&common::frames().join("rec1-t087.png")).unwrap();
+    let mut s = Session::new(20, Vec::new(), None, None);
+    let read = |s: &mut Session, w, h| {
+        s.read_in_background(frame.resize(w, h));
+        s.wait();
+    };
+    read(&mut s, 1902, 989);
+    let line = "The game window is 1902 x 989, not 16:9";
+    assert!(s.reading.is_none());
+    assert!(s.missed.as_deref().is_some_and(|m| m.starts_with(line)), "{:?}", s.missed);
+
+    read(&mut s, 2560, 1440);
+    let wide = s.reading.clone().unwrap();
+    assert_eq!(wide.model.cells, reference.reading.as_ref().unwrap().model.cells);
+    assert!(wide.warnings.iter().all(|w| !w.text.contains("16:9")), "{:?}", wide.warnings);
+
+    read(&mut s, 1902, 989);
+    let kept = s.reading.as_ref().unwrap();
+    assert_eq!(kept.model.cells, wide.model.cells);
+    assert!(kept.warnings[0].text.starts_with(line), "{:?}", kept.warnings);
+}
+
+/// The auto read fingerprint: the same frame matches, a changed region or
+/// another grid size differs.
+#[test]
+fn fingerprint_differs() {
+    let (w, h) = (1280, 720);
+    let mut data = vec![0u8; w * h * 4];
+    for (i, p) in data.chunks_mut(4).enumerate() {
+        let (x, y) = (i % w, i / w);
+        p.copy_from_slice(&[(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8, 255]);
+    }
+    let frame = Rgba { w, h, data };
+    let print = fingerprint(&frame);
+    assert_eq!(print.len(), 64 * 36);
+    assert!(!differs(&print, &fingerprint(&frame.clone())));
+
+    // A 120 x 90 white patch, about the size of a cell.
+    let mut changed = frame.clone();
+    for y in 300..390 {
+        for x in 600..720 {
+            changed.data[(y * w + x) * 4..(y * w + x) * 4 + 3].copy_from_slice(&[255, 255, 255]);
+        }
+    }
+    assert!(differs(&print, &fingerprint(&changed)));
+    assert!(differs(&print, &print[..print.len() - 1]));
+}
+
+/// A print of all `gray`, with the first `changed` blocks at 255.
+fn print(gray: u8, changed: usize) -> Vec<u8> {
+    let mut p = vec![gray; 64 * 36];
+    p[..changed].fill(255);
+    p
+}
+
+/// Auto read waits for [`SETTLE`] matching samples, reads a screen once and
+/// ignores a hover-sized change.
+#[test]
+fn watch_reads_settled_screens_once() {
+    let mut w = Watch::default();
+    // The screen keeps changing: no read.
+    for g in [0, 50, 100, 150, 200] {
+        assert!(!w.sample(print(g, 0)));
+    }
+    // It settles: read after SETTLE samples matching the one before.
+    for _ in 0..SETTLE - 1 {
+        assert!(!w.sample(print(200, 0)));
+    }
+    assert!(w.sample(print(200, 0)));
+    // The same screen again, or with a hover glow under the threshold: no second read.
+    for _ in 0..5 {
+        assert!(!w.sample(print(200, 0)));
+        assert!(!w.sample(print(200, 2)));
+    }
+    // Another screen: read once it settles.
+    let reads = (0..SETTLE + 3).filter(|_| w.sample(print(10, 0))).count();
+    assert_eq!(reads, 1);
+}
+
+/// A screen marked read, or the sample after `adopt_next`, is not read again.
+#[test]
+fn watch_mark_read_suppresses() {
+    let mut w = Watch::default();
+    w.mark_read(print(80, 0));
+    assert!((0..SETTLE + 3).all(|_| !w.sample(print(80, 0))));
+
+    let mut w = Watch::default();
+    w.adopt_next();
+    assert!((0..SETTLE + 3).all(|_| !w.sample(print(30, 0))));
+    assert_eq!((0..SETTLE + 3).filter(|_| w.sample(print(90, 0))).count(), 1);
+}
+
+/// A print of all `gray`, with `n` blocks at 255 starting at block `from`.
+fn noisy(gray: u8, from: usize, n: usize) -> Vec<u8> {
+    let mut p = vec![gray; 64 * 36];
+    p[from..from + n].fill(255);
+    p
+}
+
+/// A new screen with an animation that moves up to [`HELD_BLOCKS`] blocks a
+/// sample settles and is read; the next screen change is read too.
+#[test]
+fn watch_reads_a_noisy_screen() {
+    // The animation's 12 blocks make two prints differ but hold.
+    assert!(differs(&noisy(120, 0, 6), &noisy(120, 6, 6)));
+    const { assert!(12 <= HELD_BLOCKS) };
+    let mut w = Watch::default();
+    assert_eq!((0..SETTLE + 1).filter(|_| w.sample(print(40, 0))).count(), 1);
+    // A screen change, then an animation that moves 2 x 6 blocks every sample.
+    assert!(!w.sample(print(120, 0)));
+    let reads: Vec<bool> = (0..SETTLE).map(|k| w.sample(noisy(120, 6 * (k % 2), 6))).collect();
+    assert_eq!(reads.last(), Some(&true), "{reads:?}");
+    // Another screen, with the same animation: read once it settles.
+    assert!(!w.sample(noisy(200, 0, 6)));
+    let reads: Vec<bool> = (0..SETTLE).map(|k| w.sample(noisy(200, 6 * (k % 2), 6))).collect();
+    assert_eq!(reads.last(), Some(&true), "{reads:?}");
+}
+
+/// A screen whose edges pulse by more than [`HELD_BLOCKS`] blocks every
+/// sample never settles: it is read after [`MAX_WAIT`] samples anyway.
+#[test]
+fn watch_reads_a_pulsing_screen_after_max_wait() {
+    let mut w = Watch::default();
+    w.mark_read(print(40, 0));
+    let reads: Vec<bool> = (0..MAX_WAIT + 1).map(|k| w.sample(noisy(120, 40 * (k % 2), 40))).collect();
+    assert_eq!(reads.iter().position(|&r| r), Some(MAX_WAIT), "{reads:?}");
+}
+
+/// An instrument pick covers the board: its cells come from the last board
+/// read, corrections included, and never from the card art.
+#[test]
+fn pick_keeps_the_board_under_it() {
+    let dir = common::frames();
+    let (board, pick) = (dir.join("rec1-t087.png"), dir.join("rec1-t031.png"));
+    if !board.is_file() || !pick.is_file() {
+        println!("skipped: {} is missing", dir.display());
+        return;
+    }
+    // Without a board read first: the run start, every cell locked.
+    let (alone, _) = read_model(&pick, &[]).unwrap();
+    assert!(alone.cells.iter().skip(1).all(|c| matches!(c, CellModel::Sealed { .. })), "{:?}", alone.cells);
+
+    let mut s = Session::new(20, Vec::new(), None, None);
+    s.read_in_background(load_png(&board).unwrap());
+    s.wait();
+    let n = s.reading.as_ref().unwrap().model.cells.iter().position(|c| matches!(c, CellModel::Sealed { .. })).expect("a locked cell");
+    s.edit_cell(n as u8 + 1, CellEdit::Inmate { beast: Beast::Wolf, tier: 2 }).unwrap();
+    let under = s.reading.clone().unwrap().model;
+
+    s.read_in_background(load_png(&pick).unwrap());
+    s.wait();
+    let r = s.reading.clone().unwrap();
+    assert_eq!(r.model.cells, under.cells);
+    assert_eq!((r.model.warden, r.model.day), (under.warden, under.day));
+    assert_eq!(r.model.choice.options.len(), 3);
+    assert!(r.warnings.iter().all(|w| w.cell.is_none()), "{:?}", r.warnings);
+    assert!(s.problems.is_empty(), "{:?}", s.problems);
+}
+
+/// The days clock: the counter only counts down, so a lone higher read is a
+/// misread and the same higher value on two readings in a row is a new run.
+#[test]
+fn days_clock() {
+    let mut c = DaysClock::default();
+    assert_eq!(c.update(None), None, "nothing read yet");
+    assert_eq!(c.update(Some(14)), Some(14));
+    assert_eq!(c.update(None), Some(14), "a hidden counter keeps the count");
+    assert_eq!(c.update(Some(14)), Some(14));
+    assert_eq!(c.update(Some(12)), Some(12));
+    assert_eq!(c.update(Some(15)), Some(12), "a lone higher read");
+    assert_eq!(c.update(Some(11)), Some(11));
+    assert_eq!(c.update(Some(20)), Some(11));
+    assert_eq!(c.update(None), Some(11), "a missing read breaks the pair");
+    assert_eq!(c.update(Some(20)), Some(11));
+    assert_eq!(c.update(Some(5)), Some(5), "a different value breaks the pair");
+    assert_eq!(c.update(Some(20)), Some(5));
+    assert_eq!(c.update(Some(20)), Some(20), "the same higher read twice: a new run");
+    assert_eq!(c.update(Some(0)), Some(0));
+}
+
+/// A Consume target pick hides the days counter and does not replace the
+/// board; the treasure pick after it keeps the day of the last board read
+/// and covers the board as the chain left it.
+#[test]
+fn hidden_counter_keeps_the_day() {
+    let dir = common::frames();
+    let frames = ["rec1-t071.png", "rec1-t073.png", "rec1-t085.png"].map(|f| dir.join(f));
+    if frames.iter().any(|f| !f.is_file()) {
+        println!("skipped: {} is missing", dir.display());
+        return;
+    }
+    let mut s = Session::new(20, Vec::new(), None, None);
+    let mut read = |f: &Path| {
+        s.read_in_background(load_png(f).unwrap());
+        s.wait();
+        s.reading.clone().unwrap()
+    };
+    let board = read(&frames[0]);
+    assert_eq!((board.screen, board.days_left), (Screen::Manage, Some(16)));
+    for f in &frames[1..] {
+        let r = read(f);
+        assert_eq!((r.days_left, r.model.day), (Some(16), board.model.day), "{}", f.display());
+        // The Consume target screen always hides the counter, so only the
+        // treasure pick says so.
+        let kept = r.warnings.iter().any(|w| w.text.contains("16 day(s) until Riot kept from the last read"));
+        assert_eq!(kept, r.screen != Screen::ChainTarget, "{:?}", r.warnings);
+        assert!(r.warnings.iter().all(|w| !w.text.contains("day 1 assumed")), "{:?}", r.warnings);
+    }
+    let pick = s.reading.clone().unwrap();
+    assert_eq!(pick.screen, Screen::TreasurePick);
+    // The chain emptied the eater's cell 05 (Chromatic) and cell 15 (bitten,
+    // fading on the Consume target screen): both lock again.
+    let mut cells = board.model.cells.clone();
+    let CellModel::Inmate { beast, .. } = cells[4] else { panic!("{:?}", cells[4]) };
+    cells[4] = CellModel::Sealed { event: None };
+    cells[14] = CellModel::Sealed { event: None };
+    assert_eq!(pick.model.cells, cells);
+    assert_eq!(pick.model.vault, [board.model.vault.clone(), vec![beast]].concat());
+}
+
+/// View Prison Status over a treasure pick (rec5-t018) shows the real board:
+/// the pick stays on show, solved on that board in place of the inferred one
+/// (rec5-t012), and the pick shown again (rec5-t028) keeps it.
+#[test]
+fn prison_status_gives_the_board_under_the_pick() {
+    let tools = vec![Tool::Muzzle, Tool::Saw];
+    let Some(status) = read_all(tools.clone(), &["rec5-t018.png"]) else { return };
+    let status = status.reading.unwrap();
+    assert_eq!(status.screen, Screen::PrisonStatus);
+    let Some(mut s) = read_all(tools, &["rec5-t012.png"]) else { return };
+    assert_eq!(s.reading.as_ref().unwrap().screen, Screen::TreasurePick);
+    for f in ["rec5-t018.png", "rec5-t028.png"] {
+        s.read_in_background(load_png(&common::frames().join(f)).unwrap());
+        s.wait();
+        let r = s.reading.clone().unwrap();
+        assert_eq!(r.screen, Screen::TreasurePick, "{f}");
+        assert_eq!(r.model.cells, status.model.cells, "{f}");
+        assert_eq!(r.model.vault, status.model.vault, "{f}");
+        let patrol = |w: &str| w.contains("Mark today's doors") || w.contains("No destination cards");
+        assert!(r.warnings.iter().all(|w| !patrol(&w.text)), "{f}: {:?}", r.warnings);
+        assert!(s.problems.iter().all(|p| !patrol(p)), "{f}: {:?}", s.problems);
+        assert_eq!(r.model.choice.kind, ChoiceKind::Gift, "{f}");
+        assert!(matches!(s.advice().map(|a| a.action), Some(Action::Choose { .. })), "{f}: {:?}", s.advice());
+    }
+}
+
+/// A Consume target screen right after the manage screen picks the day's
+/// first bite among today's targets; once the screen shows a bite (the eater
+/// grew, its meal's cell locked), it picks the chain's next meal.
+#[test]
+fn consume_target_picks_a_bite() {
+    let frames = ["rec3-t113.png", "rec3-t114.png", "rec3-t116.png"];
+    let Some(mut s) = read_all(Vec::new(), &frames[..2]) else { return };
+    let r = s.reading.clone().unwrap();
+    assert_eq!(r.screen, Screen::ChainTarget);
+    assert!(r.warnings.iter().all(|w| !w.text.contains("can't be solved")), "{:?}", r.warnings);
+    let (st, _) = build_state(&r.model, 1);
+    let targets: Vec<usize> = start_options(&st).iter().map(|o| o.cell).collect();
+    assert!(!targets.is_empty());
+    let advice = s.advice().expect("advice");
+    assert!(matches!(advice.action, Action::Devour { to } if targets.contains(&to)), "{advice:?} {targets:?}");
+    assert!(advice.label.starts_with("Consume the "), "{}", advice.label);
+    assert!(!s.ranking.is_empty());
+    assert!(s.ranking.iter().all(|o| matches!(o.action, Action::Devour { .. })), "{:?}", s.ranking);
+
+    s.read_in_background(load_png(&common::frames().join(frames[2])).unwrap());
+    s.wait();
+    let r = s.reading.clone().unwrap();
+    assert_eq!(r.screen, Screen::ChainTarget);
+    let (st, _) = build_state(&r.model, 1);
+    let options: Vec<usize> = devour_options(&st, st.position).iter().map(|o| o.cell).collect();
+    let advice = s.advice().expect("advice");
+    match advice.action {
+        Action::Chain { to } => assert!(options.contains(&to), "{advice:?} {options:?}"),
+        Action::EndChain => {}
+        _ => panic!("{advice:?}"),
+    }
+    assert!(s.ranking.iter().all(|o| matches!(o.action, Action::Chain { .. } | Action::EndChain)), "{:?}", s.ranking);
+}
+
+/// The red jaws over the targets of the Consume target screen rec4-t110
+/// spoil the read of cell 03: read alone it warns; after the board rec4-t070
+/// the cell is kept from the board without a warning, and the hidden days
+/// counter, which this screen always hides, gives no line either.
+#[test]
+fn consume_target_keeps_unsure_cells() {
+    let Some(alone) = read_all(Vec::new(), &["rec4-t110.png"]) else { return };
+    let r = alone.reading.clone().unwrap();
+    assert_eq!(r.screen, Screen::ChainTarget);
+    assert!(r.warnings.iter().any(|w| w.text.starts_with("Check cell 03")), "{:?}", r.warnings);
+
+    let Some(s) = read_all(Vec::new(), &["rec4-t070.png", "rec4-t110.png"]) else { return };
+    let board = read_all(Vec::new(), &["rec4-t070.png"]).unwrap().reading.unwrap();
+    let r = s.reading.clone().unwrap();
+    assert_eq!(r.screen, Screen::ChainTarget);
+    assert!(r.warnings.iter().all(|w| !w.text.starts_with("Check cell ") && !w.text.contains("days counter")), "{:?}", r.warnings);
+    assert_eq!(r.model.cells[2], board.model.cells[2]);
+}
+
+/// A loading screen (rec4-t424) after a board keeps the board's reading and
+/// solve with a line that says so; the riot screen (rec4-t422) then ends the
+/// run: no reading, no advice, no held instruments, one line.
+#[test]
+fn off_board_frame_then_run_end() {
+    let Some(mut s) = read_all(vec![Tool::Saw], &["rec4-t070.png"]) else { return };
+    let dir = common::frames();
+    let (loading, riot) = (dir.join("rec4-t424.png"), dir.join("rec4-t422.png"));
+    if !loading.is_file() || !riot.is_file() {
+        println!("skipped: {} is missing", dir.display());
+        return;
+    }
+    let before = s.reading.clone().unwrap();
+    assert_eq!(before.screen, Screen::Manage);
+    let ranking = s.ranking.clone();
+    s.read_in_background(load_png(&loading).unwrap());
+    s.wait();
+    let after = s.reading.clone().unwrap();
+    assert_eq!((&after.model, after.screen, after.at), (&before.model, before.screen, before.at));
+    assert_eq!(after.warnings[0].text, "The prison board is not on screen: showing the last reading.");
+    assert_eq!(after.warnings[1..], before.warnings[..]);
+    assert_eq!(s.ranking, ranking);
+
+    s.read_in_background(load_png(&riot).unwrap());
+    s.wait();
+    let vaulted = before.model.vault.len();
+    let line = if vaulted == 1 { "The run is over: 1 Chromatic Prisoner vaulted.".to_string() } else { format!("The run is over: {vaulted} Chromatic Prisoners vaulted.") };
+    assert_eq!(s.run_over.as_deref(), Some(line.as_str()));
+    assert!(s.reading.is_none());
+    assert!(s.pick.is_none() && s.ranking.is_empty() && s.problems.is_empty() && !s.solving);
+    assert!(s.advice().is_none());
+    assert!(s.edit_cell(2, CellEdit::Empty).is_err());
+    assert!(s.tools.is_empty() && s.take_tools_changed(), "{:?}", s.tools);
+    assert_eq!(s.days_left(), None);
+
+    // The next board starts over.
+    s.read_in_background(load_png(&dir.join("rec4-t070.png")).unwrap());
+    s.wait();
+    assert!(s.run_over.is_none());
+    assert_eq!(s.reading.as_ref().unwrap().screen, Screen::Manage);
+}
+
+/// A game dialog keeps the last reading and its solve on show.
+#[test]
+fn popup_keeps_the_last_reading() {
+    let dir = common::frames();
+    let (board, popup) = (dir.join("rec1-t087.png"), dir.join("rec2-t109.png"));
+    if !board.is_file() || !popup.is_file() {
+        println!("skipped: {} is missing", dir.display());
+        return;
+    }
+    let mut s = Session::new(20, Vec::new(), None, None);
+    s.read_in_background(load_png(&board).unwrap());
+    s.wait();
+    let before = s.reading.clone().unwrap();
+    let ranking = s.ranking.clone();
+    s.read_in_background(load_png(&popup).unwrap());
+    s.wait();
+    let after = s.reading.clone().unwrap();
+    assert_eq!((&after.model, after.screen, after.at), (&before.model, before.screen, before.at));
+    assert_eq!(after.warnings[0].text, "A popup covers the game: showing the last reading.");
+    assert_eq!(after.warnings[1..], before.warnings[..]);
+    assert_eq!(s.ranking, ranking);
+}
+
+/// A black frame: no board, no pick, no days counter.
+fn black() -> Rgba {
+    Rgba { w: 1920, h: 1080, data: [0, 0, 0, 255].repeat(1920 * 1080) }
+}
+
+/// A read without the board while no reading is on show says so in
+/// `missed`; a board read clears it.
+#[test]
+fn off_board_read_without_a_reading_is_missed() {
+    let mut s = Session::new(20, Vec::new(), None, None);
+    s.read_in_background(black());
+    s.wait();
+    assert!(s.reading.is_none());
+    assert_eq!(s.missed.as_deref(), Some("The last read found no board or pick on screen."));
+
+    let board = common::frames().join("rec1-t087.png");
+    if !board.is_file() {
+        println!("skipped: {} is missing", board.display());
+        return;
+    }
+    s.read_in_background(load_png(&board).unwrap());
+    s.wait();
+    assert!(s.reading.is_some() && s.missed.is_none());
+}
+
+/// The run log gets a "miss" line for a read that installed nothing, with
+/// its frame saved once per screen in a row, and the "window" line names the
+/// OCR language.
+#[test]
+fn run_log_logs_a_miss() {
+    let root = std::env::temp_dir().join(format!("warden-run-log-miss-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let mut s = Session::new(20, Vec::new(), None, None);
+    s.log = Some(RunLog::new(root.clone()));
+    s.log_window("\"Torchlight: Infinite\" (1920 x 1080)");
+    for _ in 0..2 {
+        s.read_in_background(black());
+        s.wait();
+    }
+    let run = s.log.as_ref().unwrap().dir().to_path_buf();
+    let text = std::fs::read_to_string(run.join("log.jsonl")).unwrap();
+    let lines: Vec<serde_json::Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert_eq!(lines[0]["kind"], "window");
+    assert_eq!(lines[0]["window"], "\"Torchlight: Infinite\" (1920 x 1080)");
+    assert_eq!(lines[0]["ocr"].as_str(), warden::reader::ocr::language().as_deref());
+    let misses: Vec<&serde_json::Value> = lines.iter().filter(|l| l["kind"] == "miss").collect();
+    assert_eq!(misses.len(), 2);
+    assert_eq!(misses[0]["screen"], "Unknown");
+    assert_eq!(misses[0]["line"], "The prison board is not on screen: showing the last reading.");
+    assert_eq!(misses[0]["size"], serde_json::json!([1920, 1080]));
+    assert_eq!(misses[0]["frame"], "frame-0001.jpg");
+    assert!(misses[1]["frame"].is_null());
+    assert!(run.join("frame-0001.jpg").is_file());
+    drop(s);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// The Sewer Ratway's "Select an Objective" reads the board under the corner
+/// brackets as a cell choice, picks the cell to move to, and is the board
+/// under the next instrument pick.
+#[test]
+fn sewer_ratway_cell_pick() {
+    let dir = common::frames();
+    let (ratway, pick) = (dir.join("rec2-t340.png"), dir.join("rec1-t031.png"));
+    if !ratway.is_file() || !pick.is_file() {
+        println!("skipped: {} is missing", dir.display());
+        return;
+    }
+    let mut s = Session::new(20, Vec::new(), None, None);
+    s.read_in_background(load_png(&ratway).unwrap());
+    s.wait();
+    let r = s.reading.clone().unwrap();
+    assert_eq!((r.screen, r.model.step, r.model.choice.kind), (Screen::CellPick, Step::Choice, ChoiceKind::Cell));
+    assert!(r.model.cells.iter().filter(|c| matches!(c, CellModel::Inmate { .. })).count() >= 4, "{:?}", r.model.cells);
+    assert!(s.problems.is_empty(), "{:?}", s.problems);
+    let label = &s.pick.as_ref().expect("a pick").label;
+    assert!(label.starts_with("Move to "), "{label}");
+
+    s.read_in_background(load_png(&pick).unwrap());
+    s.wait();
+    assert_eq!(s.reading.clone().unwrap().model.cells, r.model.cells);
+}
+
+/// The Interrogation Room's Instigate and Bestow cards after a patrol are a
+/// choice between the two, solved on the board read behind them.
+#[test]
+fn interrogation_room_cards() {
+    for card in ["rec3-ir08.png", "rec3-ir12.png"] {
+        let Some(s) = read_all(Vec::new(), &["rec3-t291.png", card]) else { return };
+        let r = s.reading.clone().unwrap();
+        assert_eq!((r.screen, r.model.step, r.model.choice.kind), (Screen::Interrogation, Step::Choice, ChoiceKind::Interrogation), "{card}");
+        assert!(s.problems.is_empty(), "{card}: {:?}", s.problems);
+        let Some(Action::Choose { id: ChoiceId::Name(key) }) = s.advice().map(|a| a.action) else { panic!("{card}: {:?}", s.advice()) };
+        assert!(key == "instigate" || key == "bestow", "{card}: {key}");
+        for name in ["instigate", "bestow"] {
+            assert!(s.ranking.iter().any(|o| o.action == Action::Choose { id: ChoiceId::Name(name.to_string()) }), "{card}: no {name} in {:?}", s.ranking);
+        }
+    }
+}
+
+/// An incident marker on an open cell is read and stays through a correction.
+#[test]
+fn open_cell_marker() {
+    let frame = common::frames().join("rec2-t100.png");
+    if !frame.is_file() {
+        println!("skipped: {} is missing", frame.display());
+        return;
+    }
+    let mut s = Session::new(20, Vec::new(), None, None);
+    s.read_in_background(load_png(&frame).unwrap());
+    s.wait();
+    let cell = &s.reading.as_ref().unwrap().model.cells[12];
+    assert!(matches!(cell, CellModel::Inmate { beast: Beast::Wolf, event: Some(EventMark::Unknown), .. }), "{cell:?}");
+    s.edit_cell(13, CellEdit::Empty).unwrap();
+    let model = s.reading.clone().unwrap().model;
+    assert_eq!(model.cells[12], CellModel::Empty { event: Some(EventMark::Unknown) });
+    let (st, _) = build_state(&model, 1);
+    assert!(!st.cells[12].sealed && st.cells[12].event.is_some() && st.cells[12].event_known == Some(false));
+}
+
+/// A low-confidence cell read warns on the first two reads that give it and
+/// not on a third in a row.
+#[test]
+fn steady_read_stops_warning() {
+    let frame = "rec3-t058.png";
+    let Some(mut s) = read_all(Vec::new(), &[frame]) else { return };
+    let check = |s: &Session| s.reading.as_ref().unwrap().warnings.iter().filter(|w| w.text.starts_with("Check cell 08: rarity")).count();
+    assert_eq!(check(&s), 1, "{:?}", s.reading.as_ref().unwrap().warnings);
+    let mut counts = Vec::new();
+    for _ in 0..2 {
+        s.read_in_background(load_png(&common::frames().join(frame)).unwrap());
+        s.wait();
+        counts.push(check(&s));
+    }
+    assert_eq!(counts, [1, 0]);
+    assert!(s.reading.as_ref().unwrap().warnings.iter().all(|w| !w.text.starts_with("Check cell")), "{:?}", s.reading.as_ref().unwrap().warnings);
+}
+
+/// A treasure pick after a consume chain that reached Chromatic: the board
+/// under it is the last Consume target screen's (earlier bites locked), with
+/// the eater gone from the warden's cell to the vault and its cell and its
+/// last meal's locked.
+#[test]
+fn treasure_after_a_chain() {
+    let dir = common::frames();
+    let frames = ["rec2-t045.png", "rec2-t051.png", "rec2-t063.png"].map(|f| dir.join(f));
+    if !frames.iter().all(|f| f.is_file()) {
+        println!("skipped: a frame in {} is missing", dir.display());
+        return;
+    }
+    let mut s = Session::new(20, Vec::new(), None, None);
+    let [board, chain, pick] = frames.map(|f| {
+        s.read_in_background(load_png(&f).unwrap());
+        s.wait();
+        s.reading.clone().unwrap()
+    });
+    assert_eq!((board.screen, chain.screen, pick.screen), (Screen::Manage, Screen::ChainTarget, Screen::TreasurePick));
+    // The eater sits in the warden's cell, 02.
+    let n = chain.model.warden as usize;
+    assert_eq!(n, 1);
+    let CellModel::Inmate { beast, .. } = chain.model.cells[n] else { panic!("{:?}", chain.model.cells[n]) };
+    assert!(matches!(pick.model.cells[n], CellModel::Sealed { .. }), "{:?}", pick.model.cells[n]);
+    // Cell 03, the chain's last meal, locks too.
+    assert!(matches!((&chain.model.cells[2], &pick.model.cells[2]), (CellModel::Inmate { .. }, CellModel::Sealed { .. })));
+    for k in (0..chain.model.cells.len()).filter(|&k| k != n && k != 2) {
+        assert_eq!(pick.model.cells[k], chain.model.cells[k], "cell {}", k + 1);
+    }
+    // Cell 10, open on the manage board, was the first bite.
+    assert!(matches!(board.model.cells[9], CellModel::Inmate { .. }) && matches!(pick.model.cells[9], CellModel::Sealed { .. }));
+    let mut vault = board.model.vault.clone();
+    vault.push(beast);
+    assert_eq!(pick.model.vault, vault);
+    assert_eq!((pick.model.day, pick.model.step, pick.model.choice.kind), (board.model.day, Step::Choice, ChoiceKind::Gift));
+    assert!(pick.model.devour_used);
+    assert!(pick.warnings.iter().any(|w| w.text.ends_with("cell 02 left for the vault after consuming cell 03.")), "{:?}", pick.warnings);
+    assert!(s.problems.is_empty(), "{:?}", s.problems);
+}
+
+/// The last Consume target screen before a treasure pick offers one target
+/// (cell 09): the pick's board has that cell locked, as well as the eater's.
+#[test]
+fn treasure_seals_the_last_meal() {
+    let frames = ["rec3-t113.png", "rec3-t114.png", "rec3-t116.png", "rec3-t117.png"];
+    let Some(mut s) = read_all(Vec::new(), &frames) else { return };
+    let chain = s.reading.clone().unwrap();
+    assert_eq!(chain.screen, Screen::ChainTarget);
+    assert!(matches!(chain.model.cells[8], CellModel::Inmate { .. }), "{:?}", chain.model.cells[8]);
+    let treasure = common::frames().join("rec3-t121.png");
+    if !treasure.is_file() {
+        println!("skipped: {} is missing", treasure.display());
+        return;
+    }
+    s.read_in_background(load_png(&treasure).unwrap());
+    s.wait();
+    let pick = s.reading.clone().unwrap();
+    assert_eq!(pick.screen, Screen::TreasurePick);
+    for n in [8, 15] {
+        assert!(matches!(pick.model.cells[n], CellModel::Sealed { .. }), "cell {}: {:?}", n + 1, pick.model.cells[n]);
+    }
+    let text = "The Warden's Treasure follows a Chromatic Prisoner: the inmate in cell 16 left for the vault after consuming cell 09.";
+    assert!(pick.warnings.iter().any(|w| w.text == text), "{:?}", pick.warnings);
+    assert!(s.problems.is_empty(), "{:?}", s.problems);
+}
+
+
+/// Reads `frames` in order and gives the session; None (skipped) when one is missing.
+fn read_all(tools: Vec<Tool>, frames: &[&str]) -> Option<Session> {
+    if !have(frames) {
+        return None;
+    }
+    let dir = common::frames();
+    let mut s = Session::new(20, tools, None, None);
+    for f in frames {
+        s.read_in_background(load_png(&dir.join(f)).unwrap());
+        s.wait();
+    }
+    Some(s)
+}
+
+/// The instrument the session advises on the rec1-t031 pick after the
+/// rec1-t087 board with `held`, and the pick's options.
+fn advised_on_t031(held: Vec<Tool>) -> Option<(Tool, Vec<Tool>)> {
+    let s = read_all(held, &["rec1-t087.png", "rec1-t031.png"])?;
+    let r = s.reading.as_ref().unwrap();
+    assert_eq!(r.screen, Screen::InstrumentPick);
+    let Some(Action::Choose { id: ChoiceId::Name(key) }) = s.advice().map(|a| a.action) else { panic!("{:?}", s.advice()) };
+    Some((Tool::from_key(&key).expect("an instrument"), r.model.choice.options.clone()))
+}
+
+/// The board after an instrument pick holds the advised instrument without a
+/// line about it, and the solve plays with it.
+#[test]
+fn advised_instrument_is_held_after_the_pick() {
+    let Some((t, _)) = advised_on_t031(Vec::new()) else { return };
+    let mut s = read_all(Vec::new(), &["rec1-t087.png", "rec1-t031.png", "rec1-t087.png"]).unwrap();
+    assert_eq!(s.tools, vec![t]);
+    let r = s.reading.clone().unwrap();
+    assert!(r.warnings.iter().all(|w| !w.text.contains("held instruments")), "{:?}", r.warnings);
+    assert!(s.take_tools_changed());
+    assert!(!s.take_tools_changed());
+    let held = read_all(vec![t], &["rec1-t087.png"]).unwrap();
+    assert_eq!(r.model, held.reading.unwrap().model);
+    assert_eq!(s.ranking, held.ranking);
+}
+
+/// An advised instrument already held is not added again. The advice never
+/// names a held instrument, so the player adds it on a screen the reader
+/// doesn't know (the board between moves of rec1-t059 here), which keeps the
+/// advised instrument.
+#[test]
+fn held_advised_instrument_is_not_duplicated() {
+    let Some((t, _)) = advised_on_t031(Vec::new()) else { return };
+    let dir = common::frames();
+    if !dir.join("rec1-t059.png").is_file() {
+        println!("skipped: rec1-t059.png is missing");
+        return;
+    }
+    let mut s = read_all(Vec::new(), &["rec1-t087.png", "rec1-t031.png"]).unwrap();
+    let board = load_png(&dir.join("rec1-t087.png")).unwrap();
+    s.read_in_background(load_png(&dir.join("rec1-t059.png")).unwrap());
+    s.wait();
+    assert_eq!(s.reading.as_ref().unwrap().screen, Screen::Unknown);
+    s.set_tools(vec![t]);
+    s.read_in_background(board);
+    s.wait();
+    assert_eq!(s.tools, vec![t]);
+    assert!(!s.take_tools_changed());
+}
+
+/// A game dialog between the pick and the board keeps the advised instrument.
+#[test]
+fn popup_keeps_the_advised_instrument() {
+    let Some((t, _)) = advised_on_t031(Vec::new()) else { return };
+    let Some(mut s) = read_all(Vec::new(), &["rec1-t087.png", "rec1-t031.png", "rec2-t109.png"]) else { return };
+    assert!(s.tools.is_empty());
+    let dir = common::frames();
+    s.read_in_background(load_png(&dir.join("rec1-t087.png")).unwrap());
+    s.wait();
+    assert_eq!(s.tools, vec![t]);
+}
+
+/// An instrument advised at a new run's start is kept when the second
+/// higher read confirms the new run: the board after the rec1-t031 pick
+/// (rec1-t049, 19 days, over rec1-t087's 14) takes the advised instrument
+/// while its count waits, and reading it again clears only the old Saw.
+#[test]
+fn new_run_keeps_the_instrument_picked_at_its_start() {
+    let Some((t, _)) = advised_on_t031(vec![Tool::Saw]) else { return };
+    assert_ne!(t, Tool::Saw);
+    let Some(mut s) = read_all(vec![Tool::Saw], &["rec1-t087.png", "rec1-t031.png", "rec1-t049.png"]) else { return };
+    assert_eq!(s.reading.as_ref().map(|r| (r.days_left, r.screen)), Some((Some(14), Screen::Patrol)), "the higher count waits");
+    assert_eq!(s.tools, vec![Tool::Saw, t]);
+    s.read_in_background(load_png(&common::frames().join("rec1-t049.png")).unwrap());
+    s.wait();
+    let r = s.reading.clone().unwrap();
+    assert_eq!(r.days_left, Some(19));
+    assert_eq!(s.tools, vec![t]);
+    assert!(r.warnings.iter().any(|w| w.text == "A new run: the held instruments were cleared."), "{:?}", r.warnings);
+}
+
+/// Held instruments saved at a days count (an app restart) are cleared by a
+/// higher count read twice (rec1-t029, 20 days); with no saved count the
+/// first count is taken and they are kept.
+#[test]
+fn saved_instruments_clear_on_a_higher_count() {
+    let dir = common::frames();
+    let frame = dir.join("rec1-t029.png");
+    if !frame.is_file() {
+        println!("skipped: {} is missing", dir.display());
+        return;
+    }
+    for (days, held) in [(Some(11), vec![]), (None, vec![Tool::Muzzle])] {
+        let mut s = Session::new(20, vec![Tool::Muzzle], None, days);
+        for _ in 0..2 {
+            s.read_in_background(load_png(&frame).unwrap());
+            s.wait();
+        }
+        assert_eq!(s.days_left(), Some(20));
+        assert_eq!(s.tools, held, "saved at {days:?}");
+    }
+}
+
+/// An instrument the player adds on the pick is the one taken: the next
+/// advice on that pick is not added on top.
+#[test]
+fn instrument_named_on_the_pick_is_kept() {
+    let Some((t, offers)) = advised_on_t031(Vec::new()) else { return };
+    let other = *offers.iter().find(|&&o| o != t).expect("another offer");
+    let Some(mut s) = read_all(Vec::new(), &["rec1-t087.png", "rec1-t031.png"]) else { return };
+    s.set_tools(vec![other]);
+    s.wait();
+    let dir = common::frames();
+    s.read_in_background(load_png(&dir.join("rec1-t087.png")).unwrap());
+    s.wait();
+    assert_eq!(s.tools, vec![other]);
+}
+
+/// A higher days count read twice is a new run: the held instruments go.
+#[test]
+fn new_run_clears_the_held_instruments() {
+    let Some(mut s) = read_all(vec![Tool::ALL[0], Tool::ALL[1]], &["rec1-t087.png", "rec1-t071.png"]) else { return };
+    assert_eq!(s.tools.len(), 2, "a lone higher read");
+    let dir = common::frames();
+    s.read_in_background(load_png(&dir.join("rec1-t071.png")).unwrap());
+    s.wait();
+    assert!(s.tools.is_empty());
+    let r = s.reading.clone().unwrap();
+    assert!(r.warnings.iter().any(|w| w.text == "A new run: the held instruments were cleared."), "{:?}", r.warnings);
+    assert!(s.take_tools_changed());
+}
+
+/// rec4-t074: a Warden's Treasure pick after the rec4-t070 manage board with
+/// no Consume target screen between them, the Ravenous Chains held. The
+/// Chromatic is the board's top inmate, the Legendary Wolf in cell 07 (the
+/// Chains removed the Mammoth in the warden's cell 08 beside it at the start
+/// of a day), not the inmate in the warden's cell.
+#[test]
+fn treasure_after_the_ravenous_chains() {
+    let Some(mut s) = read_all(vec![Tool::Chains], &["rec4-t070.png"]) else { return };
+    let board = s.reading.clone().unwrap();
+    s.read_in_background(load_png(&common::frames().join("rec4-t074.png")).unwrap());
+    s.wait();
+    let pick = s.reading.clone().unwrap();
+    assert_eq!((board.screen, pick.screen), (Screen::Manage, Screen::TreasurePick));
+    assert!(matches!(board.model.cells[6], CellModel::Inmate { beast: Beast::Wolf, tier: 4, .. }), "{:?}", board.model.cells[6]);
+    for n in [6, 7] {
+        assert!(matches!(pick.model.cells[n], CellModel::Sealed { .. }), "cell {}: {:?}", n + 1, pick.model.cells[n]);
+    }
+    assert_eq!(pick.model.vault, [board.model.vault.clone(), vec![Beast::Wolf]].concat());
+    let text = "The Warden's Treasure follows a Chromatic Prisoner: the inmate in cell 07 left for the vault, lifted by the Ferocious Beast's Ravenous Chains at the start of the day, which removed the inmate in cell 08: check them with View Prison Status.";
+    assert!(pick.warnings.iter().any(|w| w.text == text), "{:?}", pick.warnings);
+}
+
+/// A frame sent while a read runs waits for it: the first read is not dropped.
+#[test]
+fn a_frame_during_a_read_waits_for_it() {
+    let dir = common::frames();
+    let frames = ["rec5-t012.png", "rec5-t018.png"];
+    if frames.iter().any(|f| !dir.join(f).is_file()) {
+        println!("skipped: {} is missing", dir.display());
+        return;
+    }
+    let mut s = Session::new(20, Vec::new(), None, None);
+    for f in frames {
+        s.read_in_background(load_png(&dir.join(f)).unwrap());
+    }
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let poll_until = |s: &mut Session, done: fn(&mut Session) -> bool| {
+        while !done(s) {
+            assert!(std::time::Instant::now() < until, "no read finished in 60 s");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    };
+    poll_until(&mut s, |s| s.poll());
+    assert_eq!(s.reading.as_ref().unwrap().screen, Screen::TreasurePick);
+    assert!(s.scanning());
+    poll_until(&mut s, |s| {
+        s.poll();
+        !s.scanning()
+    });
+    // View Prison Status over the pick keeps the pick on show, on its board.
+    let r = s.reading.clone().unwrap();
+    let status = read_all(Vec::new(), &frames[1..]).unwrap().reading.unwrap();
+    assert_eq!((status.screen, r.screen), (Screen::PrisonStatus, Screen::TreasurePick));
+    assert_eq!(r.model.cells, status.model.cells);
+}
+
+/// The run log: a line per reading, and a frame only when the screen or
+/// board differs from the last frame saved.
+#[test]
+fn run_log_saves_a_frame_per_board() {
+    let dir = common::frames();
+    let names = ["rec1-t087.png", "rec1-t031.png", "rec1-t031.png"];
+    if let Some(f) = names.iter().find(|f| !dir.join(f).is_file()) {
+        println!("skipped: {f} is missing");
+        return;
+    }
+    let root = std::env::temp_dir().join(format!("warden-run-log-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let mut s = Session::new(ROUND, Vec::new(), None, None);
+    s.log = Some(RunLog::new(root.clone()));
+    for f in names {
+        s.read_in_background(load_png(&dir.join(f)).unwrap());
+        s.wait();
+    }
+    let run = s.log.as_ref().unwrap().dir().to_path_buf();
+    let text = std::fs::read_to_string(run.join("log.jsonl")).unwrap();
+    let lines: Vec<serde_json::Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    let reads: Vec<&serde_json::Value> = lines.iter().filter(|l| l["kind"] == "read").collect();
+    assert_eq!(reads.len(), 3);
+    assert_eq!(reads[0]["screen"], "Patrol");
+    assert_eq!(reads[1]["screen"], "InstrumentPick");
+    assert_eq!(reads[0]["frame"], "frame-0001.jpg");
+    assert_eq!(reads[1]["frame"], "frame-0002.jpg");
+    assert!(reads[2]["frame"].is_null());
+    assert!(reads[0]["model"]["cells"].is_array() && reads[0]["at"].is_string());
+    assert!(lines.iter().any(|l| l["kind"] == "advice" && l["pick"].is_string()));
+    let frames = std::fs::read_dir(&run).unwrap().filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "jpg")).count();
+    assert_eq!(frames, 2);
+    drop(s);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// True when the saved frames hold every one of `names`; says which is missing otherwise.
+fn have(names: &[&str]) -> bool {
+    let missing = names.iter().find(|f| !common::frames().join(f).is_file());
+    if let Some(f) = missing {
+        println!("skipped: {f} is missing");
+    }
+    missing.is_none()
+}
+
+/// Reads `name` of the saved frames in `s` and gives the reading on show.
+fn read_next(s: &mut Session, name: &str) -> Reading {
+    s.read_in_background(load_png(&common::frames().join(name)).unwrap());
+    s.wait();
+    s.reading.clone().unwrap()
+}
+
+/// The lobby's run theme scroll (rec6-t003, Opulence) sets the theme and
+/// keeps the last board on show; the riot screen clears it.
+#[test]
+fn the_theme_scroll_sets_the_theme() {
+    if !have(&["rec6-t181.png", "rec6-t003.png", "rec4-t422.png"]) {
+        return;
+    }
+    let mut s = Session::new(20, Vec::new(), None, None);
+    let board = read_next(&mut s, "rec6-t181.png");
+    let r = read_next(&mut s, "rec6-t003.png");
+    assert_eq!(s.theme, Some(OPULENCE));
+    assert!(s.take_tools_changed());
+    assert_eq!((board.screen, r.screen), (Screen::Manage, Screen::Manage));
+    assert_eq!(r.model, board.model);
+    assert!(r.warnings.iter().any(|w| w.text.starts_with("The run's theme: ")), "{:?}", r.warnings);
+    s.read_in_background(load_png(&common::frames().join("rec4-t422.png")).unwrap());
+    s.wait();
+    assert!(s.run_over.is_some());
+    assert_eq!(s.theme, None);
+}
+
+/// An Opulence treasure in rec6 (day 13): the manage board, the pick, View
+/// Prison Status over it, then the board shown after each pick before the
+/// next pick screen.
+const OPULENCE_FLOW: [&str; 8] = ["rec6-t181.png", "rec6-t191.png", "rec6-t206.png", "rec6-t225.png", "rec6-t227.png", "rec6-t230.png", "rec6-t231.png", "rec6-t236.png"];
+
+/// The gifts offered and the picks left on the treasure pick being solved.
+fn treasure_pick(s: &Session) -> Option<(usize, u32)> {
+    s.treasure_pick().map(|(options, picks)| (options.len(), picks))
+}
+
+#[test]
+fn opulence_counts_the_picks_of_a_treasure() {
+    if !have(&OPULENCE_FLOW) {
+        return;
+    }
+    let mut s = Session::new(20, Vec::new(), Some(OPULENCE), None);
+    assert_eq!(read_next(&mut s, "rec6-t181.png").screen, Screen::Manage);
+    assert_eq!(read_next(&mut s, "rec6-t191.png").screen, Screen::TreasurePick);
+    assert_eq!(treasure_pick(&s), Some((4, 3)));
+    assert_eq!(read_next(&mut s, "rec6-t206.png").screen, Screen::TreasurePick);
+    assert_eq!(treasure_pick(&s), Some((4, 3)));
+    // The board after the first pick stays under the pick on show.
+    let r = read_next(&mut s, "rec6-t225.png");
+    let after = read_all(Vec::new(), &["rec6-t225.png"]).unwrap().reading.unwrap();
+    assert_eq!((r.screen, after.screen), (Screen::TreasurePick, Screen::Unknown));
+    assert_eq!(r.model.cells, after.model.cells);
+    assert_eq!(read_next(&mut s, "rec6-t227.png").screen, Screen::TreasurePick);
+    assert_eq!(treasure_pick(&s), Some((4, 2)));
+    assert_eq!(read_next(&mut s, "rec6-t230.png").screen, Screen::TreasurePick);
+    assert_eq!(read_next(&mut s, "rec6-t231.png").screen, Screen::TreasurePick);
+    assert_eq!(treasure_pick(&s), Some((4, 1)));
+    // No pick left: the board after the last one is installed as read.
+    assert_eq!(read_next(&mut s, "rec6-t236.png").screen, Screen::Unknown);
+    assert_eq!(treasure_pick(&s), None);
+}
+
+/// Without a theme a treasure gives one pick: the board after it is
+/// installed as read.
+#[test]
+fn a_treasure_without_a_theme_has_one_pick() {
+    let Some(mut s) = read_all(Vec::new(), &OPULENCE_FLOW[..2]) else { return };
+    assert_eq!(s.reading.as_ref().unwrap().screen, Screen::TreasurePick);
+    assert_eq!(treasure_pick(&s), Some((4, 1)));
+    assert_eq!(read_next(&mut s, "rec6-t225.png").screen, Screen::Unknown);
+    assert_eq!(treasure_pick(&s), None);
+}

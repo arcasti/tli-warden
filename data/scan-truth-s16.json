@@ -1,0 +1,1677 @@
+{
+  "_about": "Hand labels for trainingdata/s16/rec1-tNNN.png (S16 frames of one recorded run): docs/screenshots.md fields (inmates beast/tier, tier 0 Normal to 4 Ultimate, beast \"?\" when not identified, locked, nests, events, jaws, warden, phase, doors in card order with 1 = Go to Interrogation Room, days, tools, chromatic) plus screen, decision, offers, objective and unsure; phase \"chain\" marks any Consume target pick. Inmates were checked on portrait crops; jaws mixes the small red crown (has a target) and the big jaws on a hovered target and needs a recheck. A \"scratch\" map (cell to tier) gives the rarity glow around the \"?\" portrait of a locked cell (a Scratch mark); a locked cell left out of it shows no glow.",
+  "rec1-t029.png": {
+    "inmates": {},
+    "locked": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [],
+    "warden": 1,
+    "phase": "patrol",
+    "doors": [],
+    "days": 20,
+    "tools": [],
+    "chromatic": 0,
+    "screen": "board",
+    "decision": [],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [
+      "run start before the instrument pick: every cell locked, no destination cards yet"
+    ]
+  },
+  "rec1-t031.png": {
+    "inmates": {},
+    "locked": [],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [],
+    "warden": 1,
+    "phase": "pick",
+    "doors": [],
+    "days": 20,
+    "tools": [],
+    "chromatic": 0,
+    "screen": "instrumentPick",
+    "decision": [],
+    "offers": [
+      "Ferocious Beast's Ravenous Chains",
+      "Scapegoat's Guillotine",
+      "Kin's Coin of Fate"
+    ],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": []
+  },
+  "rec1-t049.png": {
+    "inmates": {
+      "4": "rat/4",
+      "5": "rat/1",
+      "6": "rat/3",
+      "7": "wolf/1"
+    },
+    "locked": [
+      2,
+      3,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      7
+    ],
+    "warden": 1,
+    "phase": "patrol",
+    "doors": [
+      3,
+      6,
+      7
+    ],
+    "days": 19,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 0,
+    "screen": "board",
+    "decision": [],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": []
+  },
+  "rec1-t055.png": {
+    "inmates": {
+      "4": "rat/4",
+      "5": "rat/1",
+      "6": "rat/3",
+      "7": "wolf/1"
+    },
+    "locked": [
+      2,
+      3,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      7
+    ],
+    "warden": 7,
+    "phase": "manage",
+    "doors": [],
+    "days": 19,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 0,
+    "screen": "board",
+    "decision": [
+      "Consume",
+      "Replace",
+      "End"
+    ],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [
+      "decision buttons still fading in"
+    ]
+  },
+  "rec1-t057.png": {
+    "inmates": {
+      "4": "rat/4",
+      "5": "rat/1",
+      "6": "rat/3",
+      "7": "wolf/1"
+    },
+    "locked": [
+      2,
+      3,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      5
+    ],
+    "warden": 7,
+    "phase": "chain",
+    "doors": [],
+    "days": null,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 0,
+    "screen": "chainTarget",
+    "decision": [
+      "Cancel"
+    ],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [
+      "first Consume target pick, not a chain step; big red jaws frame on the hovered target cell 5",
+      "days counter hidden by the red overlay"
+    ]
+  },
+  "rec1-t059.png": {
+    "inmates": {
+      "4": "rat/4",
+      "6": "rat/3",
+      "7": "rat/2"
+    },
+    "locked": [
+      2,
+      3,
+      5,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [],
+    "warden": 7,
+    "phase": "patrol",
+    "doors": [],
+    "days": 18,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 0,
+    "screen": "board",
+    "decision": [],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [
+      "between moves: no cards shown yet"
+    ]
+  },
+  "rec1-t061.png": {
+    "inmates": {
+      "4": "rat/4",
+      "6": "rat/3",
+      "7": "rat/2",
+      "12": "mammoth/1"
+    },
+    "locked": [
+      2,
+      3,
+      5,
+      8,
+      9,
+      10,
+      11,
+      13,
+      14,
+      15,
+      16
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [],
+    "warden": 12,
+    "phase": "patrol",
+    "doors": [],
+    "days": 18,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 0,
+    "screen": "board",
+    "decision": [],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [
+      "warden just landed on 12 (opened it)"
+    ]
+  },
+  "rec1-t063.png": {
+    "inmates": {
+      "4": "rat/4",
+      "6": "rat/3",
+      "7": "rat/2",
+      "12": "rat/0"
+    },
+    "locked": [
+      2,
+      3,
+      5,
+      8,
+      9,
+      10,
+      11,
+      13,
+      14,
+      15,
+      16
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [],
+    "warden": 12,
+    "phase": "patrol",
+    "doors": [
+      13,
+      15,
+      1
+    ],
+    "days": 17,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 0,
+    "screen": "board",
+    "decision": [],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [
+      "door 1 = Go to Interrogation Room card"
+    ]
+  },
+  "rec1-t067.png": {
+    "inmates": {
+      "4": "rat/4",
+      "6": "rat/3",
+      "7": "rat/2",
+      "12": "rat/0",
+      "15": "lion/0"
+    },
+    "locked": [
+      2,
+      3,
+      5,
+      8,
+      9,
+      10,
+      11,
+      13,
+      14,
+      16
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      15,
+      12
+    ],
+    "warden": 15,
+    "phase": "chain",
+    "doors": [],
+    "days": null,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 0,
+    "screen": "chainTarget",
+    "decision": [
+      "Cancel"
+    ],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": []
+  },
+  "rec1-t069.png": {
+    "inmates": {
+      "4": "rat/4",
+      "6": "rat/3",
+      "7": "rat/2",
+      "15": "wolf/1"
+    },
+    "locked": [
+      2,
+      3,
+      5,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      16
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [],
+    "warden": 15,
+    "phase": "patrol",
+    "doors": [
+      16,
+      3,
+      5
+    ],
+    "days": 17,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 0,
+    "screen": "board",
+    "decision": [],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": []
+  },
+  "rec1-t071.png": {
+    "inmates": {
+      "4": "rat/4",
+      "5": "lion/1",
+      "6": "rat/3",
+      "7": "rat/2",
+      "15": "wolf/1"
+    },
+    "locked": [
+      2,
+      3,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      16
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      5
+    ],
+    "warden": 5,
+    "phase": "manage",
+    "doors": [],
+    "days": 16,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 0,
+    "screen": "board",
+    "decision": [
+      "Consume",
+      "Replace",
+      "End"
+    ],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": []
+  },
+  "rec1-t073.png": {
+    "inmates": {
+      "4": "rat/4",
+      "6": "rat/3",
+      "7": "rat/2"
+    },
+    "locked": [
+      2,
+      3,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      16
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      7
+    ],
+    "warden": 5,
+    "phase": "chain",
+    "doors": [],
+    "days": null,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 0,
+    "screen": "chainTarget",
+    "decision": [
+      "Cancel"
+    ],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [],
+    "covered": [
+      5,
+      15
+    ]
+  },
+  "rec1-t077.png": {
+    "inmates": {
+      "4": "rat/4",
+      "5": "mammoth/3",
+      "6": "rat/3"
+    },
+    "locked": [
+      2,
+      3,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      6
+    ],
+    "warden": 5,
+    "phase": "patrol",
+    "doors": [],
+    "days": 15,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 0,
+    "screen": "board",
+    "decision": [],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": []
+  },
+  "rec1-t081.png": {
+    "inmates": {
+      "4": "rat/4"
+    },
+    "locked": [
+      2,
+      3,
+      5,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [],
+    "warden": 6,
+    "phase": "chain",
+    "doors": [],
+    "days": null,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 0,
+    "screen": "chainTarget",
+    "decision": [
+      "Cancel"
+    ],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [
+      "days hidden"
+    ],
+    "covered": [
+      6
+    ]
+  },
+  "rec1-t085.png": {
+    "inmates": {},
+    "locked": [],
+    "nests": [],
+    "events": [],
+    "jaws": [],
+    "warden": null,
+    "phase": "pick",
+    "doors": [],
+    "days": null,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 1,
+    "screen": "treasurePick",
+    "decision": [],
+    "offers": [
+      "Three-Headed Thumb Ring",
+      "Brass Horn of Strife",
+      "Crimson Vintage",
+      "Brand of Original Sin"
+    ],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [
+      "popup over the board; board fields not labeled"
+    ]
+  },
+  "rec1-t087.png": {
+    "inmates": {
+      "7": "lion/1",
+      "11": "lion/1",
+      "13": "rat/0"
+    },
+    "locked": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      8,
+      9,
+      10,
+      12,
+      14,
+      15,
+      16
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [],
+    "warden": 6,
+    "phase": "patrol",
+    "doors": [
+      8,
+      9,
+      10
+    ],
+    "days": 14,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 1,
+    "screen": "board",
+    "decision": [],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [
+      "cells 7, 11, 13 opened by Three-Headed Thumb Ring",
+      "cell 9 shows a small white icon besides the ! marker; the Go to Cell 9 card carries a ! too"
+    ]
+  },
+  "rec1-t089.png": {
+    "inmates": {
+      "7": "lion/1",
+      "10": "wolf/0",
+      "11": "lion/1",
+      "13": "rat/0"
+    },
+    "locked": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      8,
+      9,
+      12,
+      14,
+      15,
+      16
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      10
+    ],
+    "warden": 10,
+    "phase": "manage",
+    "doors": [],
+    "days": 14,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 1,
+    "screen": "board",
+    "decision": [
+      "Consume",
+      "Replace",
+      "End"
+    ],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": []
+  },
+  "rec1-t095.png": {
+    "inmates": {
+      "7": "lion/1",
+      "10": "lion/1",
+      "11": "lion/1"
+    },
+    "locked": [],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [],
+    "warden": 16,
+    "phase": "event",
+    "doors": [],
+    "days": 12,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 1,
+    "screen": "dayBanner",
+    "decision": [],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [
+      "\"Day 8\" banner over a dimmed board; board read is approximate",
+      "days counter hidden; 12 inferred from t097"
+    ],
+    "covered": [
+      16
+    ]
+  },
+  "rec1-t097.png": {
+    "inmates": {
+      "6": "rat/0",
+      "7": "lion/1",
+      "10": "lion/1",
+      "11": "lion/1",
+      "16": "wolf/1"
+    },
+    "locked": [
+      2,
+      3,
+      4,
+      5,
+      8,
+      9,
+      12,
+      13,
+      14,
+      15
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      7,
+      10,
+      11
+    ],
+    "warden": 6,
+    "phase": "patrol",
+    "doors": [],
+    "days": 12,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 1,
+    "screen": "board",
+    "decision": [],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": []
+  },
+  "rec1-t107.png": {
+    "inmates": {
+      "6": "mammoth/0",
+      "7": "lion/3",
+      "11": "lion/1",
+      "12": "rat/1",
+      "16": "wolf/1"
+    },
+    "locked": [
+      2,
+      3,
+      4,
+      5,
+      8,
+      9,
+      10,
+      13,
+      14,
+      15
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      16,
+      12
+    ],
+    "warden": 16,
+    "phase": "chain",
+    "doors": [],
+    "days": null,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 0,
+    "screen": "chainTarget",
+    "decision": [
+      "Cancel"
+    ],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [
+      "12 is the hovered target"
+    ]
+  },
+  "rec1-t113.png": {
+    "inmates": {
+      "5": "lion/0",
+      "6": "mammoth/0",
+      "7": "lion/3",
+      "11": "lion/1",
+      "16": "rat/2"
+    },
+    "locked": [
+      2,
+      3,
+      4,
+      8,
+      9,
+      10,
+      12,
+      13,
+      14,
+      15
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      6
+    ],
+    "warden": 5,
+    "phase": "manage",
+    "doors": [],
+    "days": 9,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 1,
+    "screen": "board",
+    "decision": [
+      "Replace",
+      "End"
+    ],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [
+      "no Consume button: the day's Consume was already used or no target"
+    ]
+  },
+  "rec1-t115.png": {
+    "inmates": {
+      "5": "wolf/0",
+      "6": "mammoth/0",
+      "7": "lion/3",
+      "11": "lion/1",
+      "16": "rat/2"
+    },
+    "locked": [
+      2,
+      3,
+      4,
+      8,
+      9,
+      10,
+      12,
+      13,
+      14,
+      15
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      6
+    ],
+    "warden": 5,
+    "phase": "patrol",
+    "doors": [
+      6,
+      9,
+      10
+    ],
+    "days": 8,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 1,
+    "screen": "board",
+    "decision": [],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": []
+  },
+  "rec1-t123.png": {
+    "inmates": {
+      "5": "wolf/0",
+      "7": "lion/3",
+      "10": "lion/3",
+      "15": "lion/0",
+      "16": "rat/2"
+    },
+    "locked": [
+      2,
+      3,
+      4,
+      6,
+      8,
+      9,
+      11,
+      12,
+      13,
+      14
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      15
+    ],
+    "warden": 15,
+    "phase": "manage",
+    "doors": [],
+    "days": 7,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 1,
+    "screen": "board",
+    "decision": [
+      "Consume",
+      "End"
+    ],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [
+      "no Replace button: Replace already used today"
+    ]
+  },
+  "rec1-t131.png": {
+    "inmates": {
+      "2": "mammoth/2",
+      "3": "wolf/1",
+      "8": "lion/0",
+      "15": "rat/1",
+      "16": "rat/2"
+    },
+    "locked": [
+      4,
+      5,
+      6,
+      7,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      3,
+      16
+    ],
+    "warden": 15,
+    "phase": "patrol",
+    "doors": [
+      1,
+      3,
+      5
+    ],
+    "days": 6,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 2,
+    "screen": "board",
+    "decision": [],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [
+      "cells 2, 3, 8 opened by the second Thumb Ring"
+    ]
+  },
+  "rec1-t143.png": {
+    "inmates": {
+      "3": "wolf/1",
+      "5": "lion/2",
+      "10": "wolf/3",
+      "14": "mammoth/0",
+      "15": "rat/1",
+      "16": "rat/2"
+    },
+    "locked": [
+      2,
+      4,
+      6,
+      7,
+      8,
+      9,
+      11,
+      12,
+      13
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      3,
+      5
+    ],
+    "warden": 14,
+    "phase": "manage",
+    "doors": [],
+    "days": 4,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 2,
+    "screen": "board",
+    "decision": [
+      "Replace",
+      "End"
+    ],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [
+      "panel fields rechecked on the frame: 4 day(s) until Riot (white), Make Your Decision with Replace and End"
+    ]
+  },
+  "rec1-t157.png": {
+    "inmates": {
+      "4": "rat/3",
+      "5": "lion/2",
+      "8": "wolf/2",
+      "10": "wolf/3"
+    },
+    "locked": [
+      2,
+      3,
+      6,
+      7,
+      9,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      5,
+      10
+    ],
+    "warden": 8,
+    "phase": "chain",
+    "doors": [],
+    "days": 2,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 2,
+    "screen": "chainTarget",
+    "decision": [
+      "Cancel"
+    ],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [
+      "Kin's Coin of Fate tooltip open over the left panel",
+      "panel fields rechecked on the frame: Select an Inmate to Consume, 2 day(s) until Riot (red); doors 10, 13, 14 and 1 day come at t159"
+    ]
+  },
+  "rec1-t167.png": {
+    "inmates": {
+      "5": "lion/2",
+      "8": "wolf/2",
+      "10": "rat/4"
+    },
+    "locked": [
+      2,
+      3,
+      4,
+      6,
+      7,
+      9,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      5
+    ],
+    "warden": 10,
+    "phase": "patrol",
+    "doors": [
+      12,
+      13,
+      16
+    ],
+    "days": 1,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 2,
+    "screen": "board",
+    "decision": [],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": [
+      "cell 4 gone between t165 and t167 (eaten by 10)"
+    ]
+  },
+  "rec1-t169.png": {
+    "inmates": {
+      "5": "lion/2",
+      "8": "wolf/2",
+      "10": "rat/4",
+      "16": "lion/2"
+    },
+    "locked": [
+      2,
+      3,
+      4,
+      6,
+      7,
+      9,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "nests": [],
+    "events": [
+      9
+    ],
+    "jaws": [
+      5,
+      16
+    ],
+    "warden": 16,
+    "phase": "manage",
+    "doors": [],
+    "days": 0,
+    "tools": [
+      "coin"
+    ],
+    "chromatic": 2,
+    "screen": "board",
+    "decision": [
+      "Consume",
+      "Replace",
+      "End"
+    ],
+    "offers": [],
+    "objective": {
+      "name": "Undercurrents",
+      "progress": "0/2"
+    },
+    "unsure": []
+  },
+  "rec2-t051.png": {
+    "inmates": {},
+    "locked": [],
+    "nests": [],
+    "events": [],
+    "jaws": [],
+    "covered": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ],
+    "warden": 2,
+    "phase": "chain",
+    "doors": [],
+    "days": null,
+    "tools": [],
+    "chromatic": 0,
+    "screen": "chainTarget",
+    "decision": [
+      "Cancel"
+    ],
+    "offers": [],
+    "objective": null,
+    "unsure": [
+      "second recording; cells not labeled (all covered); days counter hidden by the red overlay"
+    ]
+  },
+  "rec2-t084.png": {
+    "inmates": {
+      "2": "mammoth/1",
+      "4": "lion/0",
+      "7": "mammoth/3",
+      "8": "mammoth/3",
+      "9": "wolf/0",
+      "10": "mammoth/1",
+      "13": "wolf/2",
+      "16": "wolf/0"
+    },
+    "locked": [
+      3,
+      5,
+      6,
+      11,
+      12,
+      14,
+      15
+    ],
+    "scratch": {
+      "3": 1
+    },
+    "nests": [],
+    "events": [
+      13
+    ],
+    "jaws": [
+      4
+    ],
+    "covered": [],
+    "warden": 10,
+    "phase": "patrol",
+    "doors": [],
+    "days": 15,
+    "tools": [],
+    "chromatic": 0,
+    "screen": "board",
+    "decision": [],
+    "offers": [],
+    "objective": {
+      "name": "Behind Cell Doors",
+      "progress": "Completed"
+    },
+    "unsure": [
+      "second recording; the \"?\" portraits of cells 5, 6, 11 and 15 have no glow yet (cell 3 glows blue); no destination cards on screen; two held instruments not named"
+    ]
+  },
+  "rec2-t100.png": {
+    "inmates": {
+      "4": "lion/0",
+      "10": "wolf/1",
+      "13": "wolf/2"
+    },
+    "locked": [
+      3,
+      5,
+      6,
+      11,
+      12,
+      14
+    ],
+    "scratch": {
+      "3": 1,
+      "5": 0,
+      "6": 0,
+      "11": 0
+    },
+    "nests": [],
+    "events": [
+      13
+    ],
+    "jaws": [
+      4
+    ],
+    "covered": [
+      2,
+      7,
+      8,
+      9,
+      15,
+      16
+    ],
+    "warden": 15,
+    "phase": "manage",
+    "doors": [],
+    "days": 14,
+    "tools": [],
+    "chromatic": 1,
+    "screen": "board",
+    "decision": [
+      "Consume",
+      "End"
+    ],
+    "offers": [],
+    "objective": {
+      "name": "Behind Cell Doors",
+      "progress": "Completed"
+    },
+    "unsure": [
+      "second recording; Prison Incident marker on the open cell 13; cells 2, 7, 8, 9, 15 and 16 not labeled (covered); two held instruments not named"
+    ]
+  },
+  "rec2-t109.png": {
+    "inmates": {},
+    "locked": [],
+    "nests": [],
+    "events": [],
+    "jaws": [],
+    "phase": "popup",
+    "doors": [],
+    "days": null,
+    "tools": [],
+    "chromatic": 0,
+    "screen": "popup",
+    "decision": [],
+    "offers": [],
+    "objective": null,
+    "unsure": [
+      "second recording; Tip dialog: Network request timeout, over a Consume target pick"
+    ]
+  },
+  "rec2-t145.png": {
+    "inmates": {},
+    "locked": [],
+    "nests": [],
+    "events": [],
+    "jaws": [],
+    "phase": "popup",
+    "doors": [],
+    "days": null,
+    "tools": [],
+    "chromatic": 0,
+    "screen": "popup",
+    "decision": [],
+    "offers": [],
+    "objective": null,
+    "unsure": [
+      "second recording; Tip dialog: Network request timeout, over the board"
+    ]
+  },
+  "rec2-t200.png": {
+    "inmates": {},
+    "locked": [],
+    "nests": [],
+    "events": [],
+    "jaws": [],
+    "phase": "popup",
+    "doors": [],
+    "days": null,
+    "tools": [],
+    "chromatic": 0,
+    "screen": "popup",
+    "decision": [],
+    "offers": [],
+    "objective": null,
+    "unsure": [
+      "second recording; Prison Incident popup Behind Closed Doors with a Confirm button"
+    ]
+  },
+  "rec2-t246.png": {
+    "inmates": {
+      "2": "rat/0",
+      "3": "mammoth/0",
+      "4": "lion/1",
+      "7": "wolf/3",
+      "8": "mammoth/3",
+      "9": "mammoth/0",
+      "10": "wolf/2",
+      "15": "lion/4",
+      "16": "wolf/1"
+    },
+    "locked": [
+      5,
+      6,
+      11,
+      12,
+      13,
+      14
+    ],
+    "scratch": {
+      "5": 0,
+      "11": 0
+    },
+    "nests": [],
+    "events": [
+      6
+    ],
+    "jaws": [
+      2,
+      4,
+      8
+    ],
+    "covered": [],
+    "warden": 7,
+    "phase": "patrol",
+    "doors": [
+      8,
+      10
+    ],
+    "days": 7,
+    "tools": [],
+    "chromatic": 3,
+    "screen": "board",
+    "decision": [],
+    "offers": [],
+    "objective": {
+      "name": "Behind Cell Doors",
+      "progress": "Completed"
+    },
+    "unsure": [
+      "second recording; cell 8 lit with the path line through it; the Warden window covers the second vault row (third Chromatic Prisoner partly seen); two held instruments not named"
+    ]
+  },
+  "rec2-t340.png": {
+    "inmates": {},
+    "locked": [],
+    "nests": [],
+    "events": [],
+    "jaws": [],
+    "covered": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ],
+    "warden": 6,
+    "phase": "pick",
+    "doors": [],
+    "days": 1,
+    "tools": [],
+    "chromatic": 2,
+    "screen": "cellPick",
+    "decision": [],
+    "offers": [],
+    "objective": {
+      "name": "Behind Cell Doors",
+      "progress": "Completed"
+    },
+    "unsure": [
+      "second recording; Sewer Ratway \"Select an Objective\" (corner brackets on every cell); cells not labeled (all covered); the Warden window covers the lower Chromatic Prisoner slots; two held instruments not named"
+    ]
+  },
+  "rec2-t350.png": {
+    "inmates": {
+      "2": "wolf/3",
+      "4": "lion/3",
+      "9": "mammoth/2",
+      "12": "wolf/3",
+      "15": "mammoth/0",
+      "16": "lion/4"
+    },
+    "locked": [
+      3,
+      5,
+      6,
+      7,
+      8,
+      10,
+      11,
+      13,
+      14
+    ],
+    "scratch": {
+      "5": 0,
+      "11": 0
+    },
+    "nests": [],
+    "events": [
+      14
+    ],
+    "jaws": [
+      4
+    ],
+    "covered": [],
+    "warden": 15,
+    "phase": "manage",
+    "doors": [],
+    "days": 1,
+    "tools": [],
+    "chromatic": 4,
+    "screen": "board",
+    "decision": [
+      "Replace",
+      "End"
+    ],
+    "offers": [],
+    "objective": {
+      "name": "Behind Cell Doors",
+      "progress": "Completed"
+    },
+    "unsure": [
+      "second recording; Prison Incident marker on the locked cell 14; the Warden window covers the second vault row (two of four Chromatic Prisoners partly seen); two held instruments not named"
+    ]
+  },
+  "rec2-t364.png": {
+    "inmates": {},
+    "locked": [],
+    "nests": [],
+    "events": [],
+    "jaws": [],
+    "covered": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ],
+    "warden": 3,
+    "phase": "manage",
+    "doors": [],
+    "days": 0,
+    "tools": [],
+    "chromatic": 2,
+    "screen": "board",
+    "decision": [
+      "Consume",
+      "Replace",
+      "End"
+    ],
+    "offers": [],
+    "objective": {
+      "name": "Behind Cell Doors",
+      "progress": "Completed"
+    },
+    "unsure": [
+      "second recording; cells not labeled (all covered); two held instruments not named; the red 0 of the days counter reads as \"()\""
+    ]
+  }
+}

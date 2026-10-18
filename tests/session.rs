@@ -6,12 +6,13 @@
 use std::path::Path;
 mod common;
 use warden::app::runlog::RunLog;
-use warden::app::session::{CellEdit, DaysClock, HELD_BLOCKS, MAX_WAIT, ROUND, Reading, SETTLE, Session, Watch, differs, fingerprint};
+use warden::app::session::{CellEdit, consume_targets, DaysClock, HELD_BLOCKS, MAX_WAIT, ROUND, Reading, SETTLE, Session, Watch, differs, fingerprint};
 use warden::board::{CellModel, ChoiceKind, EventMark, Step, build_state};
 use warden::engine::data::{Beast, OPULENCE, Tool};
 use warden::engine::devour::{devour_options, start_options};
 use warden::engine::{Action, ChoiceId};
 use warden::reader::{Rgba, load_png, read_model};
+use warden::reader::model::WarningKind;
 use warden::reader::panels::Screen;
 use warden::solver::TUNED;
 use warden::solver::solve::{Rollouts, follow_up, solve};
@@ -438,6 +439,68 @@ fn consume_target_keeps_unsure_cells() {
     assert_eq!(r.screen, Screen::ChainTarget);
     assert!(r.warnings.iter().all(|w| !w.text.starts_with("Check cell ") && !w.text.contains("days counter")), "{:?}", r.warnings);
     assert_eq!(r.model.cells[2], board.model.cells[2]);
+}
+
+/// The player's Consume target pick trainingdata/reports/chain-target.png
+/// (outside s16): the eater on cell 03 has the big jaws on 04, 05, 12 and 13.
+/// The advice bites one of those or bites nothing, never the Magic Lion on
+/// 08; when the board read allows other targets, a warning on the eater's
+/// cell names both sets. Skips when the frame is missing.
+#[test]
+fn consume_target_follows_the_jaws() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("trainingdata/reports/chain-target.png");
+    if !path.is_file() {
+        println!("skipped: {} is missing", path.display());
+        return;
+    }
+    let mut s = Session::new(20, Vec::new(), None, None);
+    s.read_in_background(load_png(&path).unwrap());
+    s.wait();
+    let r = s.reading.clone().unwrap();
+    assert_eq!(r.screen, Screen::ChainTarget);
+    let jawed = [3, 4, 11, 12];
+    if let Some(advice) = s.advice() {
+        match advice.action {
+            Action::Devour { to } | Action::Chain { to } => assert!(jawed.contains(&to), "{advice:?}"),
+            Action::EndChain | Action::End => {}
+            _ => panic!("{advice:?}"),
+        }
+    }
+    let (st, _) = build_state(&r.model, 1);
+    let options: Vec<usize> = start_options(&st).iter().map(|o| o.cell).collect();
+    let mut sorted = options.clone();
+    sorted.sort();
+    if sorted != jawed {
+        let w = r.warnings.iter().find(|w| w.text.starts_with("The Consume targets on screen are cells 04, 05, 12 and 13"));
+        assert_eq!(w.and_then(|w| w.cell), Some(2), "{:?}", r.warnings);
+    }
+}
+
+/// The targets of a Consume target pick: the jawed cells among the board
+/// read's, with a warning on the eater's cell when the two differ; the
+/// board read's when no jaws read or none of them is among its own.
+#[test]
+fn consume_targets_restrict_and_warn() {
+    assert_eq!(consume_targets(&[3, 7], &[], 2), (vec![3, 7], None));
+    assert_eq!(consume_targets(&[7, 3], &[3, 7], 2), (vec![7, 3], None));
+
+    let (targets, w) = consume_targets(&[3, 7], &[3, 4], 2);
+    assert_eq!(targets, [3]);
+    let w = w.expect("a warning");
+    assert_eq!(w.cell, Some(2));
+    assert_eq!(w.kind, WarningKind::Read);
+    assert_eq!(
+        w.text,
+        "The Consume targets on screen are cells 04 and 05 and the board read allows cells 04 and 08: check the eater in cell 03 and those cells."
+    );
+
+    let (targets, w) = consume_targets(&[7], &[3, 4, 11], 2);
+    assert_eq!(targets, [7]);
+    assert!(w.expect("a warning").text.starts_with("The Consume targets on screen are cells 04, 05 and 12 and the board read allows cell 08:"));
+
+    let (targets, w) = consume_targets(&[], &[3], 2);
+    assert!(targets.is_empty());
+    assert!(w.expect("a warning").text.contains("cell 04 and the board read allows none:"));
 }
 
 /// A loading screen (rec4-t424) after a board keeps the board's reading and

@@ -143,6 +143,49 @@ fn lit_destination_tiers() {
     }
 }
 
+/// trainingdata/reports/chain-target.png (outside s16): a player's Consume
+/// target pick with the eater, a Magic Lion, on cell 3 and the big red jaws
+/// on its targets 4, 5, 12 and 13, not on the Magic Lion on 8 or the red glow
+/// of the Ultimate on 16. Skips when the frame is missing.
+#[test]
+fn consume_targets_read() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("trainingdata/reports/chain-target.png");
+    if !path.is_file() {
+        println!("skipped: {} is missing", path.display());
+        return;
+    }
+    let scene = read_scene(&load_png(&path).unwrap());
+    let targets: Vec<u8> = CELLS.filter(|&c| scene.cell(c).target).collect();
+    assert_eq!(targets, [4, 5, 12, 13]);
+}
+
+/// The big jaws read only on a Consume target pick: every other screen of
+/// trainingdata/s16 has none. Skips when the frames are missing.
+#[test]
+fn consume_targets_only_on_target_pick() {
+    let dir = common::frames();
+    if !dir.is_dir() {
+        println!("skipped: {} is missing", dir.display());
+        return;
+    }
+    let mut seen = 0;
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "png") {
+            continue;
+        }
+        let img = load_png(&path).unwrap();
+        if read_panels(&img).screen == Screen::ChainTarget {
+            continue;
+        }
+        let scene = read_scene(&img);
+        let targets: Vec<u8> = CELLS.filter(|&c| scene.cell(c).target).collect();
+        assert!(targets.is_empty(), "{}: targets {targets:?}", path.display());
+        seen += 1;
+    }
+    assert!(seen > 0, "no frames in {}", dir.display());
+}
+
 /// rec6-t003: the run theme scroll in the lobby names Opulence; the manage
 /// board of rec6-t181 and the treasure pick of rec6-t191 name no theme.
 /// Skips when a frame is missing.

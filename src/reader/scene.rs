@@ -303,6 +303,45 @@ fn crown_score(img: &Rgba, cell: u8) -> f32 {
     n as f32 / 1000.0
 }
 
+/// Share of saturated red pixels that marks the big jaws of a Consume target
+/// pick on a cell: the score is the smallest share of the three bands the
+/// jaws fill (left and right of the portrait, under it). Measured over 81
+/// trainingdata frames and 44 run-log frames: the cells of every other screen,
+/// and the cells a target pick does not offer, score 0.000 (an Ultimate's red
+/// glow included); the offered targets score 0.086 to 0.317.
+const TARGET_MIN: f32 = 0.04;
+
+/// The big jaws' score of a cell: see [`TARGET_MIN`]. Stops at the first
+/// band below it.
+fn target_score(img: &Rgba, cell: u8) -> f32 {
+    let (cx, cy) = portrait(cell);
+    let share = |(x0, x1): (i32, i32), (y0, y1): (i32, i32)| {
+        let mut n = 0;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let [r, g, b] = img.rgb(x, y).map(|v| v as i32);
+                if r > 150 && g * 2 < r && b * 2 < r {
+                    n += 1;
+                }
+            }
+        }
+        n as f32 / ((x1 - x0) * (y1 - y0)) as f32
+    };
+    let bands = [
+        ((cx - 40, cx + 40), (cy + 50, cy + 80)),
+        ((cx - 58, cx - 38), (cy - 30, cy + 50)),
+        ((cx + 38, cx + 58), (cy - 30, cy + 50)),
+    ];
+    let mut score = f32::MAX;
+    for (xs, ys) in bands {
+        score = score.min(share(xs, ys));
+        if score < TARGET_MIN {
+            break;
+        }
+    }
+    score
+}
+
 /// Half the width and height of the box around a portrait that a tooltip
 /// panel is looked for in.
 const TIP_BOX: (i32, i32) = (70, 45);
@@ -659,6 +698,10 @@ pub struct CellRead {
     /// red-tinted target pick and next to a red (Ultimate) glow.
     pub jaws: bool,
     pub jaws_conf: f32,
+    /// The big red jaws a Consume target pick draws around each inmate the
+    /// eater can consume.
+    pub target: bool,
+    pub target_conf: f32,
     /// A tooltip panel covers the cell, so the reads above are of the panel.
     pub covered: bool,
 }
@@ -777,6 +820,9 @@ pub fn read_scene_with(img: &Rgba, t: &Templates) -> Scene {
                 r.inmate = Some((beast, tier));
                 let (jaws, conf) = t.crown_split.decide(crown_score(img, c));
                 (r.jaws, r.jaws_conf) = (jaws, conf);
+                let score = target_score(img, c);
+                r.target = score >= TARGET_MIN;
+                r.target_conf = ((score - TARGET_MIN).abs() / TARGET_MIN).min(1.0);
             } else if r.locked {
                 r.beast_conf = r.locked_conf;
                 let (tier, conf, strength) = glow_tier(img, c, false, t);

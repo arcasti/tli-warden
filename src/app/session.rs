@@ -197,6 +197,36 @@ fn steady_key(w: &Warning) -> Option<String> {
 /// How the reader's warnings about one cell's read start.
 const CHECK_CELL: &str = "Check cell ";
 
+/// How the warning about Consume targets the board read does not allow starts.
+const TARGETS_DIFFER: &str = "The Consume targets on screen are ";
+
+/// The targets of a Consume target pick: the engine's `options` on the read
+/// board that the screen marks with big jaws (`jawed`, model indices). When
+/// the two differ, a warning on the eater's cell; when none of the jawed
+/// cells is among the options, or no jaws were read, the options as they are.
+pub fn consume_targets(options: &[usize], jawed: &[usize], eater: usize) -> (Vec<usize>, Option<Warning>) {
+    if jawed.is_empty() || (jawed.len() == options.len() && options.iter().all(|n| jawed.contains(n))) {
+        return (options.to_vec(), None);
+    }
+    let cells = |list: &[usize]| {
+        let labels: Vec<String> = list.iter().map(|&n| cell_label(n)).collect();
+        match &labels[..] {
+            [] => "none".to_string(),
+            [one] => format!("cell {one}"),
+            [rest @ .., last] => format!("cells {} and {last}", rest.join(", ")),
+        }
+    };
+    let text = format!(
+        "{TARGETS_DIFFER}{} and the board read allows {}: check the eater in cell {} and those cells.",
+        cells(jawed),
+        cells(options),
+        cell_label(eater),
+    );
+    let both: Vec<usize> = options.iter().copied().filter(|n| jawed.contains(n)).collect();
+    let targets = if both.is_empty() { options.to_vec() } else { both };
+    (targets, Some(Warning { cell: Some(eater), kind: WarningKind::Read, text }))
+}
+
 /// The line shown over the last reading while a game dialog covers the board.
 const POPUP: &str = "A popup covers the game: showing the last reading.";
 /// The line shown over the last reading while the board is not on screen.
@@ -999,7 +1029,8 @@ impl Session {
             }
             *picks = treasure_picks(self.theme).saturating_sub(self.treasure.unwrap_or(0)).max(1);
         }
-        // A Consume target screen picks the day's first bite, or a chain's next.
+        // A Consume target screen picks the day's first bite, or a chain's
+        // next, among the cells the screen marks as targets.
         let target = reading.screen == Screen::ChainTarget;
         if target && self.chained
             && let Some(eater) = st.cells[st.position].inmate
@@ -1007,7 +1038,28 @@ impl Session {
             offer_chain(&mut st, eater.id);
         }
         let first = target && !self.chained;
-        let pick = if first { instant_bite(&st) } else { instant(&st) };
+        let mut warning = None;
+        let mut bites = Vec::new();
+        if target {
+            let jawed: Vec<usize> = self.scene.as_ref().map_or(Vec::new(), |(scene, _, _)| {
+                (2..=16).filter(|&c| scene.cell(c).target).map(|c| c as usize - 1).collect()
+            });
+            let (eater, chain) = (st.position, st.pending.iter_mut().find_map(|p| match p {
+                Pending::Chain { options, .. } => Some(options),
+                _ => None,
+            }));
+            if let Some(options) = chain {
+                (*options, warning) = consume_targets(options, &jawed, eater);
+            } else if first {
+                let options: Vec<usize> = start_options(&st).iter().map(|o| o.cell).collect();
+                (bites, warning) = consume_targets(&options, &jawed, eater);
+            }
+        }
+        if let Some(r) = &mut self.reading {
+            r.warnings.retain(|w| !w.text.starts_with(TARGETS_DIFFER));
+            r.warnings.extend(warning);
+        }
+        let pick = if first { instant_bite(&st, &bites) } else { instant(&st) };
         self.pick = pick.map(|i| Pick { action: i.action, label: i.label, why: i.why });
         self.state = Some(st.clone());
         self.follow();
@@ -1016,7 +1068,7 @@ impl Session {
         self.solving = true;
         let (notify, rollouts) = (self.notify.clone(), self.rollouts);
         std::thread::spawn(move || {
-            let mut r = Rollouts::with(&st, SEED, &TUNED, first);
+            let mut r = Rollouts::with(&st, SEED, &TUNED, first.then_some(&bites[..]));
             loop {
                 let ran = r.run(ROUND.min(rollouts - r.rounds()));
                 let done = ran == 0 || r.rounds() >= rollouts;

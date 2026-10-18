@@ -211,19 +211,24 @@ pub struct Rollouts<'a> {
 
 impl<'a> Rollouts<'a> {
     pub fn new(st: &State, seed: u32, p: &'a Params) -> Rollouts<'a> {
-        Rollouts::with(st, seed, p, false)
+        Rollouts::with(st, seed, p, None)
     }
 
-    /// With `bite`, a Consume target pick: only today's first bites compete,
-    /// and the strategy's pick is its best bite (see [`decide_bite`]).
-    pub fn with(st: &State, seed: u32, p: &'a Params, bite: bool) -> Rollouts<'a> {
+    /// With `bite`, a Consume target pick: only today's first bites into
+    /// those cells compete, and the strategy's pick is its best bite (see
+    /// [`decide_bite`]).
+    pub fn with(st: &State, seed: u32, p: &'a Params, bite: Option<&[usize]>) -> Rollouts<'a> {
         let base = st.clone();
         let mut list = candidates(&base);
-        if bite {
-            list.retain(|c| matches!(c.action, Action::Devour { .. }));
+        if let Some(only) = bite {
+            list.retain(|c| matches!(c.action, Action::Devour { to } if only.contains(&to)));
         }
-        let decider = if bite { decide_bite } else { decide };
-        let pick = if list.is_empty() { None } else { decider(&base, p, &mut Rng32::new(seed ^ 0x5bd1e995)) };
+        let roll = &mut Rng32::new(seed ^ 0x5bd1e995);
+        let pick = match bite {
+            _ if list.is_empty() => None,
+            Some(only) => decide_bite(&base, p, roll, only),
+            None => decide(&base, p, roll),
+        };
         let n = list.len();
         Rollouts { base, p, list, pick, random: Rng32::new(seed), vals: vec![Vec::new(); n], best: vec![0.0; n], rounds: 0 }
     }
@@ -308,9 +313,10 @@ pub fn instant(st: &State) -> Option<Instant> {
     labelled(st, decide(st, &TUNED, &mut Rng32::new(1))?)
 }
 
-/// `instant` on a Consume target pick: the strategy's best bite.
-pub fn instant_bite(st: &State) -> Option<Instant> {
-    labelled(st, decide_bite(st, &TUNED, &mut Rng32::new(1))?)
+/// `instant` on a Consume target pick: the strategy's best bite into one of
+/// the cells of `only`.
+pub fn instant_bite(st: &State, only: &[usize]) -> Option<Instant> {
+    labelled(st, decide_bite(st, &TUNED, &mut Rng32::new(1), only)?)
 }
 
 fn labelled(st: &State, action: Action) -> Option<Instant> {

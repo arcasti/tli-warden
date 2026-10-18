@@ -221,11 +221,15 @@ pub fn decide(st: &State, p: &Params, roll: &mut Rng32) -> Option<Action> {
 }
 
 /// The strategy's bite once Consume is pressed: decide's own, else the best
-/// scored of today's targets; None when the inmate has none.
-pub fn decide_bite(st: &State, p: &Params, roll: &mut Rng32) -> Option<Action> {
-    if let Some(bite @ Action::Devour { .. }) = decide(st, p, roll) {
+/// scored of today's targets; None when the inmate has none. Only bites
+/// into the cells of `only` count.
+pub fn decide_bite(st: &State, p: &Params, roll: &mut Rng32, only: &[usize]) -> Option<Action> {
+    if let Some(bite @ Action::Devour { to }) = decide(st, p, roll)
+        && only.contains(&to)
+    {
         return Some(bite);
     }
     let mut ctx = context(st, p);
-    devour_scores(&mut ctx, start_options(st)).first().map(|&(to, _)| Action::Devour { to })
+    let options = start_options(st).into_iter().filter(|o| only.contains(&o.cell)).collect();
+    devour_scores(&mut ctx, options).first().map(|&(to, _)| Action::Devour { to })
 }

@@ -119,6 +119,30 @@ fn side_cell_incident_reads() {
     assert!(!scene.cell(7).event, "cell 7 has no incident");
 }
 
+/// trainingdata/reports/jaws-orange-*.png (outside s16): Legendary inmates
+/// with the jaws crown on cells lit as reachable destinations (14 in the
+/// first frame, 13 and 16 in the second) read Legendary, not Ultimate, like
+/// the unlit ones next to them. Skips when a frame is missing.
+#[test]
+fn lit_destination_tiers() {
+    let reports = Path::new(env!("CARGO_MANIFEST_DIR")).join("trainingdata/reports");
+    let cases: [(&str, &[(u8, u8)]); 2] = [
+        ("jaws-orange-cell14.png", &[(2, 4), (3, 2), (7, 1), (8, 4), (9, 1), (11, 3), (12, 0), (13, 1), (14, 3), (15, 3)]),
+        ("jaws-orange-cells13-16.png", &[(5, 3), (6, 3), (13, 3), (16, 3)]),
+    ];
+    for (name, tiers) in cases {
+        let path = reports.join(name);
+        if !path.is_file() {
+            println!("skipped: {} is missing", path.display());
+            continue;
+        }
+        let scene = read_scene(&load_png(&path).unwrap());
+        for &(c, tier) in tiers {
+            assert_eq!(scene.cell(c).inmate.map(|i| i.1), Some(tier), "{name} cell {c} tier");
+        }
+    }
+}
+
 /// rec6-t003: the run theme scroll in the lobby names Opulence; the manage
 /// board of rec6-t181 and the treasure pick of rec6-t191 name no theme.
 /// Skips when a frame is missing.

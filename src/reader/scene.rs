@@ -184,6 +184,17 @@ fn mean_rgb(img: &Rgba, pts: impl Iterator<Item = (i32, i32)>) -> [f32; 3] {
 /// lantern, red target tint or day-banner dimming. Their per-channel ratio
 /// cancels such a tint: its chromaticity gives the hue (white, blue, purple,
 /// amber, red) and its mean how much the glow stands out.
+///
+/// A cell lit as a reachable destination shows pale stone that adds a
+/// roughly grey light to the dark stone, but not evenly: on cell 14 of
+/// jaws-orange-cell14 it adds about 27 under the ring on both sides, while
+/// the wall sample catches a brown wooden bar on the left and a bluish
+/// [69, 74, 79] on the right (40-50 over the far stone). Subtracting that
+/// wall took the green out of an orange glow and read it as red. A lit cell
+/// is measured against the dark far stone plus a grey offset instead: the
+/// wall's least channel lift, capped per segment by the segment's least
+/// channel excess (an orange or red glow adds almost no blue, a blue glow
+/// almost no red).
 fn tier_feature(img: &Rgba, cell: u8, lantern: bool) -> (Vec<f32>, Vec<Vec<f32>>) {
     let (cx, cy) = portrait(cell);
     let side = |y0: i32, y1: i32, d0: i32, d1: i32, s: i32| -> Vec<(i32, i32)> {
@@ -199,18 +210,38 @@ fn tier_feature(img: &Rgba, cell: u8, lantern: bool) -> (Vec<f32>, Vec<Vec<f32>>
         top(cx - 40),
         top(cx + 20),
     ];
+    let far = median_rgb(img, side(cy - 20, cy + 40, 70, 90, -1).into_iter().chain(side(cy - 20, cy + 40, 70, 90, 1)));
+    let lift = (0..3).map(|c| wall[c] - far[c]).fold(f32::MAX, f32::min);
+    let lit = !lantern && lift > LIT_LIFT;
     let grey = (wall[0] + wall[1] + wall[2]) / 3.0;
-    let scale = if lantern { [grey; 3] } else { wall };
+    let scale = if lantern {
+        [grey; 3]
+    } else if lit {
+        far
+    } else {
+        wall
+    };
     let excess: Vec<[f32; 3]> = segments
         .into_iter()
         .map(|s| {
             let g = mean_rgb(img, s.into_iter());
-            [0, 1, 2].map(|c| (g[c] - wall[c]).max(0.0) / scale[c].max(4.0))
+            let base = if lit {
+                let o = (0..3).map(|c| g[c] - far[c]).fold(lift, f32::min).max(0.0);
+                far.map(|f| f + o)
+            } else {
+                wall
+            };
+            [0, 1, 2].map(|c| (g[c] - base[c]).max(0.0) / scale[c].max(4.0))
         })
         .collect();
     let e = [0, 1, 2].map(|c| median(excess.iter().map(|x| x[c]).collect()));
     (glow_point(e), excess.into_iter().map(glow_point).collect())
 }
+
+/// Least lift of the wall over the far stone (70-90 px out, outside the
+/// cell) that marks a cell lit as a reachable destination. Unlit cells of the
+/// labeled frames stay below 5, lit ones measure 13 to 50.
+const LIT_LIFT: f32 = 10.0;
 
 /// Chromaticity of a glow excess (pulled to grey when faint) and its strength.
 fn glow_point(e: [f32; 3]) -> Vec<f32> {

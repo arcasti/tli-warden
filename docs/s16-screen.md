@@ -16,6 +16,7 @@ Checked on 120x130 portrait crops of every labeled frame:
 The food chain confirms the reading: a wolf eats a rat (t049-t059), a lion eats a rat (t067), a lion eats a wolf (t071), a rat eats a mammoth (t077), a mammoth eats a lion (t113).
 A Consume re-rolls the eater's beast: cell 7 is a wolf before eating cell 5 and a rat after (t059).
 The warden's lantern lights its cell amber and hides a Normal glow (t089 cell 10, t097 cell 6); read those tiers from the card art or the frame instead.
+A cell the warden can move to is lit with pale stone that adds a roughly grey light around the portrait, more of it (and bluish) toward the cell's edge, with a brown wooden bar 61-64 px left of the portrait. Measured against that stone, an orange glow loses its green and looks red (reports/jaws-orange-cell14 cell 14); the reader measures a lit cell's glow against the dark stone outside the cell plus a grey offset.
 A small red jaws crown on top of a portrait (t049 cell 7) is the jaws marker: that Inmate has something to consume.
 
 ## Screen types and where things are (pixels at 1918x1078)

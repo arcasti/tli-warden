@@ -1,7 +1,7 @@
 //! Valuing moves (js/solver.js 336-497): incident markers, patrol
 //! destinations, prey marks, devours, swaps and the gift picks.
 
-use super::chain::{devour_delta, guillotine};
+use super::chain::{coin_of_fate, devour_delta, guillotine};
 use super::values::{activation, execution_value, fresh_value, stair_delta, swap_value};
 use super::{Comp, Ctx, Rng32, TOP, composition, context};
 use crate::engine::data::{RAINBOW, Tool, data};
@@ -144,6 +144,19 @@ pub fn link_loss(ctx: &Ctx, inmate: Option<Inmate>, certain: bool) -> f64 {
     link_value(ctx, link.lion, link.prey, link.rounds) * if certain || link.prey == inmate.id { 1.0 } else { 0.75 }
 }
 
+/// coinLoss: the worth of Kin's Coin of Fate lost when `gone` leave the board;
+/// `board` holds every open inmate below Rainbow.
+fn coin_loss(ctx: &Ctx, board: &Comp, gone: &[Inmate]) -> f64 {
+    if !ctx.st.has(Tool::Coin) {
+        return 0.0;
+    }
+    let mut after = *board;
+    for i in gone.iter().filter(|i| i.tier < RAINBOW) {
+        after[i.tier as usize * 4 + i.beast.index()] -= 1;
+    }
+    coin_of_fate(ctx, board) - coin_of_fate(ctx, &after)
+}
+
 /// huntGain: what a Hunt now adds, the value of the prey marks it would place.
 pub fn hunt_gain(ctx: &Ctx) -> f64 {
     let st = ctx.st;
@@ -161,6 +174,7 @@ pub fn devour_scores(ctx: &mut Ctx, options: Vec<Bite>) -> Vec<(usize, f64)> {
     let here = &st.cells[st.position];
     let Some(eater) = here.inmate.filter(|_| !here.sealed) else { return Vec::new() };
     let (mut comp, crowd) = composition(st, Some(st.position));
+    let board = composition(st, None).0;
     let tier = eater.tier as usize;
     let beast = eater.beast.index();
     let own = link_loss(ctx, Some(eater), false);
@@ -171,7 +185,10 @@ pub fn devour_scores(ctx: &mut Ctx, options: Vec<Bite>) -> Vec<(usize, f64)> {
             let meal = if o.scratch { target.hidden } else { target.inmate }.expect("meal");
             let meal_link = if o.scratch { 0.0 } else { link_loss(ctx, Some(meal), true) };
             let same_link = own != 0.0 && meal_link != 0.0 && st.link_of(eater.id) == st.link_of(meal.id);
-            let loss = if same_link { own.max(meal_link) } else { own + meal_link };
+            let mut loss = if same_link { own.max(meal_link) } else { own + meal_link };
+            // The eater leaves its tier and the meal the board (the chain after is not priced).
+            let gone = [eater, meal];
+            loss += coin_loss(ctx, &board, &gone[..if o.scratch { 1 } else { 2 }]);
             let stair_loss = if o.scratch { 0.0 } else { stair_delta(ctx, &mut comp, meal.tier as usize, meal.beast.index(), -1) };
             let delta = devour_delta(ctx, tier, beast, meal.beast.index(), o.scratch, &mut comp, crowd);
             (o.cell, delta - loss + stair_loss)
@@ -190,7 +207,9 @@ pub fn swap_gain_here(ctx: &Ctx) -> f64 {
         return f64::NEG_INFINITY;
     };
     let (comp, crowd) = composition(st, Some(st.position));
-    let mut gain = swap_value(ctx, inmate.tier as usize, &comp, crowd - 1) - link_loss(ctx, Some(inmate), true);
+    let mut gain = swap_value(ctx, inmate.tier as usize, &comp, crowd - 1)
+        - link_loss(ctx, Some(inmate), true)
+        - coin_loss(ctx, &composition(st, None).0, &[inmate]);
     // Gaoler's Execution Axe: a swap that raises the rarity opens random sealed cells.
     if st.has(Tool::Axe) {
         let doors = data().tool(Tool::Axe).count.unwrap_or(0).min(st.sealed_cells().len());

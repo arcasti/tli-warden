@@ -6,6 +6,7 @@
 
 use serde_json::{Value, json};
 use std::time::Instant;
+use warden::engine::data::Tool;
 use warden::engine::{Action, State, apply, new_game_with};
 use warden::solver::TUNED;
 use warden::solver::solve::{SolveOption, candidates, instant, solve};
@@ -60,11 +61,18 @@ fn solves_like_the_js() {
         let seed = point["seed"].as_str().expect("seed");
         let step = point["step"].as_u64().expect("step") as usize;
         let game = games.iter().find(|g| g["seed"] == seed).expect("traced game");
-        let state = replay(game, step);
+        // The JS strategy did not price Kin's Coin of Fate; without it held,
+        // the Rust solver plays as the JS did.
+        let mut state = replay(game, step);
+        state.tools.retain(|&t| t != Tool::Coin);
         let at = format!("{seed} step {step}");
 
         let pick = instant(&state).map(|i| json!({ "action": i.action, "label": i.label, "why": i.why }));
-        let pick = pick.unwrap_or(Value::Null);
+        let mut pick = pick.unwrap_or(Value::Null);
+        // Nor did its chain odds count Avenger's Casket's meals: the reason differs.
+        if state.has(Tool::Revenge) && pick.is_object() {
+            pick["why"] = point["instant"]["why"].clone();
+        }
         if pick != point["instant"] {
             mismatches.push(format!("{at} instant: rust {pick} / js {}", point["instant"]));
         }

@@ -4,12 +4,12 @@
 
 use super::chain::chain_odds;
 use super::scores::patrol_why;
-use super::{Params, Rng32, TOOL_RANK, TUNED, decide, decide_bite};
-use crate::engine::data::{Beast, RAINBOW};
+use super::{Params, Rng32, TOOL_RANK, TUNED, composition, decide, decide_bite};
+use crate::engine::data::{Beast, RAINBOW, Tool};
 use crate::engine::devour::{can_devour_now, hunt_targets, start_options};
 use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, execution_victims};
 use crate::engine::rules::{clockwise_path, patrol_options};
-use crate::engine::state::{Pending, Phase, State};
+use crate::engine::state::{Inmate, Pending, Phase, State};
 use crate::engine::text::{cell_label, describe, incident_name, plural, tier_name, tool_name};
 use crate::engine::{Action, ChoiceId, apply, data::data};
 use std::cmp::Ordering::Equal;
@@ -376,6 +376,54 @@ fn to_fixed(x: f64, d: usize) -> String {
     format!("{:.*}", d, x)
 }
 
+/// coinReason: with Kin's Coin of Fate and a morning left, the match a
+/// Consume or Replace available now would break (the warden's inmate or a
+/// meal in it), as the reason to end the day instead.
+fn coin_reason(st: &State) -> Option<String> {
+    if !st.has(Tool::Coin) || st.day >= st.max_days {
+        return None;
+    }
+    let (board, _) = composition(st, None);
+    let matched = |i: &Inmate| i.tier < RAINBOW && board[i.tier as usize * 4 + i.beast.index()] >= 2;
+    let here = st.cells.get(st.position).and_then(|c| c.inmate.filter(|_| !c.sealed));
+    let starts = start_options(st);
+    let acts = !starts.is_empty() || st.used.swap < st.params.swaps_per_day;
+    let mut meals = starts.iter().filter(|o| !o.scratch).filter_map(|o| st.cells[o.cell].inmate);
+    let kept = here.filter(|i| acts && matched(i)).or_else(|| meals.find(matched))?;
+    let mut cells: Vec<usize> = st
+        .cells
+        .iter()
+        .filter(|c| c.on_board() && c.inmate.is_some_and(|i| i.beast == kept.beast && i.tier == kept.tier))
+        .map(|c| c.n)
+        .collect();
+    cells.sort_by_key(|&n| n != st.position);
+    let mut labels: Vec<String> = cells.iter().map(|&n| cell_label(n)).collect();
+    let last = labels.pop().expect("a matched cell");
+    let coin = data().tool(Tool::Coin);
+    Some(format!(
+        "Keep the {} {} in {} and {last}: {} has a {}% chance each morning to remove one and raise {} to {}.",
+        describe(&kept),
+        if cells.len() == 2 { "pair" } else { "match" },
+        labels.join(", "),
+        tool_name(Tool::Coin.key()),
+        to_fixed(coin.chance, 0),
+        if cells.len() == 2 { "the other" } else { "another" },
+        tier_name(kept.tier + coin.tiers.unwrap_or(0))
+    ))
+}
+
+/// guillotineCut: with Scapegoat's Guillotine armed for a Replace in the
+/// warden's cell, how many of the other inmates on the block it removes, and
+/// how many there are.
+fn guillotine_cut(st: &State) -> Option<(usize, usize)> {
+    let def = data().tool(Tool::Scapegoat);
+    if !st.has(Tool::Scapegoat) || !st.cells.get(st.position).is_some_and(|c| c.on_board()) {
+        return None;
+    }
+    let others = st.board_cells().len() - 1;
+    (others > 0 && others >= def.min_others.unwrap_or(0)).then(|| (def.count.unwrap_or(0).min(others), others))
+}
+
 /// reason: why the strategy plays `action`, in a sentence.
 pub fn reason(st: &State, action: &Action) -> String {
     let here = st.cells.get(st.position);
@@ -398,12 +446,28 @@ pub fn reason(st: &State, action: &Action) -> String {
         }
         Action::Swap => {
             let here = here.expect("warden's cell");
+            if let Some((removed, others)) = guillotine_cut(st) {
+                return format!(
+                    "{} removes {removed} of the {others} other Inmates, and the new Inmate is sure to be rarer than {}.",
+                    tool_name(Tool::Scapegoat.key()),
+                    tier_name(here.inmate.expect("inmate").tier)
+                );
+            }
             if here.ivory {
                 return "A Tusk cell: replacing it raises other Inmates a tier.".to_string();
             }
             format!("{} Inmates are worth less than a fresh roll on average.", tier_name(here.inmate.expect("inmate").tier))
         }
         Action::End => {
+            if let Some(why) = coin_reason(st) {
+                return why;
+            }
+            if let Some((removed, others)) = guillotine_cut(st).filter(|_| st.used.swap < st.params.swaps_per_day) {
+                return format!(
+                    "Skip the Replace: {} would remove {removed} of the {others} other Inmates.",
+                    tool_name(Tool::Scapegoat.key())
+                );
+            }
             let starts = start_options(st);
             if !can_devour_now(st) || starts.is_empty() {
                 return "Nothing left today is worth doing.".to_string();

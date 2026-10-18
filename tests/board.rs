@@ -14,6 +14,8 @@ use warden::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATW
 use warden::engine::rules::steps_between;
 use warden::engine::state::{ObjectiveState, Pending, Phase, ToolReason, Used};
 use warden::engine::apply;
+use warden::solver::chain::chain_odds;
+use warden::solver::solve::reason;
 use warden::solver::{Rng32, TUNED, decide};
 
 mod common;
@@ -268,6 +270,55 @@ fn guillotine_on_the_last_day_keeps_the_block() {
     // Chromatic can be made on the last day; with Avenger's Casket it pays.
     let mut m = raw("guillotine-last-day.json");
     for (tools, want) in [(serde_json::json!(["scapegoat", "rope"]), Action::End), (serde_json::json!(["revenge", "rope"]), Action::Swap)] {
+        m["tools"] = tools;
+        let model: Model = serde_json::from_value(m.clone()).expect("model");
+        let st = build_state(&model, 1).0;
+        assert_eq!(decide(&st, &TUNED, &mut Rng32::new(1)), Some(want), "{}", m["tools"]);
+    }
+}
+
+/// The board of `name` with these instruments held.
+fn with_tools(name: &str, tools: Value) -> warden::engine::state::State {
+    let mut m = raw(name);
+    m["tools"] = tools;
+    let model: Model = serde_json::from_value(m).expect("model");
+    build_state(&model, 1).0
+}
+
+#[test]
+fn the_end_reason_names_the_instrument_that_decides_it() {
+    let st = with_tools("coin-pair-day15.json", serde_json::json!(["coin", "dogtag"]));
+    let why = reason(&st, &Action::End);
+    assert!(why.contains("Kin's Coin of Fate") && why.contains("16") && why.contains("10"), "{why}");
+    let st = with_tools("guillotine-last-day.json", serde_json::json!(["scapegoat", "rope"]));
+    let why = reason(&st, &Action::End);
+    assert!(why.contains("Scapegoat's Guillotine"), "{why}");
+}
+
+#[test]
+fn chain_odds_count_the_avengers_casket() {
+    // The warden's inmate made a Rare Berserk Lion so it has a meal, the Rare
+    // Alpha Wolf in 03; no chain on the open block reaches Chromatic.
+    let odds = |tools: Value| {
+        let mut m = raw("guillotine-last-day.json");
+        m["tools"] = tools;
+        m["cells"][12] = serde_json::json!({"kind": "inmate", "beast": "lion", "tier": 2});
+        let model: Model = serde_json::from_value(m).expect("model");
+        let st = build_state(&model, 1).0;
+        assert_eq!(devour_options(&st, 12).iter().map(|o| o.cell).collect::<Vec<_>>(), [2]);
+        chain_odds(&st, 12, 2)
+    };
+    assert_eq!(odds(serde_json::json!(["rope"])), (0.0, 1.25));
+    let (rainbow, _) = odds(serde_json::json!(["revenge", "rope"]));
+    assert!(rainbow > 0.0, "{rainbow}");
+}
+
+#[test]
+fn coin_of_fate_keeps_the_last_pair() {
+    // Two Legendary Lions with five mornings left: Kin's Coin of Fate makes a
+    // Chromatic of the pair, and a Consume by the warden's Lion breaks it.
+    let mut m = raw("coin-pair-day15.json");
+    for (tools, want) in [(serde_json::json!(["coin", "dogtag"]), Action::End), (serde_json::json!(["dogtag"]), Action::Devour { to: 11 })] {
         m["tools"] = tools;
         let model: Model = serde_json::from_value(m.clone()).expect("model");
         let st = build_state(&model, 1).0;

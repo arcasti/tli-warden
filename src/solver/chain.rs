@@ -45,6 +45,30 @@ pub fn guillotine(ctx: &Ctx, tier: usize, comp: &Comp, others: i64) -> (Vec<f64>
     (dist, removed / others as f64 * worth)
 }
 
+/// coinOfFate: the expected worth of Kin's Coin of Fate for the open inmates
+/// below Rainbow in `comp`: the odds it fires on one of the mornings left
+/// times one firing's average gain, a random match's partner rising its tiers
+/// less the matched inmate it removes. 0 without the Coin, a match or a morning.
+pub fn coin_of_fate(ctx: &Ctx, comp: &Comp) -> f64 {
+    let st = ctx.st;
+    let mornings = st.max_days.saturating_sub(st.day);
+    if !st.has(Tool::Coin) || mornings == 0 {
+        return 0.0;
+    }
+    let (mut matched, mut gain) = (0, 0.0);
+    for (i, &k) in comp.iter().enumerate().filter(|&(_, &k)| k >= 2) {
+        let t = i / 4;
+        let to = TOP.min(t + tiers(Tool::Coin));
+        matched += k;
+        gain += f64::from(k) * ((if to >= TOP { ctx.r } else { ctx.v[to] }) - 2.0 * ctx.v[t]);
+    }
+    if matched == 0 {
+        return 0.0;
+    }
+    let miss = 1.0 - data().tool(Tool::Coin).chance / 100.0;
+    (1.0 - miss.powi(mornings as i32)) * gain / f64::from(matched)
+}
+
 /// rise: value from here on for an eater that just reached tier t; its beast
 /// re-rolls, then it chains into a random valid meal if it has one.
 pub fn rise(ctx: &mut Ctx, t: usize, comp: &mut Comp, crowd: i64) -> f64 {
@@ -161,7 +185,9 @@ pub fn best_meal(ctx: &mut Ctx, tier: usize, beast: usize, comp: &mut Comp, crow
 }
 
 /// chainOdds: exact odds that a devour from cell `from` into cell `to` chains
-/// up to Rainbow, and its expected bites, by the rules of `rise` without tools.
+/// up to Rainbow, and its expected bites, by the rules of `rise` with Avenger's
+/// Casket (engine do_devour: after each bite, while a door is left, its chance
+/// to open one with a meal for the eater's new tier and beast) and no other tools.
 pub fn chain_odds(st: &State, from: usize, to: usize) -> (f64, f64) {
     let target = &st.cells[to];
     let meal = if target.sealed { target.hidden } else { target.inmate };
@@ -170,16 +196,31 @@ pub fn chain_odds(st: &State, from: usize, to: usize) -> (f64, f64) {
     if !target.sealed {
         comp[meal.tier as usize * 4 + meal.beast.index()] -= 1;
     }
-    let mut odds = Odds { eats: eats_table(st), comp, memo: HashMap::new() };
+    // With reusable cells a meal's cell seals again and a scratched door stays sealed.
+    let reseal = st.params.reusable_cells;
+    let doors = st.sealed_cells().len() + usize::from(reseal && !target.sealed) - usize::from(!reseal && target.sealed);
+    let casket = if st.has(Tool::Revenge) { data().tool(Tool::Revenge).chance / 100.0 } else { 0.0 };
+    let food = Beast::ALL.map(|b| data().food_chain[b.index()].iter().map(|f| f.index()).collect());
+    let mut odds = Odds { eats: eats_table(st), food, casket, reseal, doors, comp, memo: HashMap::new() };
     let gain = if target.sealed && target.scratch { 2 + usize::from(st.params.scratch_stacks_base) } else { 1 };
     let (p, n) = odds.at_tier(TOP.min(eater.tier as usize + gain));
     (p, 1.0 + n)
 }
 
+/// (tier, beast, doors, the tiers' composition from tier up) to the odds.
+type Memo = HashMap<(usize, usize, usize, Vec<i32>), (f64, f64)>;
+
 struct Odds {
     eats: [Vec<usize>; 4],
+    /// Who each beast eats without tools: the meals the Casket brings.
+    food: [Vec<usize>; 4],
+    /// Avenger's Casket's chance to fire after a bite; 0 without it.
+    casket: f64,
+    /// A meal's cell seals again (reusable cells).
+    reseal: bool,
+    doors: usize,
     comp: Comp,
-    memo: HashMap<(usize, usize, Vec<i32>), (f64, f64)>,
+    memo: Memo,
 }
 
 impl Odds {
@@ -190,7 +231,22 @@ impl Odds {
         }
         let (mut p, mut n) = (0.0, 0.0);
         for b in 0..4 {
-            let (pb, nb) = self.eat(t, b);
+            let (mut pb, mut nb) = self.eat(t, b);
+            if self.casket > 0.0 && self.doors > 0 {
+                let foods = self.food[b].clone();
+                let (mut ps, mut ns) = (0.0, 0.0);
+                self.doors -= 1;
+                for &f in &foods {
+                    self.comp[t * 4 + f] += 1;
+                    let (pf, nf) = self.eat(t, b);
+                    self.comp[t * 4 + f] -= 1;
+                    ps += pf / foods.len() as f64;
+                    ns += nf / foods.len() as f64;
+                }
+                self.doors += 1;
+                pb = self.casket * ps + (1.0 - self.casket) * pb;
+                nb = self.casket * ns + (1.0 - self.casket) * nb;
+            }
             p += pb / 4.0;
             n += nb / 4.0;
         }
@@ -198,7 +254,9 @@ impl Odds {
     }
 
     fn eat(&mut self, t: usize, b: usize) -> (f64, f64) {
-        let key = (t, b, self.comp[t * 4..20].to_vec());
+        // The doors only change the odds through the Casket.
+        let doors = if self.casket > 0.0 { self.doors } else { 0 };
+        let key = (t, b, doors, self.comp[t * 4..20].to_vec());
         if let Some(&hit) = self.memo.get(&key) {
             return hit;
         }
@@ -207,13 +265,16 @@ impl Odds {
         let mut out = (0.0, 0.0);
         if total != 0 {
             let (mut p, mut n) = (0.0, 0.0);
+            let reseal = usize::from(self.reseal);
             for &f in &foods {
                 let k = self.comp[t * 4 + f];
                 if k == 0 {
                     continue;
                 }
                 self.comp[t * 4 + f] -= 1;
+                self.doors += reseal;
                 let (pf, nf) = self.at_tier(t + 1);
+                self.doors -= reseal;
                 self.comp[t * 4 + f] += 1;
                 p += (f64::from(k) * pf) / f64::from(total);
                 n += (f64::from(k) * (nf + 1.0)) / f64::from(total);

@@ -1,6 +1,7 @@
 //! Replays seeded runs recorded from the earlier JS engine and requires the Rust strategy to pick every
 //! traced move the JS strategy picked (tests/fixtures/traces.jsonl, 20 games).
 
+use warden::engine::data::Tool;
 use warden::engine::rng::hash_seed;
 use warden::engine::{Action, apply, new_game_with};
 use warden::engine::state::State;
@@ -26,7 +27,11 @@ fn decides_like_the_js() {
             // The End Day after a failed move is the playout's fallback, not a decide pick.
             let fallback = i > 0 && action == Action::End && !steps[i - 1]["ok"].as_bool().unwrap_or(true) && steps[i - 1]["action"]["type"] != "end";
             if !fallback {
-                let pick = decide(&state, &TUNED, &mut roll);
+                // The JS strategy did not price Kin's Coin of Fate; without it
+                // held, the Rust strategy plays as the JS did.
+                let mut js = state.clone();
+                js.tools.retain(|&t| t != Tool::Coin);
+                let pick = decide(&js, &TUNED, &mut roll);
                 let rust = serde_json::to_value(&pick).expect("pick to JSON");
                 compared += 1;
                 if rust != step["action"] {
@@ -85,7 +90,6 @@ fn follow_up_behind_a_door_depends() {
 
 #[test]
 fn axe_doors_count_toward_a_swap() {
-    use warden::engine::data::Tool;
     use warden::solver::chain::swap_dist;
     use warden::solver::context;
     use warden::solver::scores::swap_gain_here;

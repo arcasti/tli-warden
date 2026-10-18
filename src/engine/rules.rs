@@ -370,8 +370,9 @@ fn run_start(s: &mut State) {
 
 // ---------- Day flow ----------
 
-/// Today's moves from the dice: the distinct cells they land on, nearest first,
-/// the room only when a die lands there (the S16 cards, docs/s16-screen.md).
+/// Today's moves from the dice: the cells they land on, nearest first, the room only when a die
+/// lands there (the S16 cards, docs/s16-screen.md). `roll_dice` draws distinct steps, so the
+/// dedupe only matters for dice set from outside (the JS traces in tests/parity.rs).
 pub fn destinations_from_dice(s: &mut State) {
     let d = data();
     let pos = s.position;
@@ -391,13 +392,22 @@ pub fn fewer_dice(s: &State) -> i32 {
     s.tools.iter().map(|&t| data().tool(t).fewer_dice).sum()
 }
 
-/// Rolls today's dice and derives today's moves from them.
+/// Rolls today's dice and derives today's moves from them. The game draws the steps as distinct
+/// values (46 of 46 recorded three-card mornings showed three different steps), so a die that
+/// repeats an earlier one is redrawn: uniform over the distinct sets, and the same rng stream as
+/// independent dice on a morning without a repeat.
 pub fn roll_dice(s: &mut State) {
     let d = data();
     let fewer = rand(&mut s.rng) * 100.0 < f64::from(s.params.fewer_doors_chance);
-    let count = (s.params.destinations as i32 - i32::from(fewer) - fewer_dice(s)).max(1);
-    let span = f64::from(d.max_pips - d.min_pips + 1);
-    let dice: Vec<u32> = (0..count).map(|_| d.min_pips + (rand(&mut s.rng) * span).floor() as u32).collect();
+    let pips = d.max_pips - d.min_pips + 1;
+    let count = (s.params.destinations as i32 - i32::from(fewer) - fewer_dice(s)).clamp(1, pips as i32) as usize;
+    let mut dice: Vec<u32> = Vec::with_capacity(count);
+    while dice.len() < count {
+        let die = d.min_pips + (rand(&mut s.rng) * f64::from(pips)).floor() as u32;
+        if !dice.contains(&die) {
+            dice.push(die);
+        }
+    }
     s.dice = dice;
     destinations_from_dice(s);
 }
@@ -496,4 +506,40 @@ pub fn roster_of(s: &State) -> Roster {
     rows.sort_by(|a, b| b.tier.cmp(&a.tier).then(a.beast.index().cmp(&b.beast.index())));
     let by_tier = (0..=RAINBOW).map(|t| rows.iter().filter(|r| r.tier == t).count() as u32).collect();
     Roster { rows, by_tier }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Rolls `mornings` seeded mornings and counts each pip, checking every roll is `count` distinct pips.
+    fn roll_many(s: &mut State, mornings: usize, count: usize) -> [usize; 7] {
+        let mut seen = [0usize; 7];
+        for _ in 0..mornings {
+            roll_dice(s);
+            let mut dice = s.dice.clone();
+            dice.sort_unstable();
+            dice.dedup();
+            assert_eq!(dice.len(), count, "dice {:?}", s.dice);
+            for &p in &dice {
+                assert!((1..=6).contains(&p), "pip {p}");
+                seen[p as usize] += 1;
+            }
+        }
+        seen
+    }
+
+    #[test]
+    fn dice_are_distinct_and_uniform() {
+        let mut s = new_game("DISTINCT-DICE");
+        s.params.fewer_doors_chance = 0;
+        s.tools.clear();
+        let seen = roll_many(&mut s, 6000, 3);
+        // Each pip shows on half the mornings: 3000 expected, sd about 39.
+        for (pip, &n) in seen.iter().enumerate().skip(1) {
+            assert!((2800..=3200).contains(&n), "pip {pip} seen {n} times");
+        }
+        s.tools.push(Tool::Whip);
+        roll_many(&mut s, 2000, 2);
+    }
 }

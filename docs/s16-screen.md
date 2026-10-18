@@ -39,12 +39,12 @@ A small red jaws crown on top of a portrait (t049 cell 7) is the jaws marker: th
 - Other: Speed-up (1540-1705, 20-60), Quick Action toggle (1725, 950-1005), objective popup before the run (t025-t027).
 
 ## Destinations
-Each morning shows one card per die, nearest first; the Interrogation Room card appears only when a die lands on the room, in its distance order (data/scan-truth-s16.json, field `doors`, 1 = the room):
+Each morning shows one card per die, nearest first, and the dice never repeat a step (46 of 46 recorded mornings without a "-1 daily destination option" instrument showed three cards with three different steps; each such instrument removes one card); the Interrogation Room card appears only when a die lands on the room, in its distance order (data/scan-truth-s16.json, field `doors`, 1 = the room):
 - t063, warden at 12: cards 13, 15, room (1, 3, 5 steps).
 - t131, warden at 15: cards room, 3, 5 (2, 4, 6 steps).
 - t049, t069, t087, t115, t167: three cell cards, no room card.
 
-Both engines follow this: today's destinations are the distinct cells the dice land on, the room included only when a die lands there, sorted by steps from the warden.
+The Rust engine follows this: it draws distinct steps from 1 to 6, and today's destinations are the distinct cells the dice land on, the room included only when a die lands there, sorted by steps from the warden.
 
 ## Markers not in the rules list
 - Cells highlighted pale (lighter stone) with thin connecting lines: the reachable cells of the current destination options or the move path (t047, t063, t093).

@@ -147,7 +147,18 @@ fn builds_like_the_js() {
         assert_eq!(serde_json::to_value(&problems).unwrap(), js["problems"], "{name} problems");
         let mut rust = serde_json::to_value(&st).unwrap();
         drop_rust_only(&mut rust, &js["state"]);
-        if let Some(diff) = first_diff("state", &normalize(rust), &normalize(js["state"].clone())) {
+        // The analyzer's leftover dice and incident counts come from the JS newGame: its roll of
+        // independent dice repeats a step (4, 3, 3), and the Rust engine draws distinct steps
+        // (docs/s16-screen.md), so the markers newGame places after the roll differ too. The board
+        // sets the cells itself, so those two fields are left out of the comparison.
+        let mut js_state = js["state"].clone();
+        assert_eq!(js_state["dice"], serde_json::json!([4, 3, 3]), "{name} JS dice");
+        for v in [&mut rust, &mut js_state] {
+            for key in ["dice", "incidentCounts"] {
+                v.as_object_mut().unwrap().remove(key);
+            }
+        }
+        if let Some(diff) = first_diff("state", &normalize(rust), &normalize(js_state)) {
             panic!("{name}: {diff}");
         }
         count += 1;

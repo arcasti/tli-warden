@@ -17,6 +17,7 @@ fn decides_like_the_js() {
         games += 1;
         let seed = game["seed"].as_str().expect("seed");
         let mut state = new_game(seed);
+        common::follow_js_repeat(&mut state, &game["start"]);
         let mut roll = Rng32::new(hash_seed(seed));
         let steps = game["steps"].as_array().expect("steps");
         let mut complete = true;
@@ -35,6 +36,7 @@ fn decides_like_the_js() {
                 }
             }
             apply(&mut state, &action);
+            common::follow_js_repeat(&mut state, &step["state"]);
         }
         if complete {
             full += 1;

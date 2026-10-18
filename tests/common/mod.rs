@@ -30,6 +30,25 @@ pub fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join(name)
 }
 
+/// Whether the traced JS state `js` rolled a repeated step and the Rust engine rolled other dice.
+/// The JS engine rolled independent dice; the Rust engine draws distinct steps, as the game does
+/// (docs/s16-screen.md), so a replay follows the trace's morning there.
+pub fn js_repeat_differs(state: &State, js: &Value) -> bool {
+    let dice: Vec<u32> = serde_json::from_value(js["dice"].clone()).expect("dice");
+    let mut distinct = dice.clone();
+    distinct.sort_unstable();
+    distinct.dedup();
+    distinct.len() < dice.len() && state.dice != dice
+}
+
+/// Continues a replay from the traced JS state where `js_repeat_differs`; tests/parity.rs checks
+/// the moves themselves.
+pub fn follow_js_repeat(state: &mut State, js: &Value) {
+    if js_repeat_differs(state, js) {
+        *state = serde_json::from_value(js.clone()).expect("JS state");
+    }
+}
+
 /// The game traces recorded from the earlier JS engine
 /// (seeds TRACE-0001 to TRACE-0020), one JSON value per game, from
 /// tests/fixtures/traces.jsonl.

@@ -371,8 +371,8 @@ fn run_start(s: &mut State) {
 // ---------- Day flow ----------
 
 /// Today's moves from the dice: the cells they land on, nearest first, the room only when a die
-/// lands there (the S16 cards, docs/s16-screen.md). `roll_dice` draws distinct steps, so the
-/// dedupe only matters for dice set from outside (the JS traces in tests/parity.rs).
+/// lands there (the S16 cards, docs/s16-screen.md). `roll_dice` draws distinct steps, so only a
+/// state copied from a JS trace (tests/common `follow_js_repeat`) can hold a repeated step.
 pub fn destinations_from_dice(s: &mut State) {
     let d = data();
     let pos = s.position;

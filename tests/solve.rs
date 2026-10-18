@@ -1,20 +1,23 @@
-//! Runs the Rust solver at the points in tests/fixtures/solve-traces.jsonl,
-//! recorded from the earlier JS solver (every 8th
-//! step of the 20 traced games), and requires the same instant pick,
-//! candidates and options, and the same ranked scores where no playout
-//! depends on the dice model (the JS rolled independent dice).
+//! At every 8th decision of the strategy games of tests/decide.rs (games 0
+//! to 19 of seed 1), runs the Rust solver and requires the instant pick, the
+//! candidates and the options with their scores recorded in
+//! tests/fixtures/strategy-solves.jsonl, so an accidental change of the
+//! strategy or the playouts fails. After a deliberate change, re-record the
+//! fixture with `WARDEN_RECORD=1 cargo test --profile fast-test --test decide --test solve`
+//! and review its diff.
 
 use serde_json::{Value, json};
 use std::time::Instant;
-use warden::engine::data::Tool;
 use warden::engine::{Action, State, apply, new_game_with};
 use warden::solver::TUNED;
 use warden::solver::solve::{SolveOption, candidates, instant, solve};
 
 mod common;
-use common::{fixture, follow_js_repeat, no_cap, traces};
+use common::{follow_js_repeat, no_cap, traces};
 
-/// The game `seed` replayed to `step` from its traced moves.
+const SOLVES: &str = "strategy-solves.jsonl";
+
+/// The traced JS game `seed` replayed to `step` from its traced moves.
 fn replay(game: &Value, step: usize) -> State {
     let mut state = new_game_with(game["seed"].as_str().expect("seed"), no_cap());
     follow_js_repeat(&mut state, &game["start"]);
@@ -26,86 +29,86 @@ fn replay(game: &Value, step: usize) -> State {
     state
 }
 
-fn close(rust: f64, js: &Value) -> bool {
-    match js {
-        Value::String(s) if s == "inf" => rust == f64::INFINITY,
-        _ => js.as_f64().is_some_and(|x| (rust - x).abs() <= 1e-9),
+/// `x` as JSON; JSON has no infinity, so a non-finite score is a string.
+fn score(x: f64) -> Value {
+    if x.is_finite() { json!(x) } else { json!(x.to_string()) }
+}
+
+fn close(now: &Value, was: &Value) -> bool {
+    match (now.as_f64(), was.as_f64()) {
+        (Some(a), Some(b)) => (a - b).abs() <= 1e-9,
+        _ => now == was,
     }
 }
 
-/// The first field of `o` that differs from the JS option, if any.
-fn option_diff(o: &SolveOption, js: &Value) -> Option<String> {
-    let action = serde_json::to_value(&o.action).expect("action");
-    let same = o.label == js["label"]
-        && action == js["action"]
-        && json!(o.n) == js["n"]
-        && json!(o.policy) == js["policy"]
-        && close(o.mean, &js["mean"])
-        && close(o.se, &js["se"])
-        && close(o.gap_se, &js["gapSe"])
-        && close(o.best, &js["best"]);
-    let rust = json!({ "label": o.label, "action": action, "n": o.n, "policy": o.policy, "mean": o.mean, "se": o.se, "gapSe": o.gap_se, "best": o.best });
-    (!same).then(|| format!("rust {rust} / js {js}"))
+fn option(o: &SolveOption) -> Value {
+    json!({ "label": o.label, "action": o.action, "n": o.n, "policy": o.policy, "mean": score(o.mean), "se": score(o.se), "gapSe": score(o.gap_se), "best": score(o.best) })
+}
+
+fn same_option(now: &Value, was: &Value) -> bool {
+    ["label", "action", "n", "policy"].iter().all(|f| now[f] == was[f]) && ["mean", "se", "gapSe", "best"].iter().all(|f| close(&now[f], &was[f]))
+}
+
+/// The solver's view of the state before decision `step` of game `k`.
+fn point(k: u32, step: usize, state: &State) -> Value {
+    let pick = instant(state).map_or(Value::Null, |i| json!({ "action": i.action, "label": i.label, "why": i.why }));
+    let labels: Vec<String> = candidates(state).into_iter().map(|c| c.label).collect();
+    let options: Vec<Value> = solve(state, 30, 7, &TUNED).iter().map(option).collect();
+    json!({ "k": k, "step": step, "instant": pick, "candidates": labels, "options": options })
 }
 
 #[test]
-fn solves_like_the_js() {
-    let games = traces();
-    let text = std::fs::read_to_string(fixture("solve-traces.jsonl")).expect("solve-traces.jsonl");
-
-    let (mut points, mut exact) = (0, 0);
-    let mut mismatches: Vec<String> = Vec::new();
-    for line in text.lines().filter(|l| !l.trim().is_empty()) {
-        points += 1;
-        let point: Value = serde_json::from_str(line).expect("point line");
-        let seed = point["seed"].as_str().expect("seed");
-        let step = point["step"].as_u64().expect("step") as usize;
-        let game = games.iter().find(|g| g["seed"] == seed).expect("traced game");
-        // The JS strategy did not price Kin's Coin of Fate; without it held,
-        // the Rust solver plays as the JS did.
-        let mut state = replay(game, step);
-        state.tools.retain(|&t| t != Tool::Coin);
-        let at = format!("{seed} step {step}");
-
-        let pick = instant(&state).map(|i| json!({ "action": i.action, "label": i.label, "why": i.why }));
-        let mut pick = pick.unwrap_or(Value::Null);
-        // Nor did its chain odds count Avenger's Casket's meals: the reason differs.
-        if state.has(Tool::Revenge) && pick.is_object() {
-            pick["why"] = point["instant"]["why"].clone();
-        }
-        if pick != point["instant"] {
-            mismatches.push(format!("{at} instant: rust {pick} / js {}", point["instant"]));
-        }
-        let labels: Vec<String> = candidates(&state).into_iter().map(|c| c.label).collect();
-        if json!(labels) != point["candidates"] {
-            mismatches.push(format!("{at} candidates: rust {labels:?} / js {}", point["candidates"]));
-        }
-        let options = solve(&state, 30, 7, &TUNED);
-        let js = point["options"].as_array().expect("options");
-        if options.len() != js.len() {
-            mismatches.push(format!("{at} options: rust {} / js {}", options.len(), js.len()));
-        } else if options.iter().zip(js).all(|(o, j)| option_diff(o, j).is_none()) {
-            exact += 1;
-        } else {
-            // The JS playouts rolled independent dice and the Rust playouts draw distinct steps
-            // (docs/s16-screen.md), so the playout scores and the ranking differ wherever a
-            // playout reaches a morning; the options offered must still be the same.
-            let mut rust: Vec<Value> = options.iter().map(|o| json!([o.label, o.action])).collect();
-            let mut want: Vec<Value> = js.iter().map(|j| json!([j["label"], j["action"]])).collect();
-            rust.sort_by_key(Value::to_string);
-            want.sort_by_key(Value::to_string);
-            if rust != want {
-                mismatches.push(format!("{at} options: rust {rust:?} / js {want:?}"));
+fn solves_as_recorded() {
+    let mut points: Vec<Value> = Vec::new();
+    for k in 0..20 {
+        common::strategy_game(k, |step, state| {
+            if step % 8 == 0 {
+                points.push(point(k, step, state));
             }
+        });
+    }
+    if common::recording() {
+        common::record(SOLVES, &points);
+        return;
+    }
+
+    let want = common::recorded(SOLVES);
+    let mut mismatches: Vec<String> = Vec::new();
+    if want.len() != points.len() {
+        mismatches.push(format!("points: now {} / recorded {}", points.len(), want.len()));
+    }
+    // The first differing point of each game.
+    let mut reported = Value::Null;
+    for (now, was) in points.iter().zip(&want) {
+        if now["k"] != reported
+            && let Some(diff) = point_diff(now, was)
+        {
+            reported = now["k"].clone();
+            mismatches.push(format!("game {} step {} {diff}", now["k"], now["step"]));
         }
     }
 
-    println!("points checked: {points}, options scored as in the JS: {exact}");
-    println!("mismatches: {}", mismatches.len());
+    println!("points: {}, mismatches: {}", points.len(), mismatches.len());
     for m in mismatches.iter().take(10) {
         println!("  {m}");
     }
-    assert!(mismatches.is_empty(), "{} mismatches with the JS solver", mismatches.len());
+    assert!(mismatches.is_empty(), "{} mismatches with {SOLVES}", mismatches.len());
+}
+
+/// The first part of point `now` that differs from the recorded `was`, if any.
+fn point_diff(now: &Value, was: &Value) -> Option<String> {
+    if (&now["k"], &now["step"]) != (&was["k"], &was["step"]) {
+        return Some(format!("point: recorded game {} step {}", was["k"], was["step"]));
+    }
+    if let Some(field) = ["instant", "candidates"].into_iter().find(|&f| now[f] != was[f]) {
+        return Some(format!("{field}: now {} / recorded {}", now[field], was[field]));
+    }
+    let (a, b) = (now["options"].as_array().expect("options"), was["options"].as_array().expect("options"));
+    if a.len() != b.len() {
+        return Some(format!("options: now {} / recorded {}", a.len(), b.len()));
+    }
+    let (o, w) = a.iter().zip(b).find(|(o, w)| !same_option(o, w))?;
+    Some(format!("option: now {o} / recorded {w}"))
 }
 
 #[test]

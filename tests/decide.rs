@@ -1,59 +1,55 @@
-//! Replays seeded runs recorded from the earlier JS engine and requires the Rust strategy to pick every
-//! traced move the JS strategy picked (tests/fixtures/traces.jsonl, 20 games).
+//! Plays games 0 to 19 of seed 1 with the strategy alone, as the bench plays
+//! them, and requires every decided action, the final vault and the run's
+//! stats recorded in tests/fixtures/strategy-games.jsonl, so an accidental
+//! change of the strategy fails. After a deliberate change, re-record the
+//! fixture with `WARDEN_RECORD=1 cargo test --profile fast-test --test decide --test solve`
+//! and review its diff.
 
+use serde_json::{Value, json};
 use warden::engine::data::Tool;
-use warden::engine::rng::hash_seed;
-use warden::engine::{Action, apply, new_game_with};
+use warden::engine::Action;
 use warden::engine::state::State;
+use warden::solver::TUNED;
 use warden::solver::solve::{FollowUp, follow_up};
-use warden::solver::{Rng32, TUNED, decide};
 
 mod common;
 
+const GAMES: &str = "strategy-games.jsonl";
+
 #[test]
-fn decides_like_the_js() {
-    let (mut games, mut full, mut compared) = (0, 0, 0);
+fn decides_as_recorded() {
+    let games: Vec<Value> = (0..20)
+        .map(|k| {
+            let (actions, st) = common::strategy_game(k, |_, _| {});
+            json!({ "k": k, "actions": actions, "vault": st.vault.len(), "stats": st.stats })
+        })
+        .collect();
+    if common::recording() {
+        common::record(GAMES, &games);
+        return;
+    }
+
+    let want = common::recorded(GAMES);
     let mut mismatches: Vec<String> = Vec::new();
-    for game in common::traces() {
-        games += 1;
-        let seed = game["seed"].as_str().expect("seed");
-        let mut state = new_game_with(seed, common::no_cap());
-        common::follow_js_repeat(&mut state, &game["start"]);
-        let mut roll = Rng32::new(hash_seed(seed));
-        let steps = game["steps"].as_array().expect("steps");
-        let mut complete = true;
-        for (i, step) in steps.iter().enumerate() {
-            let action: Action = serde_json::from_value(step["action"].clone()).expect("action");
-            // The End Day after a failed move is the playout's fallback, not a decide pick.
-            let fallback = i > 0 && action == Action::End && !steps[i - 1]["ok"].as_bool().unwrap_or(true) && steps[i - 1]["action"]["type"] != "end";
-            if !fallback {
-                // The JS strategy did not price Kin's Coin of Fate; without it
-                // held, the Rust strategy plays as the JS did.
-                let mut js = state.clone();
-                js.tools.retain(|&t| t != Tool::Coin);
-                let pick = decide(&js, &TUNED, &mut roll);
-                let rust = serde_json::to_value(&pick).expect("pick to JSON");
-                compared += 1;
-                if rust != step["action"] {
-                    mismatches.push(format!("{seed} step {i}: rust {rust} / js {}", step["action"]));
-                    complete = false;
-                    break;
-                }
-            }
-            apply(&mut state, &action);
-            common::follow_js_repeat(&mut state, &step["state"]);
-        }
-        if complete {
-            full += 1;
+    if want.len() != games.len() {
+        mismatches.push(format!("games: now {} / recorded {}", games.len(), want.len()));
+    }
+    for (now, was) in games.iter().zip(&want) {
+        let k = &now["k"];
+        let (a, b) = (now["actions"].as_array().expect("actions"), was["actions"].as_array().expect("actions"));
+        if let Some(i) = (0..a.len().max(b.len())).find(|&i| a.get(i) != b.get(i)) {
+            let show = |v: Option<&Value>| v.map_or("none".to_string(), Value::to_string);
+            mismatches.push(format!("game {k} step {i}: now {} / recorded {}", show(a.get(i)), show(b.get(i))));
+        } else if now["vault"] != was["vault"] || now["stats"] != was["stats"] {
+            mismatches.push(format!("game {k} end: now vault {} {} / recorded vault {} {}", now["vault"], now["stats"], was["vault"], was["stats"]));
         }
     }
 
-    println!("games: {games}, steps compared: {compared}, fully matched: {full}");
-    println!("mismatches: {}", mismatches.len());
+    println!("games: {}, mismatches: {}", games.len(), mismatches.len());
     for m in mismatches.iter().take(10) {
         println!("  {m}");
     }
-    assert!(mismatches.is_empty(), "{} games differ from the JS", mismatches.len());
+    assert!(mismatches.is_empty(), "{} games differ from {GAMES}", mismatches.len());
 }
 
 fn board(name: &str) -> State {

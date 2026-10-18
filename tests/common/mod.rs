@@ -1,13 +1,15 @@
-//! Helpers shared by the tests: the recorded JS traces, the fixture boards,
-//! JSON comparison of Rust and JS states, and a hit count for the reader
-//! tests. Each test crate uses only some of them.
+//! Helpers shared by the tests: the recorded JS traces, the strategy games
+//! and their snapshot fixtures, the fixture boards, JSON comparison of Rust
+//! and JS states, and a hit count for the reader tests. Each test crate uses
+//! only some of them.
 #![allow(dead_code)]
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use warden::board::{Model, build_state};
-use warden::engine::State;
-use warden::engine::state::Params;
+use warden::engine::state::{Params, Phase};
+use warden::engine::{Action, State, apply};
+use warden::solver::{TUNED, bench, decide};
 
 /// The saved frames, trainingdata/s16 (git-ignored).
 pub fn frames() -> PathBuf {
@@ -56,6 +58,45 @@ pub fn follow_js_repeat(state: &mut State, js: &Value) {
 pub fn traces() -> Vec<Value> {
     let text = std::fs::read_to_string(fixture("traces.jsonl")).expect("traces.jsonl");
     text.lines().filter(|l| !l.trim().is_empty()).map(|l| serde_json::from_str(l).expect("trace line")).collect()
+}
+
+/// Plays game `k` of seed 1 as `bench::play_strategy` does (its strategy
+/// dice, default Params) and returns every action `decide` picked, in order,
+/// with the final state; `at(i, state)` sees the state before decision `i`.
+pub fn strategy_game(k: u32, mut at: impl FnMut(usize, &State)) -> (Vec<Action>, State) {
+    let (mut st, mut rng) = bench::start(1, k);
+    let mut picks = Vec::new();
+    for _ in 0..2000 {
+        if st.phase == Phase::Ended {
+            break;
+        }
+        at(picks.len(), &st);
+        let Some(action) = decide(&st, &TUNED, &mut rng) else { break };
+        picks.push(action.clone());
+        if !apply(&mut st, &action).is_ok() && !(action != Action::End && apply(&mut st, &Action::End).is_ok()) {
+            break;
+        }
+    }
+    (picks, st)
+}
+
+/// Whether the snapshot tests record their fixtures instead of comparing
+/// (the env var `WARDEN_RECORD` is set).
+pub fn recording() -> bool {
+    std::env::var_os("WARDEN_RECORD").is_some()
+}
+
+/// Writes `lines` to tests/fixtures/`name`, one JSON value per line.
+pub fn record(name: &str, lines: &[Value]) {
+    let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
+    std::fs::write(fixture(name), text).expect("write fixture");
+    println!("recorded {} lines to tests/fixtures/{name}", lines.len());
+}
+
+/// The lines of the recorded fixture tests/fixtures/`name`.
+pub fn recorded(name: &str) -> Vec<Value> {
+    let text = std::fs::read_to_string(fixture(name)).unwrap_or_else(|_| panic!("no {name}: record it with WARDEN_RECORD=1"));
+    text.lines().filter(|l| !l.trim().is_empty()).map(|l| serde_json::from_str(l).expect("fixture line")).collect()
 }
 
 /// Reads that matched out of those checked, with the misses described.

@@ -7,7 +7,7 @@ Unofficial. Not affiliated with or endorsed by the developers or publishers of *
 ## Requirements
 
 - Windows 10 or 11.
-- The game at a 16:9 size (1920 x 1080 or any other 16:9 size), fullscreen or borderless. Other shapes lay the board out differently and are not read; the Board tab says so.
+- The game at a 16:9 size (1920 x 1080 or any other 16:9 size): fullscreen, borderless, or a window that is not maximized (a maximized window loses the title bar and taskbar height and is no longer 16:9). Other shapes lay the board out differently and are not read: the Board tab says why above the last reading and marks it "last reading".
 - The English Windows OCR language. Warden reads the days counter, the destination cards and the panels with it. If the Board tab says English OCR is missing, open PowerShell as administrator and run:
 
   ```powershell

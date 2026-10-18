@@ -149,11 +149,18 @@ fn frame_size_is_scaled_or_refused() {
     let wide = s.reading.clone().unwrap();
     assert_eq!(wide.model.cells, reference.reading.as_ref().unwrap().model.cells);
     assert!(wide.warnings.iter().all(|w| !w.text.contains("16:9")), "{:?}", wide.warnings);
+    assert!(wide.kept_lines().is_empty());
 
     read(&mut s, 1902, 989);
-    let kept = s.reading.as_ref().unwrap();
+    let kept = s.reading.clone().unwrap();
     assert_eq!(kept.model.cells, wide.model.cells);
     assert!(kept.warnings[0].text.starts_with(line), "{:?}", kept.warnings);
+    let lines = kept.kept_lines();
+    assert!(lines.len() == 1 && lines[0].starts_with(line) && lines[0].ends_with("that is not maximized."), "{lines:?}");
+
+    // A frame that reads again drops the line.
+    read(&mut s, 1920, 1080);
+    assert!(s.reading.as_ref().unwrap().kept_lines().is_empty());
 }
 
 /// The auto read fingerprint: the same frame matches, a changed region or
@@ -495,6 +502,8 @@ fn popup_keeps_the_last_reading() {
     assert_eq!((&after.model, after.screen, after.at), (&before.model, before.screen, before.at));
     assert_eq!(after.warnings[0].text, "A popup covers the game: showing the last reading.");
     assert_eq!(after.warnings[1..], before.warnings[..]);
+    assert_eq!(after.kept_lines(), ["A popup covers the game: showing the last reading."]);
+    assert!(before.kept_lines().is_empty());
     assert_eq!(s.ranking, ranking);
 }
 

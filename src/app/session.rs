@@ -49,6 +49,21 @@ pub struct Reading {
     pub at: SystemTime,
 }
 
+impl Reading {
+    /// The lines saying why the frames after this reading were not read
+    /// (a popup, a screen without the board, a window that is not 16:9, the
+    /// theme scroll): empty unless the reading on show is a kept one. The
+    /// next reading installed starts without them.
+    pub fn kept_lines(&self) -> Vec<&str> {
+        self.warnings.iter().filter(|w| w.cell.is_none() && kept_line(&w.text)).map(|w| w.text.as_str()).collect()
+    }
+}
+
+/// Whether a warning is a line [`Session::take_read`] puts over a kept reading.
+fn kept_line(text: &str) -> bool {
+    text == POPUP || text == OFF_BOARD || text.starts_with(THEME_READ) || text.starts_with(SHAPE)
+}
+
 /// The days left until the Riot over a run's readings. The counter only
 /// counts down, so a read equal to or lower than the last count is taken, a
 /// missing read keeps the last count, and a higher read is a misread unless
@@ -231,7 +246,7 @@ const SHAPE: &str = "The game window is ";
 /// not read.
 fn shape_line((w, h): (usize, usize)) -> Option<String> {
     let off = (w * 9).abs_diff(h * 16) * 100 > h * 16;
-    off.then(|| format!("{SHAPE}{w} x {h}, not 16:9: the board is laid out differently and can't be read. Set the game to 1920 x 1080, fullscreen or borderless."))
+    off.then(|| format!("{SHAPE}{w} x {h}, not 16:9: the board is laid out differently and can't be read. Set the game to a 16:9 size: fullscreen or borderless, or a window such as 1920 x 1080 that is not maximized."))
 }
 
 /// The fingerprint grid: 64 x 36 blocks, 30 x 30 pixels each on a 1920 x 1080 frame.
@@ -572,7 +587,7 @@ impl Session {
         });
         if let Some(line) = kept {
             if let Some(r) = &mut self.reading {
-                r.warnings.retain(|w| w.text != POPUP && w.text != OFF_BOARD && !w.text.starts_with(THEME_READ) && !w.text.starts_with(SHAPE));
+                r.warnings.retain(|w| !kept_line(&w.text));
                 r.warnings.insert(0, Warning { cell: None, kind: WarningKind::Read, text: line.clone() });
             } else {
                 self.missed = Some(match panels.screen {

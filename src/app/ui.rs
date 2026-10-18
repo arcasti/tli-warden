@@ -320,7 +320,7 @@ impl eframe::App for WardenApp {
             }
         }
         self.session.poll();
-        let warned = self.session.reading.as_ref().map_or(0, |r| r.warnings.iter().filter(|w| w.cell.is_some()).count());
+        let warned = self.session.reading.as_ref().map_or(0, |r| r.warnings.iter().filter(|w| w.cell.is_some()).count() + r.kept_lines().len());
         if self.warned == 0 && warned > 0 {
             self.tab = Tab::Board;
         }
@@ -403,7 +403,9 @@ impl WardenApp {
     }
 
     /// The ring with the pick in its courtyard and marks on the cells of the
-    /// pick, the move after it and the other good picks.
+    /// pick, the move after it and the other good picks. Over a kept reading,
+    /// the lines saying why the frames since were not read, and "last
+    /// reading" in the courtyard.
     fn board_tab(&mut self, ui: &mut egui::Ui) {
         let s = &self.session;
         if let Some(text) = &s.run_over {
@@ -444,9 +446,16 @@ impl WardenApp {
                 .filter(|&c| Some(c) != pick)
                 .collect(),
         };
+        let kept = reading.kept_lines();
+        for line in &kept {
+            ui.label(RichText::new(*line).small().color(Color32::YELLOW));
+        }
         let warned: Vec<(usize, &str)> = reading.warnings.iter().filter_map(|w| Some((w.cell?, w.text.as_str()))).collect();
         let (clicked, court) = board(ui, &reading.model, &warned, &marks);
-        let day = riot(reading.model.day, reading.days_left);
+        let mut day = riot(reading.model.day, reading.days_left);
+        if !kept.is_empty() {
+            day.push_str(" \u{b7} last reading");
+        }
         let pick = advice.as_ref().map(|a| move_name(&a.action, short(&a.label)));
         let next = then.map(|n| move_name(&n.action, short(&n.label)));
         courtyard(ui, court, &day, pick.as_deref(), next.as_deref(), s.solving);

@@ -117,6 +117,32 @@ fn session_on_t087() {
     assert_eq!(s.ranking, whole);
 }
 
+/// The player adds a missed incident marker, keeps it through a kind
+/// correction and takes it off again.
+#[test]
+fn marker_correction() {
+    let frame = common::frames().join("rec1-t087.png");
+    if !frame.is_file() {
+        println!("skipped: {} is missing", frame.display());
+        return;
+    }
+    let mut s = Session::new(20, Vec::new(), None, None);
+    s.read_in_background(load_png(&frame).unwrap());
+    s.wait();
+    let model = s.reading.clone().unwrap().model;
+    let n = model.cells.iter().position(|c| matches!(c, CellModel::Sealed { event: None })).expect("a locked cell without a marker");
+    let cell = |s: &Session| s.reading.as_ref().unwrap().model.cells[n].clone();
+    s.set_marker(n as u8 + 1, true).unwrap();
+    assert_eq!(cell(&s), CellModel::Sealed { event: Some(EventMark::Unknown) });
+    s.edit_cell(n as u8 + 1, CellEdit::Empty).unwrap();
+    assert_eq!(cell(&s), CellModel::Empty { event: Some(EventMark::Unknown) });
+    s.edit_cell(n as u8 + 1, CellEdit::Locked).unwrap();
+    assert_eq!(cell(&s), CellModel::Sealed { event: Some(EventMark::Unknown) });
+    s.set_marker(n as u8 + 1, false).unwrap();
+    assert_eq!(cell(&s), CellModel::Sealed { event: None });
+    assert!(s.set_marker(1, true).is_err(), "the Interrogation Room takes no marker");
+}
+
 /// A Then line for the advised move: the session's follow-up is the
 /// solver's for the action it advises after the solve.
 #[test]

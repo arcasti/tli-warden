@@ -2,8 +2,8 @@
 //! player's corrections and held instruments, and the ranking, which a
 //! worker thread fills in rounds so the window shows it as it firms up.
 
-use crate::board::{CellModel, Model, build_state};
-use crate::engine::data::{Beast, Gift, RAINBOW, Tool, data};
+use crate::board::{CellModel, EventMark, Model, build_state};
+use crate::engine::data::{Beast, Gift, RAINBOW, Tool, VAULT_CAP, data};
 use crate::engine::rules::treasure_picks;
 use crate::engine::text::{cell_label, tool_name};
 use crate::reader::model::{Warning, WarningKind, to_model};
@@ -138,6 +138,9 @@ fn vaulted(board: &Model, meal: Option<Meal>, chains: bool) -> Option<(Model, us
 /// shared (the Chains pick one at random) or the Chains' tiers, one roll per
 /// neighbour, can't lift it to Chromatic.
 fn chains_vaulted(board: &Model) -> Option<(Model, usize, Vec<usize>)> {
+    if board.vault.len() >= VAULT_CAP as usize {
+        return None;
+    }
     let inmate = |c: &CellModel| match *c {
         CellModel::Inmate { beast, tier, .. } => Some((tier, beast)),
         _ => None,
@@ -463,6 +466,8 @@ pub struct Session {
     /// row up to the stored one that gave it.
     steady: BTreeMap<String, usize>,
     edits: BTreeMap<u8, CellEdit>,
+    /// Per cell, an incident marker the player added (true) or removed.
+    markers: BTreeMap<u8, bool>,
     rx: Option<Receiver<Progress>>,
     /// A frame the reader is working on, off the UI thread.
     scan: Option<Receiver<Scanned>>,
@@ -508,6 +513,7 @@ impl Session {
             meal: None,
             steady: BTreeMap::new(),
             edits: BTreeMap::new(),
+            markers: BTreeMap::new(),
             rx: None,
             scan: None,
             queued: None,
@@ -731,6 +737,7 @@ impl Session {
         self.tools_changed |= held_changed;
         self.notes = notes;
         self.edits.clear();
+        self.markers.clear();
         self.rebuild();
         Taken::Installed
     }
@@ -797,16 +804,34 @@ impl Session {
 
     /// Corrects screen cell `cell` (2-16; 1 is the Interrogation Room) and re-solves.
     pub fn edit_cell(&mut self, cell: u8, edit: CellEdit) -> Result<(), String> {
+        self.check_editable(cell)?;
+        self.edits.insert(cell, edit);
+        self.log_edit(cell, format!("{edit:?}"));
+        self.rebuild();
+        Ok(())
+    }
+
+    /// Adds or removes the incident marker on screen cell `cell` (2-16) and re-solves.
+    pub fn set_marker(&mut self, cell: u8, on: bool) -> Result<(), String> {
+        self.check_editable(cell)?;
+        self.markers.insert(cell, on);
+        self.log_edit(cell, format!("Marker {}", if on { "on" } else { "off" }));
+        self.rebuild();
+        Ok(())
+    }
+
+    fn check_editable(&self, cell: u8) -> Result<(), String> {
         let count = self.reading.as_ref().ok_or("no board read yet")?.model.cells.len();
         if !(2..=count).contains(&(cell as usize)) {
             return Err(format!("cell {cell} can't be edited"));
         }
-        self.edits.insert(cell, edit);
-        if let Some(log) = &self.log {
-            log.event("edit", SystemTime::now(), json!({ "cell": cell, "edit": format!("{edit:?}") }));
-        }
-        self.rebuild();
         Ok(())
+    }
+
+    fn log_edit(&self, cell: u8, edit: String) {
+        if let Some(log) = &self.log {
+            log.event("edit", SystemTime::now(), json!({ "cell": cell, "edit": edit }));
+        }
     }
 
     /// True once after the session changed the held instruments or the theme
@@ -951,6 +976,17 @@ impl Session {
                 CellEdit::Empty => CellModel::Empty { event },
                 CellEdit::Inmate { beast, tier } => CellModel::Inmate { beast, tier, ivory: false, prey: None, event },
             };
+        }
+        // The Office and a Nest carry no marker.
+        for (&cell, &on) in &self.markers {
+            if let CellModel::Sealed { event }
+            | CellModel::Empty { event }
+            | CellModel::Inmate { event, .. }
+            | CellModel::Scouted { event, .. }
+            | CellModel::Scratch { event, .. } = &mut model.cells[cell as usize - 1]
+            {
+                *event = on.then_some(EventMark::Unknown);
+            }
         }
         Some(Reading { model, warnings, screen: panels.screen, days_left: panels.days, at: *at })
     }

@@ -659,7 +659,8 @@ impl WardenApp {
     fn edit_window(&mut self, ctx: &egui::Context) {
         let Some(cell) = self.editing else { return };
         let d = data();
-        let (mut open, mut edit) = (true, None);
+        let (mut open, mut edit, mut marker) = (true, None, None);
+        let marked = self.session.reading.as_ref().and_then(|r| r.model.cells.get(usize::from(cell) - 1)).is_some_and(|c| c.event().is_some());
         let warnings: Vec<String> = self.session.reading.iter().flat_map(|r| &r.warnings).filter(|w| w.cell == Some(usize::from(cell) - 1)).map(|w| w.text.clone()).collect();
         egui::Window::new(format!("Cell {cell:02}"))
             .open(&mut open)
@@ -676,6 +677,10 @@ impl WardenApp {
                     }
                     if ui.small_button("Empty").clicked() {
                         edit = Some(CellEdit::Empty);
+                    }
+                    let mut on = marked;
+                    if ui.checkbox(&mut on, format!("{} marker", d.incident_term)).changed() {
+                        marker = Some(on);
                     }
                 });
                 egui::Grid::new("edit-cell").spacing([2.0, 2.0]).show(ui, |ui| {
@@ -698,8 +703,13 @@ impl WardenApp {
                     }
                 });
             });
-        if let Some(edit) = edit {
-            if let Err(e) = self.session.edit_cell(cell, edit) {
+        let done = match (edit, marker) {
+            (Some(edit), _) => Some(self.session.edit_cell(cell, edit)),
+            (None, Some(on)) => Some(self.session.set_marker(cell, on)),
+            (None, None) => None,
+        };
+        if let Some(result) = done {
+            if let Err(e) = result {
                 self.error = Some(e);
             }
             self.editing = None;
@@ -856,7 +866,7 @@ fn describe(cell: &CellModel) -> String {
         CellModel::Nest { due: Some(n) } => format!("Nest, due in {n} days"),
         CellModel::Nest { due: None } => "Nest, due tomorrow".to_string(),
         CellModel::Scouted { beast: b, tier: t, event } => format!("Scouted: {} {}{}", tier(t), beast(b), marker(event)),
-        CellModel::Scratch { tier: t, event } => format!("Scratch marks: {}{}", tier(t), marker(event)),
+        CellModel::Scratch { tier: t, event } => format!("Locked, {} behind the door{}", tier(t), marker(event)),
     }
 }
 

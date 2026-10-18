@@ -51,7 +51,9 @@ fn padlock_spot(cell: u8) -> (i32, i32) {
 fn event_spot(cell: u8) -> (i32, i32) {
     let (x, y) = PORTRAIT[cell as usize - 1];
     match cell {
-        7 | 8 => (x + 80, y + 25),
+        // Cell 7's marker sits where the other cells' do (measured on a
+        // recorded frame); cell 8's has not been seen on a frame yet.
+        8 => (x + 80, y + 25),
         _ => (x + 71, y + 33),
     }
 }

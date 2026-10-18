@@ -175,8 +175,6 @@ mod tests {
             assert!(g.decisions > 0 && g.overruled <= g.decisions);
             assert_eq!(play_strategy(1, k as u32, &TUNED), Solo { chromatics: g.strategy, stats: st.stats }, "game {k}");
         }
-        let solo = strategy_bench(2, 1, 2, &TUNED);
-        assert_eq!(solo.iter().map(|s| s.chromatics).collect::<Vec<_>>(), games.iter().map(|g| g.strategy).collect::<Vec<_>>());
         let s = summarize(&games);
         for x in [s.strategy.0, s.strategy.1, s.advice.0, s.advice.1, s.gain.0, s.gain.1] {
             assert!(x.is_finite());

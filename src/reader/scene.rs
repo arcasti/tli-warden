@@ -44,10 +44,16 @@ fn padlock_spot(cell: u8) -> (i32, i32) {
     }
 }
 
-/// The Prison Incident "!" at the cell's bottom right (seen at cell 9 only).
+/// The Prison Incident "!" at the cell's bottom right: measured at cells 6,
+/// 9, 13 and 14, and at cell 8, where the right column's frame puts it
+/// further out and higher (cell 7 is assumed to match cell 8; one frame,
+/// trainingdata/reports/incident-cell8.png).
 fn event_spot(cell: u8) -> (i32, i32) {
     let (x, y) = PORTRAIT[cell as usize - 1];
-    (x + 71, y + 33)
+    match cell {
+        7 | 8 => (x + 80, y + 25),
+        _ => (x + 71, y + 33),
+    }
 }
 
 fn portrait(cell: u8) -> (i32, i32) {

@@ -103,6 +103,22 @@ fn hovered_card_reads() {
     }
 }
 
+/// trainingdata/reports/incident-cell8.png (outside s16, whose presence turns
+/// on the labeled-frame tests): a player's screenshot (1911x1072) with the
+/// Prison Incident "!" on the locked cell 8 and none on cell 7, the open
+/// Normal Rat next to it. Skips when the frame is missing.
+#[test]
+fn side_cell_incident_reads() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("trainingdata/reports/incident-cell8.png");
+    if !path.is_file() {
+        println!("skipped: {} is missing", path.display());
+        return;
+    }
+    let scene = read_scene(&load_png(&path).unwrap());
+    assert!(scene.cell(8).event, "cell 8 incident");
+    assert!(!scene.cell(7).event, "cell 7 has no incident");
+}
+
 /// rec6-t003: the run theme scroll in the lobby names Opulence; the manage
 /// board of rec6-t181 and the treasure pick of rec6-t191 name no theme.
 /// Skips when a frame is missing.

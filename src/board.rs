@@ -7,7 +7,7 @@ use crate::engine::data::{Beast, Card, Gift, RAINBOW, Tool, data};
 use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATWAY};
 use crate::engine::devour::can_eat;
 use crate::engine::rules::{new_game_with, steps_between};
-use crate::engine::state::{Cell, EventRef, Inmate, Nest, Params, Pending, Phase, PreyLink, State, ToolReason, Used, VaultEntry};
+use crate::engine::state::{Cell, EventRef, Inmate, Nest, ObjectiveState, Params, Pending, Phase, PreyLink, State, ToolReason, Used, VaultEntry};
 use crate::engine::text::cell_label;
 use crate::solver::Rng32;
 use serde::{Deserialize, Serialize};
@@ -109,6 +109,17 @@ pub struct Model {
     pub tools: Vec<Tool>,
     pub vault: Vec<Beast>,
     pub cells: Vec<CellModel>,
+    /// The run's objective, when the player has read it off the objective panel.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub objective: Option<ObjectiveModel>,
+}
+
+/// The run's objective: its data id and the progress shown on the panel.
+/// Completion follows from the data target (1 for a rating objective).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct ObjectiveModel {
+    pub id: u32,
+    pub progress: u32,
 }
 
 /// The kind of the incident in the warden's cell on the event step.
@@ -138,6 +149,7 @@ impl Model {
             tools: Vec::new(),
             vault: Vec::new(),
             cells: (0..d.cell_count).map(|n| if n == d.room { CellModel::Office } else { CellModel::Sealed { event: None } }).collect(),
+            objective: None,
         }
     }
 }
@@ -282,6 +294,10 @@ fn normalize(v: &Value) -> Model {
     m.chain_armed = truthy(o.get("chainArmed"));
     m.tools = strings(o.get("tools")).filter_map(Tool::from_key).collect();
     m.vault = o.get("vault").and_then(Value::as_array).into_iter().flatten().filter_map(|b| serde_json::from_value(b.clone()).ok()).collect();
+    m.objective = o.get("objective").and_then(Value::as_object).and_then(|g| {
+        let id = g.get("id").and_then(integer).filter(|&id| id >= 0)?;
+        Some(ObjectiveModel { id: id as u32, progress: to_int(g.get("progress"), 0).max(0) as u32 })
+    });
     m.cells = cells.iter().enumerate().map(|(n, c)| if n == d.room { CellModel::Office } else { cell_model(c) }).collect();
     m
 }
@@ -308,8 +324,18 @@ pub fn build_state(m: &Model, seed: u32) -> (State, Vec<String>) {
     let drill_days = m.max_days.clamp(5, 60) as u32;
     let mut st = new_game_with("ANALYZER", Params { drill_days, ..Params::default() });
     st.rng = (random.roll() * 4294967296.0) as u32;
-    // A screenshot shows no objective or theme; the run's own draw would add one.
+    // The objective comes from the model when the player read it; the board
+    // shows no theme, so the run's own draw would add one.
     st.objective = None;
+    if let Some(goal) = m.objective {
+        match d.objective(goal.id) {
+            Some(o) => {
+                let progress = goal.progress.min(o.target);
+                st.objective = Some(ObjectiveState { id: goal.id, progress, done: progress >= o.target });
+            }
+            None => problems.push(format!("There is no objective with id {}.", goal.id)),
+        }
+    }
     st.theme = None;
     st.day = m.day.clamp(1, i64::from(st.max_days)) as u32;
     st.next_id = 1;

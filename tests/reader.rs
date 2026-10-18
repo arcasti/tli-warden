@@ -202,6 +202,21 @@ fn theme_scroll_reads() {
     }
 }
 
+/// The objective panel: Survival of the Fittest "Completed" in
+/// trainingdata/reports/objective-completed.png (a 1911x1072 frame), and
+/// Undercurrents at 0/2 on the rec1-t123 board. Skips when a frame is missing.
+#[test]
+fn objective_panel_reads() {
+    let reports = Path::new(env!("CARGO_MANIFEST_DIR")).join("trainingdata/reports");
+    for (path, objective) in [(reports.join("objective-completed.png"), (2, 4)), (common::frames().join("rec1-t123.png"), (4, 0))] {
+        if !path.is_file() {
+            println!("skipped: {} is missing", path.display());
+            continue;
+        }
+        assert_eq!(read_panels(&load_png(&path).unwrap()).objective, Some(objective), "{}", path.display());
+    }
+}
+
 /// The Rusty Saw tooltip of rec3-t161 lies over cells 15 and 16 (16 empty, 15
 /// a Legendary Rat): both are marked covered and taken from the last board
 /// read when there is one. Skips when the frame is missing.

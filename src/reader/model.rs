@@ -5,7 +5,7 @@
 
 use super::panels::{Panels, Screen};
 use super::scene::{CELLS, Scene};
-use crate::board::{CellModel, ChoiceKind, EventMark, Model, Step};
+use crate::board::{CellModel, ChoiceKind, EventMark, Model, ObjectiveModel, Step};
 use crate::engine::data::{Beast, Tool, data};
 use crate::engine::text::{cell_label, tier_name};
 
@@ -176,6 +176,10 @@ pub fn to_model(scene: &Scene, panels: &Panels, held_tools: &[Tool], under: Opti
             }
         }
     }
+
+    // A pick, a tooltip or a dialog can hide the objective panel: the last
+    // board's objective stands until the panel reads again.
+    m.objective = panels.objective.map(|(id, progress)| ObjectiveModel { id, progress }).or(under.and_then(|b| b.objective));
 
     m.tools = held_tools.to_vec();
     if held_tools.is_empty() && panels.tool_icons {

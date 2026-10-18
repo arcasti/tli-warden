@@ -165,6 +165,8 @@ pub enum ObjectiveKind {
 #[derive(Clone, Debug)]
 pub struct Objective {
     pub id: u32,
+    /// The objective panel's title: "Objective: Undercurrents".
+    pub name: String,
     pub kind: ObjectiveKind,
     pub target: u32,
     /// The rarity reach_rating names; JS compares tiers against null as 0.
@@ -431,7 +433,7 @@ fn load(raw: &str) -> Data {
             } else {
                 (uint(&o["target"]), 0)
             };
-            Objective { id: uint(&o["Id"]), kind, target, rating, weight: uint(&o["weight"]) }
+            Objective { id: uint(&o["Id"]), name: text(&o["name"]), kind, target, rating, weight: uint(&o["weight"]) }
         })
         .collect();
 

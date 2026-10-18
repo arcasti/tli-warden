@@ -32,7 +32,7 @@ A small red jaws crown on top of a portrait (t049 cell 7) is the jaws marker: th
 - Consume target pick: whole screen tinted red, red banner "Select an Inmate to Consume" at about (960, 830), Cancel button (1720, 800). Every valid target gets big red jaws around its portrait, wherever the cursor is (rec3-t114); measured as the smallest share of saturated red (r > 150, g and b under r/2) in three bands around the portrait centre (x -58..-38 and +38..+58 at y -30..+50, x -40..+40 at y +50..+80), the targets score 0.086-0.317 and every other cell and screen 0.000. A chain shows "Chain Consume" over the eater (t073).
 - Instrument panel: heading "Torture Instrument" (80-280, 297); icons below from (122, 392), one per instrument.
 - Chromatic panel: heading at (1600-1815, 157); two columns of hexagon slots x 1690-1840, y 190-670; first slots at about (1720, 230) and (1805, 230).
-- Objective panel: x 30-380, y 135-245 ("Objective: Undercurrents / Trigger ! Prison Incident 2 times 0/2").
+- Objective panel: x 30-380, y 135-245, from y 120 when the name wraps onto two lines ("Objective: Survival of the / Fittest"). Lines: name, task, then the progress ("0/2", which OCR often glues to the task as "times0/2") or a green "Completed".
 - Instrument pick (t031-t045): "Select a Torture Instrument", three cards x 250-1180, y 140-860, Confirm (960, 960). Hovered card gets an orange frame.
 - Warden's Treasure pick (t085, t127): "Prisoner rarity reached Chromatic. Warden's Treasure obtained.", four cards x 100-1840, y 150-830, Confirm (960, 960), "View Prison Status" eye at top right.
 - Day banner (t095, t103, t135): "Day N" plaque at the board centre (x 490-1250, y 400-500), board dimmed. Day N = 20 - days until Riot.

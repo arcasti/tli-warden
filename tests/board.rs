@@ -6,11 +6,13 @@
 use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
-use warden::board::{CellModel, ChoiceKind, EventMark, Model};
+use warden::board::{CellModel, ChoiceKind, EventMark, Model, ObjectiveModel, build_state};
+use warden::engine::actions::Action;
 use warden::engine::data::{Beast, Tool, data};
+use warden::engine::devour::devour_options;
 use warden::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATWAY};
 use warden::engine::rules::steps_between;
-use warden::engine::state::{Pending, Phase, Used};
+use warden::engine::state::{ObjectiveState, Pending, Phase, ToolReason, Used};
 use warden::engine::apply;
 use warden::solver::{Rng32, TUNED, decide};
 
@@ -178,4 +180,48 @@ fn cli_solves_a_board() {
 
     assert_eq!(warden(&["solve"]).0, 1);
     assert_eq!(warden(&["solve", "tests/boards/missing.json"]).0, 1);
+}
+
+/// manage.json with `objective` set as the board JSON carries it.
+fn with_objective(objective: Value) -> Model {
+    let mut m = raw("manage.json");
+    m["objective"] = objective;
+    serde_json::from_value(m).expect("model")
+}
+
+/// An objective one consume short (Survival of the Fittest, 3 of 4) is in the
+/// state, and the consume completes it and queues the instrument pick.
+#[test]
+fn objective_in_the_model_reaches_the_state() {
+    let model = with_objective(serde_json::json!({ "id": 2, "progress": 3 }));
+    assert_eq!(model.objective, Some(ObjectiveModel { id: 2, progress: 3 }));
+    let back: Model = serde_json::from_value(serde_json::to_value(&model).unwrap()).unwrap();
+    assert_eq!(back, model);
+    let (mut st, problems) = build_state(&model, 1);
+    assert!(problems.is_empty(), "{problems:?}");
+    assert_eq!(st.objective, Some(ObjectiveState { id: 2, progress: 3, done: false }));
+    let bite = devour_options(&st, st.position).into_iter().next().expect("a consume");
+    assert!(apply(&mut st, &Action::Devour { to: bite.cell }).is_ok());
+    assert_eq!(st.objective, Some(ObjectiveState { id: 2, progress: 4, done: true }));
+    assert!(st.pending.iter().any(|p| matches!(p, Pending::Tool { reason: ToolReason::Objective, .. })), "{:?}", st.pending);
+}
+
+#[test]
+fn unknown_objective_is_a_problem() {
+    let (st, problems) = build_state(&with_objective(serde_json::json!({ "id": 99, "progress": 0 })), 1);
+    assert_eq!(st.objective, None);
+    assert_eq!(problems, vec!["There is no objective with id 99.".to_string()]);
+}
+
+#[test]
+fn board_without_objective_has_none() {
+    for objective in [Value::Null, serde_json::json!("x")] {
+        let (st, problems) = build_state(&with_objective(objective), 1);
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(st.objective, None);
+    }
+    let model: Model = serde_json::from_value(raw("manage.json")).expect("model");
+    assert_eq!(model.objective, None);
+    assert!(serde_json::to_value(&model).unwrap().get("objective").is_none());
+    assert_eq!(build_state(&model, 1).0.objective, None);
 }

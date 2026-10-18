@@ -92,6 +92,9 @@ pub struct Panels {
     pub tool_icons: bool,
     /// The theme the run theme scroll names; None on every other screen.
     pub theme: Option<u32>,
+    /// The run objective the objective panel names, as (id, progress); see
+    /// [`objective`].
+    pub objective: Option<(u32, u32)>,
 }
 
 impl Panels {
@@ -119,6 +122,9 @@ const DIALOG: (Rect, f32) = (Rect::new(560, 340, 800, 260), 1.0);
 const INCIDENT: (Rect, f32) = (Rect::new(1100, 190, 700, 70), 1.0);
 /// The title band of the run theme scroll, inside the DIALOG region.
 const THEME: (Rect, f32) = (Rect::new(660, 310, 600, 70), 1.0);
+/// The objective panel at the top left of the board: the name, the task and
+/// the progress ("0/2") or "Completed". A name on two lines starts higher.
+const OBJECTIVE: (Rect, f32) = (Rect::new(30, 110, 370, 140), 1.5);
 /// The "Return to Selection" button of View Prison Status, where a pick
 /// shows "View Prison Status".
 const STATUS: (Rect, f32) = (Rect::new(1540, 115, 300, 40), 2.0);
@@ -229,6 +235,34 @@ fn popup(dialog: &[Line], incident: &[Line]) -> bool {
 /// The theme a run theme scroll's title names.
 fn theme(title: &[Line]) -> Option<u32> {
     data().themes.iter().find(|t| has(title, &t.name, 0.75)).map(|t| t.id)
+}
+
+/// The objective the panel names, as (id, progress). The name can wrap onto
+/// two lines, so the panel's text joined also counts. "Completed" is the
+/// objective's target (1 for a rating objective). When the name reads but the
+/// progress does not, the progress is 0: the objective still steers the
+/// solve, and a later read corrects the count.
+fn objective(lines: &[Line]) -> Option<(u32, u32)> {
+    let mut sorted: Vec<&Line> = lines.iter().collect();
+    sorted.sort_by_key(|l| l.rect.y);
+    let text = squash(&joined(sorted.iter().copied()));
+    let goal = data().objectives.iter().find(|o| has(lines, &o.name, 0.75) || text.contains(&squash(&o.name)))?;
+    Some((goal.id, lines.iter().find_map(|l| progress(&l.text, goal.target)).unwrap_or(0)))
+}
+
+/// A progress line: "N/M" gives N, "Completed" gives `target`. OCR glues the
+/// count to the task ("times0/2"), so the digits next to the slash count
+/// first, then the whole word read as a number. The count after the slash is
+/// the known target, so only a count above it is refused.
+fn progress(text: &str, target: u32) -> Option<u32> {
+    if similarity(text, "Completed") >= 0.75 {
+        return Some(target);
+    }
+    let (head, _) = text.trim().rsplit_once('/')?;
+    let head = head.split_whitespace().last()?;
+    let digits = head.len() - head.trim_end_matches(|c: char| c.is_ascii_digit()).len();
+    let done = if digits > 0 { head[head.len() - digits..].parse().ok()? } else { number(head)? };
+    (done <= target).then_some(done)
 }
 
 /// One destination card's text: "Go to Cell N" or "Go to Interrogation Room".
@@ -360,6 +394,7 @@ pub fn read_panels(img: &Rgba) -> Panels {
         vault: Vec::new(),
         tool_icons: icon_score(img) >= ICON_SPREAD,
         theme: None,
+        objective: None,
     };
     let title = read(img, TITLE);
     if has(&title, "Select a Torture Instrument", 0.75) {
@@ -404,8 +439,12 @@ pub fn read_panels(img: &Rgba) -> Panels {
             p.screen = Screen::RunEnd;
         }
     }
+    let pick_or_end = matches!(p.screen, Screen::InstrumentPick | Screen::TreasurePick | Screen::RunEnd);
+    if !pick_or_end && p.screen != Screen::Theme {
+        p.objective = objective(&read(img, OBJECTIVE));
+    }
     // The riot screen shows no Chromatic Prisoner slots.
-    if !matches!(p.screen, Screen::InstrumentPick | Screen::TreasurePick | Screen::RunEnd) {
+    if !pick_or_end {
         for (k, s) in slot_scores(img).into_iter().enumerate() {
             if s < SLOT_FILLED {
                 break;
@@ -434,6 +473,17 @@ mod tests {
         assert_eq!(door("Go to Imeycogation Room"), Some(1));
         assert_eq!(door("Go to Cell 16"), Some(16));
         assert_eq!(number("O"), Some(0));
+    }
+
+    #[test]
+    fn objective_progress_parses() {
+        assert_eq!(progress("0/2", 2), Some(0));
+        assert_eq!(progress("times0/2", 2), Some(0));
+        assert_eq!(progress("O/18", 18), Some(0));
+        assert_eq!(progress("Trigger ! Prison Incident 2 times 1/2", 2), Some(1));
+        assert_eq!(progress("Completed", 4), Some(4));
+        assert_eq!(progress("Consume 4 times", 4), None);
+        assert_eq!(progress("3/2", 2), None);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Chain math (js/solver.js 113-251): the exact expected outcome of a devour,
 //! including the random chain after it.
 
-use super::{Comp, Ctx, TOP, composition, eats_table, normalize};
+use super::{Comp, Ctx, TOP, composition, eats_table, food_chain, normalize};
 use crate::engine::data::{Beast, Tool, data};
 use crate::engine::state::State;
 use std::collections::HashMap;
@@ -200,8 +200,7 @@ pub fn chain_odds(st: &State, from: usize, to: usize) -> (f64, f64) {
     let reseal = st.params.reusable_cells;
     let doors = st.sealed_cells().len() + usize::from(reseal && !target.sealed) - usize::from(!reseal && target.sealed);
     let casket = if st.has(Tool::Revenge) { data().tool(Tool::Revenge).chance / 100.0 } else { 0.0 };
-    let food = Beast::ALL.map(|b| data().food_chain[b.index()].iter().map(|f| f.index()).collect());
-    let mut odds = Odds { eats: eats_table(st), food, casket, reseal, doors, comp, memo: HashMap::new() };
+    let mut odds = Odds { eats: eats_table(st), food: food_chain(), casket, reseal, doors, comp, memo: HashMap::new() };
     let gain = if target.sealed && target.scratch { 2 + usize::from(st.params.scratch_stacks_base) } else { 1 };
     let (p, n) = odds.at_tier(TOP.min(eater.tier as usize + gain));
     (p, 1.0 + n)

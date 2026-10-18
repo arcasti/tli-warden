@@ -122,9 +122,14 @@ pub fn normalize(weights: &[f64]) -> Vec<f64> {
     weights.iter().map(|w| w.max(0.0) / total).collect()
 }
 
+/// Who each beast eats, by index, without tools.
+pub fn food_chain() -> [Vec<usize>; 4] {
+    Beast::ALL.map(|b| data().food_chain[b.index()].iter().map(|f| f.index()).collect())
+}
+
 /// Who each beast eats, by index, with the Skewered Rat Heads and the Iron Crown.
 pub fn eats_table(st: &State) -> [Vec<usize>; 4] {
-    let mut eats = Beast::ALL.map(|b| data().food_chain[b.index()].iter().map(|f| f.index()).collect::<Vec<_>>());
+    let mut eats = food_chain();
     if st.has(Tool::Skewer) {
         eats[Beast::Rat.index()].push(Beast::Rat.index());
     }

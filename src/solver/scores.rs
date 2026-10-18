@@ -1,7 +1,7 @@
 //! Valuing moves (js/solver.js 336-497): incident markers, patrol
 //! destinations, prey marks, devours, swaps and the gift picks.
 
-use super::chain::{devour_delta, swap_dist};
+use super::chain::{devour_delta, guillotine};
 use super::values::{activation, execution_value, fresh_value, stair_delta, swap_value};
 use super::{Comp, Ctx, Rng32, TOP, composition, context};
 use crate::engine::data::{RAINBOW, Tool, data};
@@ -189,11 +189,12 @@ pub fn swap_gain_here(ctx: &Ctx) -> f64 {
     let Some(inmate) = here.inmate.filter(|_| !here.sealed && st.used.swap < st.params.swaps_per_day) else {
         return f64::NEG_INFINITY;
     };
-    let mut gain = swap_value(ctx, inmate.tier as usize) - link_loss(ctx, Some(inmate), true);
+    let (comp, crowd) = composition(st, Some(st.position));
+    let mut gain = swap_value(ctx, inmate.tier as usize, &comp, crowd - 1) - link_loss(ctx, Some(inmate), true);
     // Gaoler's Execution Axe: a swap that raises the rarity opens random sealed cells.
     if st.has(Tool::Axe) {
         let doors = data().tool(Tool::Axe).count.unwrap_or(0).min(st.sealed_cells().len());
-        let rise: f64 = swap_dist(ctx).iter().skip(inmate.tier as usize + 1).sum();
+        let rise: f64 = guillotine(ctx, inmate.tier as usize, &comp, crowd - 1).0.iter().skip(inmate.tier as usize + 1).sum();
         gain += rise * doors as f64 * ctx.p.w_open * ctx.open_value;
     }
     if here.ivory {

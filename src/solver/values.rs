@@ -1,7 +1,7 @@
 //! Valuing positions (js/solver.js 255-334): chain readiness, swaps, what an
 //! inmate can do once the warden stands with it, and Executions.
 
-use super::chain::{best_meal, swap_dist};
+use super::chain::{best_meal, guillotine};
 use super::{Comp, Ctx, TOP};
 use crate::engine::data::data;
 
@@ -44,9 +44,12 @@ pub fn stair_fresh(ctx: &Ctx, dist: &[f64], comp: &mut Comp) -> f64 {
     sum
 }
 
-/// swapValue: what swapping an inmate of this tier is worth, on average.
-pub fn swap_value(ctx: &Ctx, tier: usize) -> f64 {
-    swap_dist(ctx).iter().enumerate().fold(0.0, |sum, (t, p)| sum + p * ctx.v[t]) - ctx.v[tier]
+/// swapValue: what swapping an inmate of this tier is worth, on average, with
+/// `others` other open inmates (`comp` below Rainbow) that Scapegoat's
+/// Guillotine may remove.
+pub fn swap_value(ctx: &Ctx, tier: usize, comp: &Comp, others: i64) -> f64 {
+    let (dist, loss) = guillotine(ctx, tier, comp, others);
+    dist.iter().enumerate().fold(0.0, |sum, (t, p)| sum + p * ctx.v[t]) - ctx.v[tier] - loss
 }
 
 /// activation: the inmate's best devour or a swap, whichever is worth more,
@@ -57,7 +60,7 @@ pub fn activation(ctx: &mut Ctx, tier: usize, beast: usize, comp: &mut Comp, cro
         value = value.max(best_meal(ctx, tier, beast, comp, crowd).0);
     }
     if swap_left && tier as f64 <= ctx.p.swap_max_tier {
-        value = value.max(swap_value(ctx, tier));
+        value = value.max(swap_value(ctx, tier, comp, crowd - 1));
     }
     value
 }

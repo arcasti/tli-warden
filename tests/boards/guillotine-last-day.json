@@ -1,0 +1,29 @@
+{
+  "v": 1,
+  "day": 20,
+  "maxDays": 20,
+  "step": "manage",
+  "warden": 12,
+  "devourUsed": false,
+  "swapUsed": false,
+  "tools": ["scapegoat", "rope"],
+  "vault": ["wolf", "lion"],
+  "cells": [
+    { "kind": "office" },
+    { "kind": "sealed", "event": null },
+    { "kind": "inmate", "beast": "wolf", "tier": 2 },
+    { "kind": "sealed", "event": "unknown" },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "inmate", "beast": "lion", "tier": 3 },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "inmate", "beast": "lion", "tier": 0 },
+    { "kind": "inmate", "beast": "wolf", "tier": 1 },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null }
+  ]
+}

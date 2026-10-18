@@ -20,6 +20,31 @@ pub fn swap_dist(ctx: &Ctx) -> Vec<f64> {
     normalize(&w)
 }
 
+/// guillotine: tier odds for an inmate of tier `tier` swapped out, and the
+/// expected worth of the inmates the swap removes, with `others` other open
+/// inmates on the block (those below Rainbow counted in `comp`). Scapegoat's
+/// Guillotine (engine swap): with at least min_others others, it removes count
+/// of them at random and the new inmate is sure to be rarer than the old.
+pub fn guillotine(ctx: &Ctx, tier: usize, comp: &Comp, others: i64) -> (Vec<f64>, f64) {
+    let mut dist = swap_dist(ctx);
+    let def = data().tool(Tool::Scapegoat);
+    if !ctx.st.has(Tool::Scapegoat) || others < def.min_others.unwrap_or(0) as i64 || others <= 0 {
+        return (dist, 0.0);
+    }
+    for p in dist.iter_mut().take(tier + 1) {
+        *p = 0.0;
+    }
+    if dist.iter().any(|&p| p > 0.0) {
+        dist = normalize(&dist);
+    } else {
+        dist = vec![0.0; dist.len().max(tier + 2)];
+        dist[tier + 1] = 1.0;
+    }
+    let worth = comp.iter().enumerate().fold(0.0, |sum, (i, &k)| sum + f64::from(k) * ctx.v[i / 4]);
+    let removed = (def.count.unwrap_or(0) as i64).min(others) as f64;
+    (dist, removed / others as f64 * worth)
+}
+
 /// rise: value from here on for an eater that just reached tier t; its beast
 /// re-rolls, then it chains into a random valid meal if it has one.
 pub fn rise(ctx: &mut Ctx, t: usize, comp: &mut Comp, crowd: i64) -> f64 {

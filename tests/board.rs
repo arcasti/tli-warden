@@ -261,3 +261,16 @@ fn board_without_objective_has_none() {
     assert!(serde_json::to_value(&model).unwrap().get("objective").is_none());
     assert_eq!(build_state(&model, 1).0.objective, None);
 }
+
+#[test]
+fn guillotine_on_the_last_day_keeps_the_block() {
+    // Replace with Scapegoat's Guillotine removes 2 of the 3 others, and no
+    // Chromatic can be made on the last day; with Avenger's Casket it pays.
+    let mut m = raw("guillotine-last-day.json");
+    for (tools, want) in [(serde_json::json!(["scapegoat", "rope"]), Action::End), (serde_json::json!(["revenge", "rope"]), Action::Swap)] {
+        m["tools"] = tools;
+        let model: Model = serde_json::from_value(m.clone()).expect("model");
+        let st = build_state(&model, 1).0;
+        assert_eq!(decide(&st, &TUNED, &mut Rng32::new(1)), Some(want), "{}", m["tools"]);
+    }
+}

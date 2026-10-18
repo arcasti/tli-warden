@@ -1,7 +1,7 @@
 //! The game state, shaped like the JS state (js/engine.js newGame) so that
 //! `serde_json::to_value` diffs cleanly against a JS state without its log.
 
-use super::data::{Beast, Card, Gift, Tool, data};
+use super::data::{Beast, Card, Gift, RAINBOW, Tool, VAULT_CAP, data};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -28,6 +28,10 @@ pub struct Params {
     pub start_tools: u32,
     pub objective: u32,
     pub theme: i32,
+    /// Chromatics the vault holds; once full, inmates stop at Ultimate. None
+    /// means no cap, as in the JS engine (its traces deserialize to None).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vault_cap: Option<u32>,
 }
 
 impl Default for Params {
@@ -53,6 +57,7 @@ impl Default for Params {
             start_tools: 0,
             objective: 0,
             theme: 0,
+            vault_cap: Some(VAULT_CAP),
         }
     }
 }
@@ -255,6 +260,12 @@ pub struct State {
 impl State {
     pub fn has(&self, tool: Tool) -> bool {
         self.tools.contains(&tool)
+    }
+
+    /// The highest tier an inmate can reach: Chromatic while the vault has
+    /// room, Ultimate once it is full.
+    pub fn top_tier(&self) -> i32 {
+        if self.params.vault_cap.is_none_or(|cap| self.vault.len() < cap as usize) { RAINBOW } else { RAINBOW - 1 }
     }
 
     /// Index of the cell holding inmate `id`, sealed or open (cellOf).

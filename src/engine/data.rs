@@ -9,6 +9,8 @@ const RAW: &str = include_str!("../../data/warden-data.json");
 
 /// Chromatic, the top tier; an inmate reaching it leaves for the vault.
 pub const RAINBOW: i32 = 5;
+/// The vault holds at most this many Chromatics (confirmed in-game).
+pub const VAULT_CAP: u32 = 10;
 /// Relative worth of one inmate per tier; the advisor ranks moves with it.
 pub const WORTH: [f64; 6] = [1.0, 3.0, 9.0, 27.0, 81.0, 400.0];
 

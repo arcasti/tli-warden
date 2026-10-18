@@ -127,6 +127,9 @@ fn drop_rust_only(rust: &mut Value, js: &Value) {
     if js["used"].get("hunt").is_none() {
         rust["used"].as_object_mut().unwrap().remove("hunt");
     }
+    if js["params"].get("vaultCap").is_none() {
+        rust["params"].as_object_mut().unwrap().remove("vaultCap");
+    }
     for (r, j) in rust["pending"].as_array_mut().unwrap().iter_mut().zip(js["pending"].as_array().unwrap()) {
         for key in ["reason", "picks"] {
             if j.get(key).is_none() {
@@ -156,6 +159,12 @@ fn builds_like_the_js() {
         for v in [&mut rust, &mut js_state] {
             for key in ["dice", "incidentCounts"] {
                 v.as_object_mut().unwrap().remove(key);
+            }
+        }
+        // The JS marks every "scratch" door scratched; the Rust only with Filthy Claws.
+        if !st.has(Tool::Claws) {
+            for cell in js_state["cells"].as_array_mut().unwrap() {
+                cell["scratch"] = Value::Bool(false);
             }
         }
         if let Some(diff) = first_diff("state", &normalize(rust), &normalize(js_state)) {
@@ -215,6 +224,22 @@ fn objective_in_the_model_reaches_the_state() {
     assert!(apply(&mut st, &Action::Devour { to: bite.cell }).is_ok());
     assert_eq!(st.objective, Some(ObjectiveState { id: 2, progress: 4, done: true }));
     assert!(st.pending.iter().any(|p| matches!(p, Pending::Tool { reason: ToolReason::Objective, .. })), "{:?}", st.pending);
+}
+
+/// A glowing "?" door of the eater's rarity is a Wolf's target only with
+/// Filthy Claws: without it the glow is an incident showing the rarity.
+#[test]
+fn glowing_door_is_scratched_only_with_filthy_claws() {
+    let mut model: Model = serde_json::from_value(raw("manage.json")).expect("model");
+    model.warden = 9;
+    let door = |st: &warden::engine::state::State| devour_options(st, 9).iter().any(|b| b.cell == 8 && b.scratch);
+    let (st, _) = build_state(&model, 1);
+    assert!(!st.cells[8].scratch && st.cells[8].known == 1);
+    assert!(!door(&st));
+    model.tools.push(Tool::Claws);
+    let (st, _) = build_state(&model, 1);
+    assert!(st.cells[8].scratch);
+    assert!(door(&st));
 }
 
 #[test]

@@ -6,16 +6,16 @@
 
 use serde_json::{Value, json};
 use std::time::Instant;
-use warden::engine::{Action, State, apply, new_game};
+use warden::engine::{Action, State, apply, new_game_with};
 use warden::solver::TUNED;
 use warden::solver::solve::{SolveOption, candidates, instant, solve};
 
 mod common;
-use common::{fixture, follow_js_repeat, traces};
+use common::{fixture, follow_js_repeat, no_cap, traces};
 
 /// The game `seed` replayed to `step` from its traced moves.
 fn replay(game: &Value, step: usize) -> State {
-    let mut state = new_game(game["seed"].as_str().expect("seed"));
+    let mut state = new_game_with(game["seed"].as_str().expect("seed"), no_cap());
     follow_js_repeat(&mut state, &game["start"]);
     for s in &game["steps"].as_array().expect("steps")[..step] {
         let action: Action = serde_json::from_value(s["action"].clone()).expect("action");

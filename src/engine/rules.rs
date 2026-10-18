@@ -39,7 +39,7 @@ pub fn fires(s: &mut State, tool: Tool) -> bool {
 pub fn make_inmate(s: &mut State, beast: Beast, tier: i32) -> Inmate {
     let id = s.next_id;
     s.next_id += 1;
-    Inmate { id, beast, tier: tier.clamp(0, RAINBOW) }
+    Inmate { id, beast, tier: tier.clamp(0, s.top_tier()) }
 }
 
 /// Rarity odds for whoever is behind a door. The Sorting Hook keeps out Normals.
@@ -541,5 +541,30 @@ mod tests {
         }
         s.tools.push(Tool::Whip);
         roll_many(&mut s, 2000, 2);
+    }
+
+    /// Promotes an Ultimate on a board whose vault already holds `vaulted` Chromatics.
+    fn promote_ultimate(vaulted: usize) -> State {
+        let mut s = new_game("VAULT-CAP");
+        s.pending.clear();
+        s.vault = (0..vaulted as u32).map(|id| VaultEntry { id: 1000 + id, beast: Beast::ALL[0], day: 1 }).collect();
+        s.cells[0].sealed = false;
+        let ultimate = make_inmate(&mut s, Beast::ALL[0], RAINBOW - 1);
+        s.cells[0].inmate = Some(ultimate);
+        crate::engine::tools::promote(&mut s, ultimate, 1, false);
+        s
+    }
+
+    #[test]
+    fn a_full_vault_stops_inmates_at_ultimate() {
+        let gift = |s: &State| s.pending.iter().any(|p| matches!(p, Pending::Gift { .. }));
+        let full = promote_ultimate(10);
+        assert_eq!(full.cells[0].inmate.map(|i| i.tier), Some(RAINBOW - 1));
+        assert_eq!(full.vault.len(), 10);
+        assert!(!gift(&full));
+        let room = promote_ultimate(9);
+        assert_eq!(room.cells[0].inmate, None);
+        assert_eq!(room.vault.len(), 10);
+        assert!(gift(&room));
     }
 }

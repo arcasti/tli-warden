@@ -7,6 +7,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use warden::board::{Model, build_state};
 use warden::engine::State;
+use warden::engine::state::Params;
 
 /// The saved frames, trainingdata/s16 (git-ignored).
 pub fn frames() -> PathBuf {
@@ -28,6 +29,11 @@ pub fn build(name: &str) -> (State, Vec<String>) {
 /// The recorded fixture tests/fixtures/`name`.
 pub fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join(name)
+}
+
+/// Params for replaying a JS trace: the JS engine had no vault cap.
+pub fn no_cap() -> Params {
+    Params { vault_cap: None, ..Params::default() }
 }
 
 /// Continues a replay from the traced JS state `js` where the JS rolled a repeated step and the

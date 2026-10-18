@@ -23,7 +23,7 @@ pub fn board_inmates(s: &State) -> Vec<Inmate> {
 pub fn promote(s: &mut State, who: Inmate, by: i32, reroll: bool) -> Inmate {
     let at = s.cell_of(who.id);
     let mut inmate = at.and_then(|n| s.cells[n].inmate).unwrap_or(who);
-    inmate.tier = (inmate.tier + by).clamp(0, RAINBOW);
+    inmate.tier = (inmate.tier + by).clamp(0, s.top_tier());
     if reroll && inmate.tier < RAINBOW {
         inmate.beast = Beast::ALL[pick_index(&mut s.rng, &weights(&s.params.beast_weights))];
     }

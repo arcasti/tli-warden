@@ -362,8 +362,11 @@ pub fn build_state(m: &Model, seed: u32) -> (State, Vec<String>) {
                     cell.hidden = Some(make(&mut st.next_id, *beast, *tier));
                     set_event(&mut cell, event);
                 }
+                // A "?" with a rarity glow is a Scratch mark only with Filthy
+                // Claws; an incident that shows the rarity behind doors draws
+                // the same glow on doors a Wolf can't eat through.
                 CellModel::Scratch { tier, event } => {
-                    cell.scratch = true;
+                    cell.scratch = m.tools.contains(&Tool::Claws);
                     cell.known = 1;
                     let beast = Beast::ALL[(random.roll() * 4.0).floor() as usize];
                     cell.hidden = Some(make(&mut st.next_id, beast, *tier));

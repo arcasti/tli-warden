@@ -2,10 +2,10 @@
 //! state after every move (tests/fixtures/traces.jsonl, 20 games).
 
 use serde_json::Value;
-use warden::engine::{Action, apply, new_game};
+use warden::engine::{Action, apply, new_game_with};
 
 mod common;
-use common::{first_diff, follow_js_repeat, normalize, traces};
+use common::{first_diff, follow_js_repeat, no_cap, normalize, traces};
 
 fn state_diff(state: &warden::engine::State, js: &Value) -> Option<String> {
     let rust = normalize(serde_json::to_value(state).expect("state to JSON"));
@@ -19,7 +19,7 @@ fn replays_js_traces() {
     for game in traces() {
         games += 1;
         let seed = game["seed"].as_str().expect("seed");
-        let mut state = new_game(seed);
+        let mut state = new_game_with(seed, no_cap());
         follow_js_repeat(&mut state, &game["start"]);
         if let Some(diff) = state_diff(&state, &game["start"]) {
             mismatches.push(format!("{seed} newGame: {diff}"));

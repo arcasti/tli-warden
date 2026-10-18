@@ -2,7 +2,7 @@
 //! traced move the JS strategy picked (tests/fixtures/traces.jsonl, 20 games).
 
 use warden::engine::rng::hash_seed;
-use warden::engine::{Action, apply, new_game};
+use warden::engine::{Action, apply, new_game_with};
 use warden::engine::state::State;
 use warden::solver::solve::{FollowUp, follow_up};
 use warden::solver::{Rng32, TUNED, decide};
@@ -16,7 +16,7 @@ fn decides_like_the_js() {
     for game in common::traces() {
         games += 1;
         let seed = game["seed"].as_str().expect("seed");
-        let mut state = new_game(seed);
+        let mut state = new_game_with(seed, common::no_cap());
         common::follow_js_repeat(&mut state, &game["start"]);
         let mut roll = Rng32::new(hash_seed(seed));
         let steps = game["steps"].as_array().expect("steps");

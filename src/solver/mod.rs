@@ -140,7 +140,8 @@ pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
         p,
         eats: eats_table(st),
         v,
-        r: v[RAINBOW as usize] * p.rainbow_mult,
+        // A full vault stops inmates at Ultimate: the top tier is worth no more.
+        r: if st.top_tier() < RAINBOW { v[RAINBOW as usize - 1] } else { v[RAINBOW as usize] * p.rainbow_mult },
         saw: st.has(Tool::Saw),
         muzzle: st.has(Tool::Muzzle),
         skewer: st.has(Tool::Skewer),

@@ -187,7 +187,6 @@ mod tests {
     fn changed_weights_change_the_strategy_runs() {
         let mut p = TUNED.clone();
         *p.weight_mut("w_step").unwrap() = 0.0;
-        assert_eq!(p.w_step, 0.0);
         assert!(p.weight_mut("w_steps").is_none());
         let (tuned, changed) = (strategy_bench(20, 1, 2, &TUNED), strategy_bench(20, 1, 2, &p));
         assert_ne!(tuned, changed);

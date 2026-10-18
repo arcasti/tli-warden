@@ -802,19 +802,15 @@ fn treasure_seals_the_last_meal() {
     assert!(s.problems.is_empty(), "{:?}", s.problems);
 }
 
-
 /// Saved frame `name`; a leading `~` covers its first instrument slot with
 /// noise, so the panel's read is unsure.
 fn frame(name: &str) -> Rgba {
     let Some(name) = name.strip_prefix('~') else { return load_png(&common::frames().join(name)).unwrap() };
     let mut img = load_png(&common::frames().join(name)).unwrap();
-    // The slot's 89 px icon around (122, 391) at 1918x1078.
-    let (sx, sy) = (img.w as f32 / 1918.0, img.h as f32 / 1078.0);
-    let (x0, x1) = ((77.0 * sx) as usize, (167.0 * sx) as usize);
-    let (y0, y1) = ((346.0 * sy) as usize, (436.0 * sy) as usize);
+    // The slot's 89 px icon around (122, 391); frames load at 1918x1078.
     let mut seed = 1u32;
-    for y in y0..y1 {
-        for x in x0..x1 {
+    for y in 346..436 {
+        for x in 77..167 {
             seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
             let i = (y * img.w + x) * 4;
             img.data[i..i + 3].fill((seed >> 24) as u8);

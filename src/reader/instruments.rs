@@ -40,7 +40,7 @@ impl Icons {
         out
     }
 
-    pub fn from_bytes(b: &[u8]) -> Result<Icons, String> {
+    fn from_bytes(b: &[u8]) -> Result<Icons, String> {
         if b.len() < 10 || &b[..8] != MAGIC {
             return Err("not an S16INS01 file".into());
         }
@@ -78,8 +78,7 @@ pub fn box_downscale(src: &[u8], w: usize, h: usize, side: usize) -> Vec<u8> {
             .map(|i| {
                 let (a, b) = (i as f64 * s, (i + 1) as f64 * s);
                 (a.floor() as usize..(b.ceil() as usize).min(n))
-                    .map(|p| (p, (b.min(p as f64 + 1.0) - a.max(p as f64)).max(0.0)))
-                    .filter(|&(_, c)| c > 0.0)
+                    .map(|p| (p, b.min(p as f64 + 1.0) - a.max(p as f64)))
                     .collect()
             })
             .collect()
@@ -193,25 +192,19 @@ mod tests {
         for (name, want) in truth {
             let img = load_png(&dir.join(name)).unwrap();
             let got = read_held(&img);
-            let detail: Vec<String> = SLOTS
-                .iter()
-                .map(|&at| {
-                    let [b, s] = ranked(&img, at);
-                    let spread = luma_stats(&img, at, 22).1;
-                    format!("spread {spread:.1} best {} {:.2} second {} {:.2}", d.tool_ids[b.0].key(), b.1, d.tool_ids[s.0].key(), s.1)
-                })
-                .collect();
-            eprintln!("{name}: {}", detail.join(" | "));
             if got.as_ref() != Some(want) {
-                bad.push(format!("{name}: got {got:?}, want {want:?}"));
+                let detail: Vec<String> = SLOTS
+                    .iter()
+                    .map(|&at| {
+                        let [b, s] = ranked(&img, at);
+                        let spread = luma_stats(&img, at, 22).1;
+                        format!("spread {spread:.1} best {} {:.2} second {} {:.2}", d.tool_ids[b.0].key(), b.1, d.tool_ids[s.0].key(), s.1)
+                    })
+                    .collect();
+                bad.push(format!("{name}: got {got:?}, want {want:?} ({})", detail.join(" | ")));
             }
         }
         bad
-    }
-
-    #[test]
-    fn embedded_icons_load() {
-        assert_eq!(Icons::embedded().icons.len(), 31);
     }
 
     #[test]

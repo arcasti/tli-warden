@@ -311,9 +311,8 @@ fn crown_score(img: &Rgba, cell: u8) -> f32 {
 /// glow included); the offered targets score 0.086 to 0.317.
 const TARGET_MIN: f32 = 0.04;
 
-/// The big jaws' score of a cell: see [`TARGET_MIN`]. Stops at the first
-/// band below it.
-fn target_score(img: &Rgba, cell: u8) -> f32 {
+/// Whether the big jaws surround a cell's portrait: see [`TARGET_MIN`].
+fn has_target_jaws(img: &Rgba, cell: u8) -> bool {
     let (cx, cy) = portrait(cell);
     let share = |(x0, x1): (i32, i32), (y0, y1): (i32, i32)| {
         let mut n = 0;
@@ -332,14 +331,7 @@ fn target_score(img: &Rgba, cell: u8) -> f32 {
         ((cx - 58, cx - 38), (cy - 30, cy + 50)),
         ((cx + 38, cx + 58), (cy - 30, cy + 50)),
     ];
-    let mut score = f32::MAX;
-    for (xs, ys) in bands {
-        score = score.min(share(xs, ys));
-        if score < TARGET_MIN {
-            break;
-        }
-    }
-    score
+    bands.into_iter().all(|(xs, ys)| share(xs, ys) >= TARGET_MIN)
 }
 
 /// Half the width and height of the box around a portrait that a tooltip
@@ -701,7 +693,6 @@ pub struct CellRead {
     /// The big red jaws a Consume target pick draws around each inmate the
     /// eater can consume.
     pub target: bool,
-    pub target_conf: f32,
     /// A tooltip panel covers the cell, so the reads above are of the panel.
     pub covered: bool,
 }
@@ -820,9 +811,7 @@ pub fn read_scene_with(img: &Rgba, t: &Templates) -> Scene {
                 r.inmate = Some((beast, tier));
                 let (jaws, conf) = t.crown_split.decide(crown_score(img, c));
                 (r.jaws, r.jaws_conf) = (jaws, conf);
-                let score = target_score(img, c);
-                r.target = score >= TARGET_MIN;
-                r.target_conf = ((score - TARGET_MIN).abs() / TARGET_MIN).min(1.0);
+                r.target = has_target_jaws(img, c);
             } else if r.locked {
                 r.beast_conf = r.locked_conf;
                 let (tier, conf, strength) = glow_tier(img, c, false, t);

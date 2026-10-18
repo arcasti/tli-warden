@@ -8,7 +8,7 @@ use crate::engine::rules::treasure_picks;
 use crate::engine::text::{cell_label, tool_name};
 use crate::reader::model::{Warning, WarningKind, to_model};
 use crate::reader::panels::{Panels, Screen, read_panels};
-use crate::reader::scene::{Scene, read_scene};
+use crate::reader::scene::{CELLS, Scene, read_scene};
 use crate::reader::{REF_H, REF_W, Rgba};
 use crate::solver::TUNED;
 use super::runlog::{RunLog, timestamp};
@@ -55,7 +55,7 @@ impl Reading {
     /// theme scroll): empty unless the reading on show is a kept one. The
     /// next reading installed starts without them.
     pub fn kept_lines(&self) -> Vec<&str> {
-        self.warnings.iter().filter(|w| w.cell.is_none() && kept_line(&w.text)).map(|w| w.text.as_str()).collect()
+        self.warnings.iter().filter(|w| kept_line(&w.text)).map(|w| w.text.as_str()).collect()
     }
 }
 
@@ -1042,7 +1042,7 @@ impl Session {
         let mut bites = Vec::new();
         if target {
             let jawed: Vec<usize> = self.scene.as_ref().map_or(Vec::new(), |(scene, _, _)| {
-                (2..=16).filter(|&c| scene.cell(c).target).map(|c| c as usize - 1).collect()
+                CELLS.filter(|&c| scene.cell(c).target).map(|c| c as usize - 1).collect()
             });
             let (eater, chain) = (st.position, st.pending.iter_mut().find_map(|p| match p {
                 Pending::Chain { options, .. } => Some(options),

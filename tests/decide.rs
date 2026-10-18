@@ -9,8 +9,8 @@ use serde_json::{Value, json};
 use warden::engine::data::Tool;
 use warden::engine::Action;
 use warden::engine::state::State;
-use warden::solver::TUNED;
 use warden::solver::solve::{FollowUp, follow_up};
+use warden::solver::{TUNED, bench};
 
 mod common;
 
@@ -21,6 +21,8 @@ fn decides_as_recorded() {
     let games: Vec<Value> = (0..20)
         .map(|k| {
             let (actions, st) = common::strategy_game(k, |_, _| {});
+            // The test's game loop must stay the bench's.
+            assert_eq!(bench::play_strategy(1, k, &TUNED), bench::Solo { chromatics: st.vault.len(), stats: st.stats }, "game {k}");
             json!({ "k": k, "actions": actions, "vault": st.vault.len(), "stats": st.stats })
         })
         .collect();

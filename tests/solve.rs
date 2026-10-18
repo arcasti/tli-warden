@@ -8,26 +8,13 @@
 
 use serde_json::{Value, json};
 use std::time::Instant;
-use warden::engine::{Action, State, apply, new_game_with};
+use warden::engine::State;
 use warden::solver::TUNED;
 use warden::solver::solve::{SolveOption, candidates, instant, solve};
 
 mod common;
-use common::{follow_js_repeat, no_cap, traces};
 
 const SOLVES: &str = "strategy-solves.jsonl";
-
-/// The traced JS game `seed` replayed to `step` from its traced moves.
-fn replay(game: &Value, step: usize) -> State {
-    let mut state = new_game_with(game["seed"].as_str().expect("seed"), no_cap());
-    follow_js_repeat(&mut state, &game["start"]);
-    for s in &game["steps"].as_array().expect("steps")[..step] {
-        let action: Action = serde_json::from_value(s["action"].clone()).expect("action");
-        apply(&mut state, &action);
-        follow_js_repeat(&mut state, &s["state"]);
-    }
-    state
-}
 
 /// `x` as JSON; JSON has no infinity, so a non-finite score is a string.
 fn score(x: f64) -> Value {
@@ -114,14 +101,18 @@ fn point_diff(now: &Value, was: &Value) -> Option<String> {
 #[test]
 #[ignore]
 fn solve_timing() {
-    let games = traces();
-    let game = &games[0];
-    let step = game["steps"].as_array().expect("steps").len() / 2;
-    let state = replay(game, step);
+    let step = common::strategy_game(0, |_, _| {}).0.len() / 2;
+    let mut state = None;
+    common::strategy_game(0, |i, st| {
+        if i == step {
+            state = Some(st.clone());
+        }
+    });
+    let state = state.expect("the middle decision");
     let start = Instant::now();
     let options = solve(&state, 400, 1, &TUNED);
     let wall = start.elapsed();
-    println!("{} step {step}: 400 rollouts in {:.3} s", game["seed"].as_str().expect("seed"), wall.as_secs_f64());
+    println!("game 0 step {step}: 400 rollouts in {:.3} s", wall.as_secs_f64());
     println!("candidates: {}", options.len());
     if let Some(top) = options.first() {
         println!("top: {} (mean {:.3}, se {:.3}, n {})", top.label, top.mean, top.se, top.n);

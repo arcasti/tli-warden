@@ -56,8 +56,7 @@ pub fn follow_js_repeat(state: &mut State, js: &Value) {
 /// (seeds TRACE-0001 to TRACE-0020), one JSON value per game, from
 /// tests/fixtures/traces.jsonl.
 pub fn traces() -> Vec<Value> {
-    let text = std::fs::read_to_string(fixture("traces.jsonl")).expect("traces.jsonl");
-    text.lines().filter(|l| !l.trim().is_empty()).map(|l| serde_json::from_str(l).expect("trace line")).collect()
+    recorded("traces.jsonl")
 }
 
 /// Plays game `k` of seed 1 as `bench::play_strategy` does (its strategy
@@ -95,7 +94,7 @@ pub fn record(name: &str, lines: &[Value]) {
 
 /// The lines of the recorded fixture tests/fixtures/`name`.
 pub fn recorded(name: &str) -> Vec<Value> {
-    let text = std::fs::read_to_string(fixture(name)).unwrap_or_else(|_| panic!("no {name}: record it with WARDEN_RECORD=1"));
+    let text = std::fs::read_to_string(fixture(name)).unwrap_or_else(|_| panic!("no tests/fixtures/{name}"));
     text.lines().filter(|l| !l.trim().is_empty()).map(|l| serde_json::from_str(l).expect("fixture line")).collect()
 }
 

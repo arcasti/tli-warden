@@ -456,6 +456,16 @@ impl WardenApp {
         if !kept.is_empty() {
             day.push_str(" \u{b7} last reading");
         }
+        if let Some(goal) = &reading.model.objective
+            && let Some(o) = data().objective(goal.id)
+        {
+            let name = o.name.trim_start_matches("Objective: ");
+            if goal.progress >= o.target {
+                day.push_str(&format!("\n{name} \u{b7} done"));
+            } else {
+                day.push_str(&format!("\n{name} {}/{}", goal.progress, o.target));
+            }
+        }
         let pick = advice.as_ref().map(|a| move_name(&a.action, short(&a.label)));
         let next = then.map(|n| move_name(&n.action, short(&n.label)));
         courtyard(ui, court, &day, pick.as_deref(), next.as_deref(), s.solving);

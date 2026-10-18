@@ -21,7 +21,7 @@ Unofficial. Not affiliated with or endorsed by the developers or publishers of *
 Start `warden.exe` and play. The window stays on top of the game.
 
 - Auto read (on by default) captures the game window whenever the screen changes and reads it. F8 turns it on or off and F9 reads once, but both only work while the game is not focused, because the game swallows key presses.
-- The Board tab shows the ring of cells as read, the recommended move in the middle and the move after it. Click a cell to correct a misread one.
+- The Board tab shows the ring of cells as read, the recommended move in the middle and the move after it, and under the day the run's objective with its progress ("Undercurrents 1/2"), which the advice plays toward. Click a cell to correct a misread one.
 - The Moves tab ranks every option by the mean number of Chromatic Inmates vaulted over the playouts, and lists the reader's warnings.
 - The Run tab lists the Torture Instruments you hold and the run's theme. Warden follows both from the game; set them there if a read missed one.
 

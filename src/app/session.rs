@@ -434,6 +434,11 @@ pub struct Session {
     /// The instrument advised on the instrument pick screen on show or last
     /// read: held from the next screen on, see [`Session::install`].
     advised_tool: Option<Tool>,
+    /// The instrument panel's read when the player last set the held list
+    /// (None inside: unread or unsure); None when the player has not set it.
+    /// While reads give the same panel read, the player's list stands; the
+    /// session's own changes to the list (an advised pick, a new run) clear it.
+    held_edit: Option<Option<Vec<Tool>>>,
     /// The player set the held list on the pick on show: nothing is inferred
     /// from it.
     pick_named: bool,
@@ -502,6 +507,7 @@ impl Session {
             days: DaysClock { left: days, higher: None },
             held_before_higher: 0,
             advised_tool: None,
+            held_edit: None,
             pick_named: false,
             notes: Vec::new(),
             tools_changed: false,
@@ -656,6 +662,7 @@ impl Session {
         let stale = if new_run { self.held_before_higher.min(self.tools.len()) } else { 0 };
         if stale > 0 {
             self.tools.drain(..stale);
+            self.held_edit = None;
             notes.push("A new run: the held instruments were cleared.".to_string());
             held_changed = true;
         }
@@ -673,7 +680,26 @@ impl Session {
                 && !self.tools.contains(&t)
             {
                 self.tools.push(t);
+                self.held_edit = None;
                 held_changed = true;
+            }
+        }
+        // A sure read of the instrument panel names the held list, unless the
+        // player set it while the panel read the same and the session has not
+        // changed it since.
+        if let Some(held) = &panels.held
+            && self.held_edit.as_ref() != Some(&panels.held)
+        {
+            self.held_edit = None;
+            if *held != self.tools {
+                self.tools = held.clone();
+                held_changed = true;
+                notes.push(if held.is_empty() {
+                    format!("The {} panel shows none.", data().instrument_name)
+                } else {
+                    let names: Vec<&str> = held.iter().map(|&t| data().tool_names[t as usize].as_str()).collect();
+                    format!("The {} panel shows: {}.", data().instrument_name, names.join(", "))
+                });
             }
         }
         // The board shown over an open treasure's pick: a flicker while View
@@ -853,6 +879,7 @@ impl Session {
             log.event("edit", SystemTime::now(), json!({ "tools": tool_keys(&tools) }));
         }
         self.tools = tools;
+        self.held_edit = Some(self.scene.as_ref().and_then(|(_, p, _)| p.held.clone()));
         self.notes.clear();
         if self.reading.as_ref().is_some_and(|r| r.screen == Screen::InstrumentPick) {
             self.advised_tool = None;
@@ -1162,6 +1189,7 @@ impl Session {
         self.chained = false;
         self.meal = None;
         self.advised_tool = None;
+        self.held_edit = None;
         self.pick_named = false;
         self.steady.clear();
         self.days = DaysClock::default();

@@ -26,7 +26,8 @@ fn session_on_t087() {
         println!("skipped: {} is missing", frame.display());
         return;
     }
-    let mut s = Session::new(ROLLOUTS, Vec::new(), None, None);
+    // The session starts with the list the instrument panel shows: its read adds no line.
+    let mut s = Session::new(ROLLOUTS, vec![Tool::Coin], None, None);
     s.read_in_background(load_png(&frame).unwrap());
     s.wait();
     let (model, warnings) = read_model(&frame, &[]).unwrap();
@@ -76,7 +77,7 @@ fn session_on_t087() {
     // A read of the same scene keeps the edit and the solve: no restart.
     let at = reading.at;
     assert_eq!(s.reading.as_ref().unwrap().at, at, "corrections keep the read time");
-    s.set_tools(Vec::new());
+    s.set_tools(model.tools.clone());
     s.wait();
     let (kept, rounds) = (s.ranking.clone(), s.rounds);
     s.read_in_background(load_png(&frame).unwrap());
@@ -104,9 +105,10 @@ fn session_on_t087() {
     assert!(s.scanning());
     s.wait();
     assert!(!s.scanning());
-    // The pick's advised instrument is held now; without it, the board as before.
-    assert_eq!(s.tools.len(), 1);
-    s.set_tools(Vec::new());
+    // The panel's list stands over the pick's advised instrument; setting it
+    // drops the panel's line, and the board is as before.
+    assert_eq!(s.tools, model.tools);
+    s.set_tools(model.tools.clone());
     s.wait();
     let again = s.reading.clone().unwrap();
     assert_eq!(again.model, model);
@@ -801,42 +803,72 @@ fn treasure_seals_the_last_meal() {
 }
 
 
-/// Reads `frames` in order and gives the session; None (skipped) when one is missing.
+/// Saved frame `name`; a leading `~` covers its first instrument slot with
+/// noise, so the panel's read is unsure.
+fn frame(name: &str) -> Rgba {
+    let Some(name) = name.strip_prefix('~') else { return load_png(&common::frames().join(name)).unwrap() };
+    let mut img = load_png(&common::frames().join(name)).unwrap();
+    // The slot's 89 px icon around (122, 391) at 1918x1078.
+    let (sx, sy) = (img.w as f32 / 1918.0, img.h as f32 / 1078.0);
+    let (x0, x1) = ((77.0 * sx) as usize, (167.0 * sx) as usize);
+    let (y0, y1) = ((346.0 * sy) as usize, (436.0 * sy) as usize);
+    let mut seed = 1u32;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let i = (y * img.w + x) * 4;
+            img.data[i..i + 3].fill((seed >> 24) as u8);
+        }
+    }
+    img
+}
+
+/// Reads `frames` (see [`frame`]) in order and gives the session; None
+/// (skipped) when one is missing.
 fn read_all(tools: Vec<Tool>, frames: &[&str]) -> Option<Session> {
     if !have(frames) {
         return None;
     }
-    let dir = common::frames();
     let mut s = Session::new(20, tools, None, None);
     for f in frames {
-        s.read_in_background(load_png(&dir.join(f)).unwrap());
+        s.read_in_background(frame(f));
         s.wait();
     }
     Some(s)
 }
 
-/// The instrument the session advises on the rec1-t031 pick after the
-/// rec1-t087 board with `held`, and the pick's options.
-fn advised_on_t031(held: Vec<Tool>) -> Option<(Tool, Vec<Tool>)> {
-    let s = read_all(held, &["rec1-t087.png", "rec1-t031.png"])?;
+/// The instrument the session advises on the rec1-t031 pick after `board`
+/// (rec1-t087, see [`frame`]) with `held`, and the pick's options.
+fn advised_on_t031(held: Vec<Tool>, board: &str) -> Option<(Tool, Vec<Tool>)> {
+    let s = read_all(held, &[board, "rec1-t031.png"])?;
     let r = s.reading.as_ref().unwrap();
     assert_eq!(r.screen, Screen::InstrumentPick);
     let Some(Action::Choose { id: ChoiceId::Name(key) }) = s.advice().map(|a| a.action) else { panic!("{:?}", s.advice()) };
     Some((Tool::from_key(&key).expect("an instrument"), r.model.choice.options.clone()))
 }
 
-/// The board after an instrument pick holds the advised instrument without a
-/// line about it, and the solve plays with it.
+/// A board frame's sure panel read names the held list over the instrument
+/// advised on the pick before it: rec1-t087 shows the Coin.
+#[test]
+fn panel_read_wins_over_the_advised_instrument() {
+    let Some((t, _)) = advised_on_t031(Vec::new(), "rec1-t087.png") else { return };
+    assert_ne!(t, Tool::Coin);
+    let s = read_all(Vec::new(), &["rec1-t087.png", "rec1-t031.png", "rec1-t087.png"]).unwrap();
+    assert_eq!(s.tools, vec![Tool::Coin]);
+}
+
+/// With the panel's read unsure, the board after an instrument pick holds the
+/// advised instrument without a line about it, and the solve plays with it.
 #[test]
 fn advised_instrument_is_held_after_the_pick() {
-    let Some((t, _)) = advised_on_t031(Vec::new()) else { return };
-    let mut s = read_all(Vec::new(), &["rec1-t087.png", "rec1-t031.png", "rec1-t087.png"]).unwrap();
+    let Some((t, _)) = advised_on_t031(Vec::new(), "~rec1-t087.png") else { return };
+    let mut s = read_all(Vec::new(), &["~rec1-t087.png", "rec1-t031.png", "~rec1-t087.png"]).unwrap();
     assert_eq!(s.tools, vec![t]);
     let r = s.reading.clone().unwrap();
     assert!(r.warnings.iter().all(|w| !w.text.contains("held instruments")), "{:?}", r.warnings);
     assert!(s.take_tools_changed());
     assert!(!s.take_tools_changed());
-    let held = read_all(vec![t], &["rec1-t087.png"]).unwrap();
+    let held = read_all(vec![t], &["~rec1-t087.png"]).unwrap();
     assert_eq!(r.model, held.reading.unwrap().model);
     assert_eq!(s.ranking, held.ranking);
 }
@@ -847,32 +879,37 @@ fn advised_instrument_is_held_after_the_pick() {
 /// advised instrument.
 #[test]
 fn held_advised_instrument_is_not_duplicated() {
-    let Some((t, _)) = advised_on_t031(Vec::new()) else { return };
-    let dir = common::frames();
-    if !dir.join("rec1-t059.png").is_file() {
-        println!("skipped: rec1-t059.png is missing");
-        return;
-    }
-    let mut s = read_all(Vec::new(), &["rec1-t087.png", "rec1-t031.png"]).unwrap();
-    let board = load_png(&dir.join("rec1-t087.png")).unwrap();
-    s.read_in_background(load_png(&dir.join("rec1-t059.png")).unwrap());
-    s.wait();
+    let Some((t, _)) = advised_on_t031(Vec::new(), "~rec1-t087.png") else { return };
+    let Some(mut s) = read_all(Vec::new(), &["~rec1-t087.png", "rec1-t031.png", "rec1-t059.png"]) else { return };
     assert_eq!(s.reading.as_ref().unwrap().screen, Screen::Unknown);
     s.set_tools(vec![t]);
-    s.read_in_background(board);
+    s.read_in_background(frame("~rec1-t087.png"));
     s.wait();
     assert_eq!(s.tools, vec![t]);
     assert!(!s.take_tools_changed());
 }
 
+/// A player's list stands while reads give the panel read it was set over
+/// (rec1-t087's Coin), and gives way to another (the rec2-t340 cell pick's Crown and Stake).
+#[test]
+fn set_instruments_stand_until_the_panel_changes() {
+    let Some(mut s) = read_all(Vec::new(), &["rec1-t087.png"]).filter(|_| have(&["rec2-t340.png"])) else { return };
+    s.set_tools(vec![Tool::Saw]);
+    s.read_in_background(frame("rec1-t087.png"));
+    s.wait();
+    assert_eq!(s.tools, vec![Tool::Saw]);
+    s.read_in_background(frame("rec2-t340.png"));
+    s.wait();
+    assert_eq!(s.tools, vec![Tool::Crown, Tool::Stake]);
+}
+
 /// A game dialog between the pick and the board keeps the advised instrument.
 #[test]
 fn popup_keeps_the_advised_instrument() {
-    let Some((t, _)) = advised_on_t031(Vec::new()) else { return };
-    let Some(mut s) = read_all(Vec::new(), &["rec1-t087.png", "rec1-t031.png", "rec2-t109.png"]) else { return };
+    let Some((t, _)) = advised_on_t031(Vec::new(), "~rec1-t087.png") else { return };
+    let Some(mut s) = read_all(Vec::new(), &["~rec1-t087.png", "rec1-t031.png", "rec2-t109.png"]) else { return };
     assert!(s.tools.is_empty());
-    let dir = common::frames();
-    s.read_in_background(load_png(&dir.join("rec1-t087.png")).unwrap());
+    s.read_in_background(frame("~rec1-t087.png"));
     s.wait();
     assert_eq!(s.tools, vec![t]);
 }
@@ -881,14 +918,15 @@ fn popup_keeps_the_advised_instrument() {
 /// higher read confirms the new run: the board after the rec1-t031 pick
 /// (rec1-t049, 19 days, over rec1-t087's 14) takes the advised instrument
 /// while its count waits, and reading it again clears only the old Saw.
+/// The panel's reads are unsure throughout.
 #[test]
 fn new_run_keeps_the_instrument_picked_at_its_start() {
-    let Some((t, _)) = advised_on_t031(vec![Tool::Saw]) else { return };
+    let Some((t, _)) = advised_on_t031(vec![Tool::Saw], "~rec1-t087.png") else { return };
     assert_ne!(t, Tool::Saw);
-    let Some(mut s) = read_all(vec![Tool::Saw], &["rec1-t087.png", "rec1-t031.png", "rec1-t049.png"]) else { return };
+    let Some(mut s) = read_all(vec![Tool::Saw], &["~rec1-t087.png", "rec1-t031.png", "~rec1-t049.png"]) else { return };
     assert_eq!(s.reading.as_ref().map(|r| (r.days_left, r.screen)), Some((Some(14), Screen::Patrol)), "the higher count waits");
     assert_eq!(s.tools, vec![Tool::Saw, t]);
-    s.read_in_background(load_png(&common::frames().join("rec1-t049.png")).unwrap());
+    s.read_in_background(frame("~rec1-t049.png"));
     s.wait();
     let r = s.reading.clone().unwrap();
     assert_eq!(r.days_left, Some(19));
@@ -919,27 +957,26 @@ fn saved_instruments_clear_on_a_higher_count() {
 }
 
 /// An instrument the player adds on the pick is the one taken: the next
-/// advice on that pick is not added on top.
+/// advice on that pick is not added on top (the panel's reads unsure).
 #[test]
 fn instrument_named_on_the_pick_is_kept() {
-    let Some((t, offers)) = advised_on_t031(Vec::new()) else { return };
+    let Some((t, offers)) = advised_on_t031(Vec::new(), "~rec1-t087.png") else { return };
     let other = *offers.iter().find(|&&o| o != t).expect("another offer");
-    let Some(mut s) = read_all(Vec::new(), &["rec1-t087.png", "rec1-t031.png"]) else { return };
+    let Some(mut s) = read_all(Vec::new(), &["~rec1-t087.png", "rec1-t031.png"]) else { return };
     s.set_tools(vec![other]);
     s.wait();
-    let dir = common::frames();
-    s.read_in_background(load_png(&dir.join("rec1-t087.png")).unwrap());
+    s.read_in_background(frame("~rec1-t087.png"));
     s.wait();
     assert_eq!(s.tools, vec![other]);
 }
 
-/// A higher days count read twice is a new run: the held instruments go.
+/// A higher days count read twice is a new run: the held instruments go
+/// (the panel's reads unsure).
 #[test]
 fn new_run_clears_the_held_instruments() {
-    let Some(mut s) = read_all(vec![Tool::ALL[0], Tool::ALL[1]], &["rec1-t087.png", "rec1-t071.png"]) else { return };
+    let Some(mut s) = read_all(vec![Tool::ALL[0], Tool::ALL[1]], &["~rec1-t087.png", "~rec1-t071.png"]) else { return };
     assert_eq!(s.tools.len(), 2, "a lone higher read");
-    let dir = common::frames();
-    s.read_in_background(load_png(&dir.join("rec1-t071.png")).unwrap());
+    s.read_in_background(frame("~rec1-t071.png"));
     s.wait();
     assert!(s.tools.is_empty());
     let r = s.reading.clone().unwrap();
@@ -1041,7 +1078,7 @@ fn run_log_saves_a_frame_per_board() {
 
 /// True when the saved frames hold every one of `names`; says which is missing otherwise.
 fn have(names: &[&str]) -> bool {
-    let missing = names.iter().find(|f| !common::frames().join(f).is_file());
+    let missing = names.iter().find(|f| !common::frames().join(f.trim_start_matches('~')).is_file());
     if let Some(f) = missing {
         println!("skipped: {f} is missing");
     }

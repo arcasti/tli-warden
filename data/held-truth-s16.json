@@ -1,0 +1,10 @@
+{
+  "_about": "Held Torture Instruments in the panel at the top left of the board, in slot order, for trainingdata/s16/held/*.png (board frames from the app's run logs). Keys are the engine's instrument ids.",
+  "run0921-f043.png": ["maiden", "coin"],
+  "run1406-f001.png": ["coin"],
+  "run1414-f001.png": ["longchain", "crown"],
+  "run1946-f079.png": ["maiden", "saw"],
+  "run2029-f020.png": ["chains", "dogtag"],
+  "run2029-f036.png": ["chains", "dogtag"],
+  "run2029-f070.png": ["chains", "dogtag"]
+}

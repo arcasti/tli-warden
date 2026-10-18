@@ -3,6 +3,7 @@
 //! Windows OCR engine (`ocr`, `panels`), and `model` joins them into a board
 //! model.
 
+pub mod instruments;
 pub mod model;
 pub mod ocr;
 pub mod panels;
@@ -132,8 +133,11 @@ pub fn save_png(path: &Path, img: &Rgba) -> Result<(), String> {
 }
 
 /// Reads a screenshot into a board model and the warnings to check;
-/// `held_tools` are the instruments the player holds (the panel shows only icons).
+/// `held_tools` are the instruments the player holds, or when empty those the
+/// instrument panel's icons name.
 pub fn read_model(path: &Path, held_tools: &[crate::engine::data::Tool]) -> Result<(crate::board::Model, Vec<model::Warning>), String> {
     let img = load_png(path)?;
-    Ok(model::to_model(&scene::read_scene(&img), &panels::read_panels(&img), held_tools, None))
+    let panels = panels::read_panels(&img);
+    let held = if held_tools.is_empty() { panels.held.clone().unwrap_or_default() } else { held_tools.to_vec() };
+    Ok(model::to_model(&scene::read_scene(&img), &panels, &held, None))
 }

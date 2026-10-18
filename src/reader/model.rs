@@ -182,7 +182,7 @@ pub fn to_model(scene: &Scene, panels: &Panels, held_tools: &[Tool], under: Opti
     m.objective = panels.objective.map(|(id, progress)| ObjectiveModel { id, progress }).or(under.and_then(|b| b.objective));
 
     m.tools = held_tools.to_vec();
-    if held_tools.is_empty() && panels.tool_icons {
+    if held_tools.is_empty() && panels.tool_icons && panels.held.is_none() {
         warn.push(Warning::held_tools_unknown(format!("The {} panel shows icons the reader can't name: pass them with --tools.", d.instrument_name)));
     }
     (m, warn)

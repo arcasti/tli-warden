@@ -1359,7 +1359,10 @@
     "phase": "patrol",
     "doors": [],
     "days": 15,
-    "tools": [],
+    "tools": [
+      "crown",
+      "stake"
+    ],
     "chromatic": 0,
     "screen": "board",
     "decision": [],
@@ -1411,7 +1414,10 @@
     "phase": "manage",
     "doors": [],
     "days": 14,
-    "tools": [],
+    "tools": [
+      "crown",
+      "stake"
+    ],
     "chromatic": 1,
     "screen": "board",
     "decision": [
@@ -1436,7 +1442,10 @@
     "phase": "popup",
     "doors": [],
     "days": null,
-    "tools": [],
+    "tools": [
+      "crown",
+      "stake"
+    ],
     "chromatic": 0,
     "screen": "popup",
     "decision": [],
@@ -1455,7 +1464,10 @@
     "phase": "popup",
     "doors": [],
     "days": null,
-    "tools": [],
+    "tools": [
+      "crown",
+      "stake"
+    ],
     "chromatic": 0,
     "screen": "popup",
     "decision": [],
@@ -1474,7 +1486,10 @@
     "phase": "popup",
     "doors": [],
     "days": null,
-    "tools": [],
+    "tools": [
+      "crown",
+      "stake"
+    ],
     "chromatic": 0,
     "screen": "popup",
     "decision": [],
@@ -1525,7 +1540,10 @@
       10
     ],
     "days": 7,
-    "tools": [],
+    "tools": [
+      "crown",
+      "stake"
+    ],
     "chromatic": 3,
     "screen": "board",
     "decision": [],
@@ -1565,7 +1583,10 @@
     "phase": "pick",
     "doors": [],
     "days": 1,
-    "tools": [],
+    "tools": [
+      "crown",
+      "stake"
+    ],
     "chromatic": 2,
     "screen": "cellPick",
     "decision": [],
@@ -1614,7 +1635,10 @@
     "phase": "manage",
     "doors": [],
     "days": 1,
-    "tools": [],
+    "tools": [
+      "crown",
+      "stake"
+    ],
     "chromatic": 4,
     "screen": "board",
     "decision": [
@@ -1657,7 +1681,10 @@
     "phase": "manage",
     "doors": [],
     "days": 0,
-    "tools": [],
+    "tools": [
+      "crown",
+      "stake"
+    ],
     "chromatic": 2,
     "screen": "board",
     "decision": [

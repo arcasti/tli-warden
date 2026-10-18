@@ -4,6 +4,7 @@
 //! engine from fixed regions of the 1918x1078 frame. The Chromatic Prisoner
 //! slots and the instrument icons are read from pixels.
 
+use super::instruments::read_held;
 use super::ocr::{Line, ocr};
 use super::scene::beast_at;
 use super::{Rect, Rgba};
@@ -95,6 +96,9 @@ pub struct Panels {
     /// The run objective the objective panel names, as (id, progress); see
     /// [`objective`].
     pub objective: Option<(u32, u32)>,
+    /// The instruments the panel icons name; None off the board screens or
+    /// when an icon is unsure.
+    pub held: Option<Vec<Tool>>,
 }
 
 impl Panels {
@@ -359,7 +363,7 @@ fn offers(lines: &[Line], names: &[String]) -> Vec<usize> {
     found.into_iter().map(|f| f.1).collect()
 }
 
-fn luma_stats(img: &Rgba, (cx, cy): (i32, i32), half: i32) -> (f32, f32) {
+pub(crate) fn luma_stats(img: &Rgba, (cx, cy): (i32, i32), half: i32) -> (f32, f32) {
     let mut v = Vec::with_capacity(((2 * half) * (2 * half)) as usize);
     for y in cy - half..cy + half {
         for x in cx - half..cx + half {
@@ -395,6 +399,7 @@ pub fn read_panels(img: &Rgba) -> Panels {
         tool_icons: icon_score(img) >= ICON_SPREAD,
         theme: None,
         objective: None,
+        held: None,
     };
     let title = read(img, TITLE);
     if has(&title, "Select a Torture Instrument", 0.75) {
@@ -438,6 +443,10 @@ pub fn read_panels(img: &Rgba) -> Panels {
         } else if has(&read(img, RIOT), "A Riot has broken out in Tartarus", 0.75) {
             p.screen = Screen::RunEnd;
         }
+    }
+    // The Consume target pick covers the panel.
+    if matches!(p.screen, Screen::Patrol | Screen::Manage | Screen::CellPick | Screen::Interrogation) {
+        p.held = read_held(img);
     }
     let pick_or_end = matches!(p.screen, Screen::InstrumentPick | Screen::TreasurePick | Screen::RunEnd);
     if !pick_or_end && p.screen != Screen::Theme {

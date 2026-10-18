@@ -6,6 +6,7 @@
 //!   warden-cli read <frame.png> [--tools id,id]
 //!   warden-cli capture [--frames N] <title text> <out.png>
 //!   warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T]
+//!   warden-cli bench --strategy-only [--set name=value,...] [--games N] [--seed S] [--threads T]
 //!   warden-cli --version
 
 use std::path::Path;
@@ -13,8 +14,8 @@ use std::process::ExitCode;
 use warden::board::{Model, build_state};
 use warden::engine::data::Tool;
 use warden::reader::{read_model, save_png};
-use warden::solver::TUNED;
-use warden::solver::bench::{bench, summarize};
+use warden::solver::bench::{Solo, bench, mean_se, strategy_bench, summarize};
+use warden::solver::{Params, TUNED};
 use warden::solver::solve::{FollowUp, follow_up, instant, solve};
 
 /// println! that ignores a closed pipe (`| head`) instead of aborting.
@@ -26,7 +27,7 @@ macro_rules! out {
     }};
 }
 
-const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] | warden-cli --version";
+const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] | warden-cli bench --strategy-only [--set name=value,...] [--games N] [--seed S] [--threads T] | warden-cli --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -107,22 +108,33 @@ fn run_capture(args: &[String]) -> Result<ExitCode, String> {
 }
 
 /// `bench`: Chromatics per run for the strategy alone and following the
-/// advice, on the same seeds; see `warden::solver::bench`.
+/// advice, on the same seeds; see `warden::solver::bench`. With
+/// `--strategy-only`, the strategy alone; see `run_strategy_bench`.
 fn run_bench(args: &[String]) -> Result<ExitCode, String> {
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
-    let (mut games, mut rollouts, mut seed, mut threads) = (100u32, 400usize, 1u32, threads);
+    let (mut games, mut rollouts, mut seed, mut threads) = (None, 400usize, 1u32, threads);
+    let (mut strategy_only, mut changed) = (false, None::<Params>);
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
-            "--games" => games = number("--games", it.next())?,
+            "--games" => games = Some(number("--games", it.next())?),
             "--rollouts" => rollouts = number("--rollouts", it.next())?,
             "--seed" => seed = number("--seed", it.next())?,
             "--threads" => threads = number("--threads", it.next())?,
+            "--strategy-only" => strategy_only = true,
+            "--set" => set_weights(changed.get_or_insert_with(|| TUNED.clone()), it.next())?,
             _ => return Err(format!("unexpected argument {arg}; {USAGE}")),
         }
     }
+    if changed.is_some() && !strategy_only {
+        return Err(format!("--set needs --strategy-only; {USAGE}"));
+    }
+    let games = games.unwrap_or(if strategy_only { 2000 } else { 100 });
     if games == 0 || rollouts == 0 || threads == 0 {
         return Err(format!("--games, --rollouts and --threads must be at least 1; {USAGE}"));
+    }
+    if strategy_only {
+        return Ok(run_strategy_bench(games, seed, threads, changed.as_ref()));
     }
     let clock = std::time::Instant::now();
     let s = summarize(&bench(games, rollouts, seed, threads));
@@ -133,6 +145,46 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
     out!("advice overruled the strategy at {} of {} decisions with 2+ options", s.overruled, s.decisions);
     out!("{games} games, {rollouts} playouts per option, seed {seed}, {threads} threads, {secs:.1} s");
     Ok(ExitCode::SUCCESS)
+}
+
+/// `--set name=value,...`: changes strategy weights, by `Params` field name.
+fn set_weights(p: &mut Params, value: Option<&String>) -> Result<(), String> {
+    let value = value.ok_or_else(|| format!("--set needs name=value pairs; {USAGE}"))?;
+    for pair in value.split(',').filter(|s| !s.trim().is_empty()) {
+        let (name, x) = pair.split_once('=').ok_or_else(|| format!("--set {pair}: expected name=value"))?;
+        let x: f64 = x.trim().parse().map_err(|_| format!("--set {pair}: {x} is not a number"))?;
+        *p.weight_mut(name.trim()).ok_or_else(|| format!("--set {pair}: no strategy weight {name}"))? = x;
+    }
+    Ok(())
+}
+
+/// `bench --strategy-only`: Chromatics and moves per run for the strategy on
+/// the tuned weights and, given `changed`, on those too, with the paired
+/// difference by game.
+fn run_strategy_bench(games: u32, seed: u32, threads: usize, changed: Option<&Params>) -> ExitCode {
+    let clock = std::time::Instant::now();
+    let tuned = strategy_bench(games, seed, threads, &TUNED);
+    let row = |name: &str, runs: &[Solo]| {
+        let (mean, se) = mean_se(&runs.iter().map(|r| r.chromatics as f64).collect::<Vec<_>>());
+        let per_run = |f: fn(&Solo) -> u32| runs.iter().map(|r| f64::from(f(r))).sum::<f64>() / runs.len() as f64;
+        out!(
+            "{name:<8}  {mean:.3} +- {se:.3} Chromatics per run; per run {:.2} Consumes, {:.2} chain bites, {:.2} Replaces, {:.2} doors opened",
+            per_run(|r| r.stats.devours),
+            per_run(|r| r.stats.chains),
+            per_run(|r| r.stats.swaps),
+            per_run(|r| r.stats.opened)
+        );
+    };
+    row("tuned", &tuned);
+    if let Some(p) = changed {
+        let runs = strategy_bench(games, seed, threads, p);
+        row("changed", &runs);
+        let gain = mean_se(&runs.iter().zip(&tuned).map(|(c, t)| c.chromatics as f64 - t.chromatics as f64).collect::<Vec<_>>());
+        out!("changed - tuned  {:+.3} +- {:.3} (paired)", gain.0, gain.1);
+        out!("changed weights: {p:?}");
+    }
+    out!("{games} games, seed {seed}, {threads} threads, {:.1} s", clock.elapsed().as_secs_f64());
+    ExitCode::SUCCESS
 }
 
 fn run_read(args: &[String]) -> Result<ExitCode, String> {

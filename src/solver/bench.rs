@@ -2,11 +2,13 @@
 //! app's advice (playouts at every decision, the strategy's pick unless the
 //! leader beats it by more than its paired margin) on the same seeds, so the
 //! paired difference measures what following the advice is worth.
+//! `warden-cli bench --strategy-only` plays the strategy alone, on the tuned
+//! weights or changed ones, to measure a change of weights.
 
 use super::advise::{Pick, advise};
 use super::solve::{Rollouts, playout};
-use super::{Rng32, TUNED, decide};
-use crate::engine::state::{Phase, State};
+use super::{Params, Rng32, TUNED, decide};
+use crate::engine::state::{Phase, State, Stats};
 use crate::engine::{Action, apply, new_game};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -35,9 +37,7 @@ pub struct Game {
 
 /// Plays game `k` both ways; the advice runs `rollouts` playouts per option.
 pub fn play(seed: u32, k: u32, rollouts: usize) -> Game {
-    let (mut st, mut rng) = start(seed, k);
-    playout(&mut st, &TUNED, &mut rng);
-    let strategy = st.vault.len();
+    let strategy = play_strategy(seed, k, &TUNED).chromatics;
 
     let (mut st, mut rng) = start(seed, k);
     let (mut decisions, mut overruled) = (0, 0);
@@ -72,6 +72,32 @@ pub fn play(seed: u32, k: u32, rollouts: usize) -> Game {
 
 /// Games 0..`games` of `seed` on `threads` threads, in game order.
 pub fn bench(games: u32, rollouts: usize, seed: u32, threads: usize) -> Vec<Game> {
+    each_game(games, threads, |k| play(seed, k, rollouts))
+}
+
+/// A run played by the strategy alone.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Solo {
+    /// Chromatics vaulted.
+    pub chromatics: usize,
+    pub stats: Stats,
+}
+
+/// Plays game `k` of `seed` with the strategy alone on weights `p`.
+pub fn play_strategy(seed: u32, k: u32, p: &Params) -> Solo {
+    let (mut st, mut rng) = start(seed, k);
+    playout(&mut st, p, &mut rng);
+    Solo { chromatics: st.vault.len(), stats: st.stats }
+}
+
+/// Games 0..`games` of `seed` played by the strategy alone on weights `p`,
+/// on `threads` threads, in game order.
+pub fn strategy_bench(games: u32, seed: u32, threads: usize, p: &Params) -> Vec<Solo> {
+    each_game(games, threads, |k| play_strategy(seed, k, p))
+}
+
+/// `play` on games 0..`games` on `threads` threads, in game order.
+fn each_game<T: Send>(games: u32, threads: usize, play: impl Fn(u32) -> T + Sync) -> Vec<T> {
     let next = AtomicU32::new(0);
     let done = Mutex::new(Vec::new());
     std::thread::scope(|s| {
@@ -82,7 +108,7 @@ pub fn bench(games: u32, rollouts: usize, seed: u32, threads: usize) -> Vec<Game
                     if k >= games {
                         break;
                     }
-                    let game = play(seed, k, rollouts);
+                    let game = play(k);
                     done.lock().unwrap().push((k, game));
                 }
             });
@@ -147,10 +173,24 @@ mod tests {
             assert_eq!(st.phase, Phase::Ended);
             assert_eq!(g.strategy, st.vault.len(), "game {k}");
             assert!(g.decisions > 0 && g.overruled <= g.decisions);
+            assert_eq!(play_strategy(1, k as u32, &TUNED), Solo { chromatics: g.strategy, stats: st.stats }, "game {k}");
         }
+        let solo = strategy_bench(2, 1, 2, &TUNED);
+        assert_eq!(solo.iter().map(|s| s.chromatics).collect::<Vec<_>>(), games.iter().map(|g| g.strategy).collect::<Vec<_>>());
         let s = summarize(&games);
         for x in [s.strategy.0, s.strategy.1, s.advice.0, s.advice.1, s.gain.0, s.gain.1] {
             assert!(x.is_finite());
         }
+    }
+
+    #[test]
+    fn changed_weights_change_the_strategy_runs() {
+        let mut p = TUNED.clone();
+        *p.weight_mut("w_step").unwrap() = 0.0;
+        assert_eq!(p.w_step, 0.0);
+        assert!(p.weight_mut("w_steps").is_none());
+        let (tuned, changed) = (strategy_bench(20, 1, 2, &TUNED), strategy_bench(20, 1, 2, &p));
+        assert_ne!(tuned, changed);
+        assert_eq!(changed[7], play_strategy(1, 7, &p));
     }
 }

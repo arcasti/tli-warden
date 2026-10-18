@@ -47,6 +47,27 @@ pub struct Params {
     pub swap_max_tier: f64,
 }
 
+impl Params {
+    /// The weight with field name `name` (such as `w_step`), for the
+    /// strategy bench's `--set`.
+    pub fn weight_mut(&mut self, name: &str) -> Option<&mut f64> {
+        Some(match name {
+            "tier_base" => &mut self.tier_base,
+            "rainbow_mult" => &mut self.rainbow_mult,
+            "w_open" => &mut self.w_open,
+            "w_now" => &mut self.w_now,
+            "w_walk" => &mut self.w_walk,
+            "w_step" => &mut self.w_step,
+            "w_nest" => &mut self.w_nest,
+            "w_chain" => &mut self.w_chain,
+            "w_stair" => &mut self.w_stair,
+            "min_devour" => &mut self.min_devour,
+            "swap_max_tier" => &mut self.swap_max_tier,
+            _ => return None,
+        })
+    }
+}
+
 /// The tuned weights (js/solver.js withDefaults(TUNED)), what `decide(st, null)` plays.
 pub static TUNED: Params = Params {
     tier_base: 2.75,

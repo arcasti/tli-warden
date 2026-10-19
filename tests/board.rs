@@ -14,7 +14,7 @@ use warden::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATW
 use warden::engine::rules::steps_between;
 use warden::engine::state::{ObjectiveState, Pending, Phase, ToolReason, Used};
 use warden::engine::apply;
-use warden::solver::chain::{chain_odds, devour_delta};
+use warden::solver::chain::{Meal, bite, chain_odds, devour_delta, rise};
 use warden::solver::solve::reason;
 use warden::solver::{Rng32, TUNED, decide};
 
@@ -367,4 +367,58 @@ fn the_fanged_guillotine_prices_oppress() {
     let delta = devour_delta(&mut ctx, 4, Beast::Wolf.index(), (0, Beast::Rat.index()), false, &mut comp, crowd);
     let want = -ctx.v[0] + p * ctx.r + (1.0 - p) * ctx.v[4] - ctx.v[4];
     assert!((delta - want).abs() < 1e-9, "{delta} {want}");
+}
+
+/// The value of a bite by the Rare eater of a duel on its Rare meal, as the
+/// day's first bite or a chained one, with these instruments held.
+fn duel_bite(tools: Value, eater: Beast, chained: bool) -> f64 {
+    let st = duel(tools, (eater, 2), 2);
+    let mut ctx = warden::solver::context(&st, &TUNED);
+    let (mut comp, crowd) = warden::solver::composition(&st, Some(5));
+    let meal = st.cells[9].inmate.expect("meal");
+    let i = 2 * 4 + meal.beast.index();
+    comp[i] -= 1;
+    bite(&mut ctx, 2, eater.index(), Meal { tier: 2, beast: meal.beast.index(), base: 1, chance: 1.0 }, chained, &mut comp, crowd)
+}
+
+#[test]
+fn the_barbed_collar_rolls_on_chained_bites_only() {
+    let plain = duel_bite(serde_json::json!([]), Beast::Wolf, false);
+    assert!((duel_bite(serde_json::json!(["collar"]), Beast::Wolf, false) - plain).abs() < 1e-12);
+    assert!(duel_bite(serde_json::json!(["collar"]), Beast::Wolf, true) > plain + 1e-6);
+}
+
+#[test]
+fn the_barbed_whip_raises_a_chained_bite() {
+    let plain = duel_bite(serde_json::json!([]), Beast::Wolf, true);
+    let whip = duel_bite(serde_json::json!(["whip"]), Beast::Wolf, true);
+    assert!(whip > plain + 1e-6, "{whip} {plain}");
+}
+
+#[test]
+fn the_avengers_casket_spawns_a_meal_for_the_new_form() {
+    // An Ultimate Lion on an empty block, with the Iron Crown: the Casket's
+    // counter is always eaten and lands it at Chromatic.
+    let st = duel(serde_json::json!(["revenge", "crown"]), (Beast::Lion, 4), 0);
+    let mut ctx = warden::solver::context(&st, &TUNED);
+    let c = data().tool(Tool::Revenge).chance / 100.0;
+    let value = rise(&mut ctx, 4, Beast::Lion.index(), &mut [0; 24], 1);
+    let want = c * ctx.r + (1.0 - c) * ctx.v[4];
+    assert!((value - want).abs() < 1e-9, "{value} {want}");
+}
+
+#[test]
+fn the_crowded_beastcage_counts_the_reopened_cell_with_reusable_cells() {
+    let mut st = duel(serde_json::json!(["beastcage"]), (Beast::Wolf, 2), 2);
+    let gain = |st: &warden::engine::state::State| {
+        let mut ctx = warden::solver::context(st, &TUNED);
+        let mut plain = warden::solver::context(st, &TUNED);
+        plain.beastcage = 0.0;
+        rise(&mut ctx, 3, Beast::Wolf.index(), &mut [0; 24], 1) - rise(&mut plain, 3, Beast::Wolf.index(), &mut [0; 24], 1)
+    };
+    let c = data().tool(Tool::Beastcage).chance / 100.0;
+    let open_value = warden::solver::context(&st, &TUNED).open_value;
+    assert!((gain(&st) - c * open_value).abs() < 1e-9 && gain(&st) > 0.0);
+    st.params.reusable_cells = false;
+    assert_eq!(gain(&st), 0.0);
 }

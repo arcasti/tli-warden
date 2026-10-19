@@ -151,19 +151,22 @@ fn worth(ctx: &Ctx, t: usize) -> f64 {
 
 /// rise: value from here on for an eater of beast b that just reached tier t;
 /// its beast re-rolls (kept under Cage Fight), then it chains into a random
-/// valid meal if it has one.
+/// valid meal if it has one. With the Crowded Beastcage the meal's re-sealed
+/// cell may open with a fresh door inmate (engine do_devour); only its worth
+/// is counted, not the chain it could feed.
 pub fn rise(ctx: &mut Ctx, t: usize, b: usize, comp: &mut Comp, crowd: i64) -> f64 {
+    let cage = ctx.beastcage * ctx.open_value;
     if t >= TOP {
-        return ctx.r;
+        return ctx.r + cage;
     }
     if ctx.cage_fight {
-        return land(ctx, t, b, comp, crowd);
+        return cage + land(ctx, t, b, comp, crowd);
     }
     let mut sum = 0.0;
     for b in 0..4 {
         sum += land(ctx, t, b, comp, crowd);
     }
-    sum / 4.0
+    cage + sum / 4.0
 }
 
 /// land: value from here on for an eater of beast b settled at tier t.
@@ -171,15 +174,18 @@ fn land(ctx: &mut Ctx, t: usize, b: usize, comp: &mut Comp, crowd: i64) -> f64 {
     if !ctx.revenge {
         return feed(ctx, t, b, comp, crowd);
     }
-    // Avenger's Casket: 30% of the time a meal for the new form appears.
-    let foods = ctx.eats[b].clone();
+    // Avenger's Casket: with its chance a door opens with a plain counter of
+    // the new form at its tier (engine do_devour), whatever the tools widen.
+    let casket = data().tool(Tool::Revenge).chance / 100.0;
+    let n = ctx.chain[b].len();
     let mut spawned = 0.0;
-    for &f in &foods {
+    for i in 0..n {
+        let f = ctx.chain[b][i];
         comp[t * 4 + f] += 1;
         spawned += ctx.v[t] + feed(ctx, t, b, comp, crowd + 1);
         comp[t * 4 + f] -= 1;
     }
-    (0.3 * spawned) / foods.len() as f64 + 0.7 * feed(ctx, t, b, comp, crowd)
+    casket * spawned / n as f64 + (1.0 - casket) * feed(ctx, t, b, comp, crowd)
 }
 
 /// The memo key of feed: tier, beast, the exact crowd under the Muzzle (its
@@ -216,7 +222,7 @@ pub fn feed(ctx: &mut Ctx, t: usize, b: usize, comp: &mut Comp, crowd: i64) -> f
             let i = m.tier * 4 + m.beast;
             let k = comp[i];
             comp[i] -= 1;
-            sum += f64::from(k) * bite(ctx, t, b, m, comp, crowd);
+            sum += f64::from(k) * bite(ctx, t, b, m, true, comp, crowd);
             comp[i] += 1;
         }
         out = sum / f64::from(total);
@@ -226,9 +232,10 @@ pub fn feed(ctx: &mut Ctx, t: usize, b: usize, comp: &mut Comp, crowd: i64) -> f
 }
 
 /// bite: one bite by an eater at tier t; the meal is gone and the eater rises
-/// (engine do_devour). A failed Oppress roll adds nothing, Saw included, and
-/// the eater stays at tier t.
-pub fn bite(ctx: &mut Ctx, t: usize, b: usize, meal: Meal, comp: &mut Comp, crowd: i64) -> f64 {
+/// (engine do_devour). `chained` marks a bite after the day's first, which
+/// the Barbed Collar rolls on. A failed Oppress roll adds nothing, the rolled
+/// tiers included, and the eater stays at tier t.
+pub fn bite(ctx: &mut Ctx, t: usize, b: usize, meal: Meal, chained: bool, comp: &mut Comp, crowd: i64) -> f64 {
     let mut gain = meal.base;
     if ctx.muzzle && crowd <= data().tool(Tool::Muzzle).max_inmates.unwrap_or(0) as i64 {
         gain += tiers(Tool::Muzzle);
@@ -240,8 +247,11 @@ pub fn bite(ctx: &mut Ctx, t: usize, b: usize, meal: Meal, comp: &mut Comp, crow
         gain += tiers(Tool::Crown);
     }
     let mut after = |ctx: &mut Ctx, g: usize| rise(ctx, TOP.min(t + g), b, comp, crowd - 1);
-    let saw = data().tool(Tool::Saw).chance / 100.0;
-    let won = if ctx.saw { (1.0 - saw) * after(ctx, gain) + saw * after(ctx, gain + 1) } else { after(ctx, gain) };
+    let extra = ctx.extra[usize::from(chained)];
+    let mut won = 0.0;
+    for (k, &p) in extra.iter().enumerate().filter(|&(_, &p)| p > 0.0) {
+        won += p * after(ctx, gain + k);
+    }
     let rest = if meal.chance < 1.0 { meal.chance * won + (1.0 - meal.chance) * after(ctx, 0) } else { won };
     -worth(ctx, meal.tier) + rest
 }
@@ -261,7 +271,7 @@ pub fn devour_delta(ctx: &mut Ctx, tier: usize, beast: usize, meal: (usize, usiz
     if !scratch {
         comp[i] -= 1;
     }
-    let value = bite(ctx, tier, beast, terms, comp, crowd) - ctx.v[tier];
+    let value = bite(ctx, tier, beast, terms, false, comp, crowd) - ctx.v[tier];
     if !scratch {
         comp[i] += 1;
     }

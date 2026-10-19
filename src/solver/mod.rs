@@ -180,11 +180,17 @@ pub struct Ctx<'a> {
     pub chain: [Vec<usize>; 4],
     pub v: [f64; 6],
     pub r: f64,
-    pub saw: bool,
+    /// The odds of each count of extra tiers a successful bite rolls (Rusty
+    /// Saw, Barbed Whip, and the Barbed Collar on chained bites), by whether
+    /// the bite is chained.
+    pub extra: [[f64; 4]; 2],
     pub muzzle: bool,
     pub skewer: bool,
     pub crown: bool,
     pub revenge: bool,
+    /// Crowded Beastcage's chance that a meal's cell opens again after a bite;
+    /// 0 without it or without reusable cells (the cell stays unsealed then).
+    pub beastcage: f64,
     /// Elephant-Foot Maul: a Mammoth eats higher countered inmates.
     pub maul: bool,
     /// Fanged Guillotine: a Wolf eats lower countered inmates, with Oppress.
@@ -227,11 +233,12 @@ pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
         v,
         // A full vault stops inmates at Ultimate: the top tier is worth no more.
         r: if st.top_tier() < RAINBOW { v[RAINBOW as usize - 1] } else { v[RAINBOW as usize] * p.rainbow_mult },
-        saw: st.has(Tool::Saw),
+        extra: [false, true].map(|chained| extra_tiers(st, chained)),
         muzzle: st.has(Tool::Muzzle),
         skewer: st.has(Tool::Skewer),
         crown: st.has(Tool::Crown),
         revenge: st.has(Tool::Revenge) && st.cells.iter().any(|c| c.sealed),
+        beastcage: if st.has(Tool::Beastcage) && st.params.reusable_cells { data().tool(Tool::Beastcage).chance / 100.0 } else { 0.0 },
         maul: st.has(Tool::Maul),
         fangs: st.has(Tool::Guillotine),
         cage_fight,
@@ -240,6 +247,27 @@ pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
         open_value,
         memo: HashMap::default(),
     }
+}
+
+/// The odds of 0 to 3 extra tiers on a successful bite (engine do_devour):
+/// the held Saw, Whip and, on a chained bite, Collar each roll on their own.
+fn extra_tiers(st: &State, chained: bool) -> [f64; 4] {
+    let mut odds = [1.0, 0.0, 0.0, 0.0];
+    for t in [Tool::Saw, Tool::Whip, Tool::Collar] {
+        if !st.has(t) || (t == Tool::Collar && !chained) {
+            continue;
+        }
+        let def = data().tool(t);
+        let (p, k) = (def.chance / 100.0, def.tiers.unwrap_or(0) as usize);
+        let mut next = [0.0; 4];
+        for (i, &q) in odds.iter().enumerate() {
+            next[i] += (1.0 - p) * q;
+            // Each adds one tier in the data, so three at most.
+            next[(i + k).min(3)] += p * q;
+        }
+        odds = next;
+    }
+    odds
 }
 
 /// decide: the move the strategy would play now, or None once the run is over.

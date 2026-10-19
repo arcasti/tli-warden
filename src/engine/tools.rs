@@ -235,7 +235,8 @@ pub fn shackles(s: &mut State, steps: usize) {
     }
 }
 
-/// Warden's Scales: the best inmate behind the locked doors is shown.
+/// Warden's Scales: the rarity of the best inmate behind the locked doors is
+/// shown, not its species (confirmed in-game).
 pub fn scout(s: &mut State) {
     let doors: Vec<usize> = s.cells.iter().filter(|c| c.sealed && c.nest.is_none()).map(|c| c.n).collect();
     if doors.is_empty() {
@@ -245,5 +246,5 @@ pub fn scout(s: &mut State) {
     let top = tiers.iter().copied().max().unwrap_or(0);
     let best: Vec<usize> = doors.iter().zip(&tiers).filter(|(_, t)| **t == top).map(|(&n, _)| n).collect();
     let n = best[pick_one(&mut s.rng, best.len())];
-    s.cells[n].known = 2;
+    s.cells[n].known = 1;
 }

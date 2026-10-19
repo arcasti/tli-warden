@@ -45,12 +45,6 @@ pub fn incident_score(ctx: &Ctx, c: &Cell, comp: &Comp) -> f64 {
     }
 }
 
-/// Whether the marker on `c` is priced by playing its incident on a copy:
-/// a known one other than the two `incident_score` prices.
-fn played(c: &Cell, id: u32) -> bool {
-    c.event_known != Some(false) && id != EXECUTION_EFFICIENCY && id != CHAIN_REACTION
-}
-
 /// Incidents whose effect rolls no dice, played once.
 const SURE_INCIDENTS: [u32; 4] = [213, 231, 232, SEWER_RATWAY];
 
@@ -70,36 +64,19 @@ fn landed(st: &State, n: usize, seed: u32) -> State {
     trial
 }
 
-/// The mean board gain, by tiers `(v, r)`, of the incident `id` that waits on
-/// cell `n`, over the landing that fires it.
-fn event_worth(st: &State, n: usize, id: u32, &(v, r): &([f64; 6], f64)) -> f64 {
-    let samples = if SURE_INCIDENTS.contains(&id) { 1 } else { 3 };
+/// The mean board gain, by tiers `(v, r)`, of `action` on a copy landed on
+/// cell `n` over `samples` samples: a marker's incident (`Action::Event`) or
+/// the Interrogation Room's Bestow. Instigate's marker adds no board value.
+fn landing_gain(st: &State, n: usize, action: &Action, samples: u32, &(v, r): &([f64; 6], f64)) -> f64 {
     let mut gain = 0.0;
     for k in 0..samples {
         let mut trial = landed(st, n, sample_seed(st, n, k));
         let before = board_value(&trial, &v, r);
-        if apply(&mut trial, &Action::Event).is_ok() {
+        if apply(&mut trial, action).is_ok() {
             gain += board_value(&trial, &v, r) - before;
         }
     }
     gain / f64::from(samples)
-}
-
-/// The Interrogation Room's worth: Bestow's mean board gain, by tiers
-/// `(v, r)`, over the landing there. Instigate's marker adds no board value
-/// (pricing it as a share of its incident's worth benched lower).
-fn room_worth(st: &State, &(v, r): &([f64; 6], f64)) -> f64 {
-    let room = data().room;
-    let bestow = Action::Choose { id: ChoiceId::Name(Card::Bestow.key().to_string()) };
-    let mut gain = 0.0;
-    for k in 0..3 {
-        let mut trial = landed(st, room, sample_seed(st, room, k));
-        let before = board_value(&trial, &v, r);
-        if apply(&mut trial, &bestow).is_ok() {
-            gain += board_value(&trial, &v, r) - before;
-        }
-    }
-    gain / 3.0
 }
 
 /// The `why` of incidentScore: what waits on the marker, if there is one.
@@ -172,10 +149,13 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
         let mut score = p.w_step * steps as f64;
         // Landing on a marker fires its incident, which can't be declined.
         score += incident_score(ctx, c, &board);
-        if let Some(id) = c.event.filter(|&id| played(c, id)) {
-            score += p.w_event * event_worth(st, n, id, &tiers);
+        // Any other known marker, and the Interrogation Room, are played on a copy.
+        if let Some(id) = c.event.filter(|&id| c.event_known != Some(false) && id != EXECUTION_EFFICIENCY && id != CHAIN_REACTION) {
+            let samples = if SURE_INCIDENTS.contains(&id) { 1 } else { 3 };
+            score += p.w_event * landing_gain(st, n, &Action::Event, samples, &tiers);
         } else if n == data().room {
-            score += p.w_event * room_worth(st, &tiers);
+            let bestow = Action::Choose { id: ChoiceId::Name(Card::Bestow.key().to_string()) };
+            score += p.w_event * landing_gain(st, n, &bestow, 3, &tiers);
         }
         // The sealed doors left after this landing's own openings.
         let (mut left, mut left_worth) = held.as_ref().map_or((0, 0.0), |h| (h.sealed, h.side));

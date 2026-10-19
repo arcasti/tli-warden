@@ -255,7 +255,7 @@ impl<'a> Rollouts<'a> {
         }
         let seeds: Vec<u32> = (0..rounds).map(|_| (self.random.roll() * 4294967296.0) as u32).collect();
         let threads = threads.clamp(1, rounds.max(1));
-        let results: Vec<Vec<(f64, Option<f64>)>> = if threads == 1 {
+        let results: Vec<Vec<(f64, f64)>> = if threads == 1 {
             seeds.iter().map(|&seed| self.round(seed)).collect()
         } else {
             let (this, priority) = (&*self, priority());
@@ -275,9 +275,7 @@ impl<'a> Rollouts<'a> {
         for round in results {
             for (k, (val, best)) in round.into_iter().enumerate() {
                 self.vals[k].push(val);
-                if let Some(best) = best {
-                    self.best[k] += best;
-                }
+                self.best[k] += best;
             }
             self.rounds += 1;
         }
@@ -285,20 +283,20 @@ impl<'a> Rollouts<'a> {
     }
 
     /// One round on `seed`: per candidate, Rainbows vaulted (NaN when the
-    /// move does not apply) and the best rarity reached.
-    fn round(&self, seed: u32) -> Vec<(f64, Option<f64>)> {
+    /// move does not apply) and the best rarity reached (0 then).
+    fn round(&self, seed: u32) -> Vec<(f64, f64)> {
         self.list
             .iter()
             .map(|c| {
                 let mut trial = self.base.clone();
                 hide_future(&mut trial, seed);
                 if !apply(&mut trial, &c.action).is_ok() {
-                    return (f64::NAN, None);
+                    return (f64::NAN, 0.0);
                 }
                 playout(&mut trial, self.p, &mut Rng32::new(seed ^ 0x9e3779b9));
                 // Second measure: the best rarity reached.
                 let top = trial.cells.iter().filter_map(|c| c.inmate.filter(|_| !c.sealed)).map(|i| i.tier).max().unwrap_or(0);
-                (trial.vault.len() as f64, Some(f64::from(top.max(if trial.vault.is_empty() { 0 } else { RAINBOW }).max(0))))
+                (trial.vault.len() as f64, f64::from(top.max(if trial.vault.is_empty() { 0 } else { RAINBOW }).max(0)))
             })
             .collect()
     }

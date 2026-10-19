@@ -2,7 +2,7 @@
 //! including the random chain after it.
 
 use super::{Comp, Ctx, TOP, composition, eats_table, food_chain, normalize};
-use crate::engine::data::{Beast, Tool, data};
+use crate::engine::data::{Beast, RAINBOW, Tool, data};
 use crate::engine::state::State;
 use std::collections::HashMap;
 
@@ -20,29 +20,94 @@ pub fn swap_dist(ctx: &Ctx) -> Vec<f64> {
     normalize(&w)
 }
 
-/// guillotine: tier odds for an inmate of tier `tier` swapped out, and the
-/// expected worth of the inmates the swap removes, with `others` other open
-/// inmates on the block (those below Rainbow counted in `comp`). Scapegoat's
-/// Guillotine (engine swap): with at least min_others others, it removes count
-/// of them at random and the new inmate is sure to be rarer than the old.
-pub fn guillotine(ctx: &Ctx, tier: usize, comp: &Comp, others: i64) -> (Vec<f64>, f64) {
+/// replaceOdds: tier odds (Normal to Rainbow) for the inmate a Replace brings
+/// in for one of tier `tier`, after every instrument that changes its rarity
+/// (engine swap), and the expected worth of the inmates the Replace removes,
+/// with `others` other open inmates on the block (those below Rainbow counted
+/// in `comp`).
+/// - Hangman's Noose: no Normal or Magic roll (`swap_dist`).
+/// - Scapegoat's Guillotine: with at least min_others others, it removes count
+///   of them at random and the new inmate is sure to be rarer than the old.
+/// - Burning Stake: replacing an inmate below Legendary, a roll below
+///   Legendary becomes Legendary at the data chance.
+/// - Severed Iron Maiden: a new inmate on the block with as many rarer open
+///   inmates as less rare ones rises its tiers.
+pub fn replace_odds(ctx: &Ctx, tier: usize, comp: &Comp, others: i64) -> (Vec<f64>, f64) {
+    let st = ctx.st;
+    let top = st.top_tier() as usize;
     let mut dist = swap_dist(ctx);
+    dist.resize(TOP + 1, 0.0);
     let def = data().tool(Tool::Scapegoat);
-    if !ctx.st.has(Tool::Scapegoat) || others < def.min_others.unwrap_or(0) as i64 || others <= 0 {
-        return (dist, 0.0);
-    }
-    for p in dist.iter_mut().take(tier + 1) {
-        *p = 0.0;
-    }
-    if dist.iter().any(|&p| p > 0.0) {
-        dist = normalize(&dist);
+    let removed = if st.has(Tool::Scapegoat) && others >= def.min_others.unwrap_or(0) as i64 && others > 0 {
+        (def.count.unwrap_or(0) as i64).min(others)
     } else {
-        dist = vec![0.0; dist.len().max(tier + 2)];
-        dist[tier + 1] = 1.0;
+        0
+    };
+    let mut loss = 0.0;
+    if removed > 0 {
+        for p in dist.iter_mut().take(tier + 1) {
+            *p = 0.0;
+        }
+        if dist.iter().any(|&p| p > 0.0) {
+            dist = normalize(&dist);
+        } else {
+            // Nothing rarer left to roll: the engine makes one a tier up.
+            dist = vec![0.0; TOP + 1];
+            dist[(tier + 1).min(top)] = 1.0;
+        }
+        let worth = comp.iter().enumerate().fold(0.0, |sum, (i, &k)| sum + f64::from(k) * ctx.v[i / 4]);
+        loss = removed as f64 / others as f64 * worth;
     }
-    let worth = comp.iter().enumerate().fold(0.0, |sum, (i, &k)| sum + f64::from(k) * ctx.v[i / 4]);
-    let removed = (def.count.unwrap_or(0) as i64).min(others) as f64;
-    (dist, removed / others as f64 * worth)
+    let stake = data().tool(Tool::Stake);
+    let legendary = stake.tier.unwrap_or(RAINBOW) as usize;
+    if st.has(Tool::Stake) && tier < legendary {
+        let c = stake.chance / 100.0;
+        let below: f64 = dist[..legendary].iter().sum();
+        for p in &mut dist[..legendary] {
+            *p *= 1.0 - c;
+        }
+        dist[legendary] += c * below;
+    }
+    if st.has(Tool::Maiden) {
+        // Open inmates by tier; the Guillotine's removals come first, so the
+        // Maiden's odds at each tier average over the removed inmates.
+        let mut counts = [0i64; TOP + 1];
+        for (i, &k) in comp.iter().enumerate() {
+            counts[i / 4] += i64::from(k);
+        }
+        let n: i64 = counts.iter().sum();
+        let k = removed.min(n);
+        let to = |t: usize| (t + tiers(Tool::Maiden)).min(top);
+        for t in 0..TOP {
+            let mass = dist[t];
+            if mass == 0.0 || to(t) == t {
+                continue;
+            }
+            let above: i64 = counts[t + 1..].iter().sum();
+            let below: i64 = counts[..t].iter().sum();
+            let level = n - above - below;
+            let mut fire = 0.0;
+            for a in 0..=k {
+                for b in 0..=k - a {
+                    if above - a == below - b {
+                        fire += choose(above, a) * choose(below, b) * choose(level, k - a - b);
+                    }
+                }
+            }
+            let moved = mass * fire / choose(n, k);
+            dist[t] -= moved;
+            dist[to(t)] += moved;
+        }
+    }
+    (dist, loss)
+}
+
+/// n choose k, 0 when k is out of range.
+fn choose(n: i64, k: i64) -> f64 {
+    if k < 0 || k > n {
+        return 0.0;
+    }
+    (0..k).fold(1.0, |c, i| c * (n - i) as f64 / (i + 1) as f64)
 }
 
 /// coinOfFate: the expected worth of Kin's Coin of Fate for the open inmates

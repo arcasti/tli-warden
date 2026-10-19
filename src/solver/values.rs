@@ -1,7 +1,7 @@
 //! Valuing positions (js/solver.js 255-334): chain readiness, swaps, what an
 //! inmate can do once the warden stands with it, and Executions.
 
-use super::chain::{best_meal, fed, guillotine};
+use super::chain::{best_meal, fed, replace_odds};
 use super::{Comp, Ctx, TOP};
 use crate::engine::data::data;
 
@@ -48,8 +48,8 @@ pub fn stair_fresh(ctx: &Ctx, dist: &[f64], comp: &mut Comp) -> f64 {
 /// `others` other open inmates (`comp` below Rainbow) that Scapegoat's
 /// Guillotine may remove.
 pub fn swap_value(ctx: &Ctx, tier: usize, comp: &Comp, others: i64) -> f64 {
-    let (dist, loss) = guillotine(ctx, tier, comp, others);
-    dist.iter().enumerate().fold(0.0, |sum, (t, p)| sum + p * ctx.v[t]) - ctx.v[tier] - loss
+    let (dist, loss) = replace_odds(ctx, tier, comp, others);
+    dist.iter().enumerate().fold(0.0, |sum, (t, p)| sum + p * if t >= TOP { ctx.r } else { ctx.v[t] }) - ctx.v[tier] - loss
 }
 
 /// activation: the inmate's best devour or a swap, whichever is worth more,
@@ -65,15 +65,19 @@ pub fn activation(ctx: &mut Ctx, tier: usize, beast: usize, comp: &mut Comp, cro
     value
 }
 
-/// freshActivation: what a brand-new inmate (tier odds `dist`) could do today.
-pub fn fresh_activation(ctx: &mut Ctx, dist: &[f64], comp: &mut Comp, crowd: i64, swap_left: bool) -> f64 {
+/// freshActivation: what a brand-new inmate (tier odds `dist`) could do today,
+/// of beast `beast` when it is known (the Iron Pestle keeps the replaced
+/// inmate's), else any of the 4 at even odds.
+pub fn fresh_activation(ctx: &mut Ctx, dist: &[f64], beast: Option<usize>, comp: &mut Comp, crowd: i64, swap_left: bool) -> f64 {
+    let beasts = beast.map_or(0..4, |b| b..b + 1);
+    let share = 1.0 / beasts.len() as f64;
     let mut sum = 0.0;
     for (t, &p) in dist.iter().enumerate() {
         if p == 0.0 {
             continue;
         }
-        for b in 0..4 {
-            sum += (p / 4.0) * activation(ctx, t, b, comp, crowd, swap_left);
+        for b in beasts.clone() {
+            sum += p * share * activation(ctx, t, b, comp, crowd, swap_left);
         }
     }
     sum
@@ -83,7 +87,7 @@ pub fn fresh_activation(ctx: &mut Ctx, dist: &[f64], comp: &mut Comp, crowd: i64
 /// do today from the warden's cell.
 pub fn fresh_value(ctx: &mut Ctx, dist: &[f64], comp: &mut Comp, crowd: i64, swap_left: bool) -> f64 {
     let worth = dist.iter().enumerate().fold(0.0, |sum, (t, p)| sum + p * ctx.v[t]);
-    ctx.p.w_open * worth + ctx.p.w_now * fresh_activation(ctx, dist, comp, crowd, swap_left) + stair_fresh(ctx, dist, comp)
+    ctx.p.w_open * worth + ctx.p.w_now * fresh_activation(ctx, dist, None, comp, crowd, swap_left) + stair_fresh(ctx, dist, comp)
 }
 
 /// executionValue: an Execution by an inmate of this tier and beast.

@@ -14,7 +14,9 @@ use warden::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATW
 use warden::engine::rules::steps_between;
 use warden::engine::state::{ObjectiveState, Pending, Phase, ToolReason, Used};
 use warden::engine::apply;
-use warden::solver::chain::{Meal, bite, chain_odds, devour_delta, rise};
+use warden::solver::chain::{Meal, bite, chain_odds, devour_delta, replace_odds, rise};
+use warden::solver::scores::swap_gain_here;
+use warden::solver::values::swap_value;
 use warden::solver::solve::reason;
 use warden::solver::{Rng32, TUNED, decide};
 
@@ -421,4 +423,62 @@ fn the_crowded_beastcage_counts_the_reopened_cell_with_reusable_cells() {
     assert!((gain(&st) - c * open_value).abs() < 1e-9 && gain(&st) > 0.0);
     st.params.reusable_cells = false;
     assert_eq!(gain(&st), 0.0);
+}
+
+/// The guillotine-last-day board (a Rare Wolf in 02, a Legendary Lion in 08,
+/// a Normal Lion in 11, the warden in 12) with the warden's inmate and these
+/// open inmates set as (cell, tier), and these instruments held.
+fn replace_board(tools: Value, warden_tier: i32, set: &[(usize, i32)]) -> warden::engine::state::State {
+    let mut m = raw("guillotine-last-day.json");
+    m["tools"] = tools;
+    m["cells"][12] = serde_json::json!({"kind": "inmate", "beast": "wolf", "tier": warden_tier});
+    for &(n, tier) in set {
+        m["cells"][n]["tier"] = serde_json::json!(tier);
+    }
+    let model: Model = serde_json::from_value(m).expect("model");
+    build_state(&model, 1).0
+}
+
+/// The tier odds of a Replace in the warden's cell, and its value.
+fn replace(st: &warden::engine::state::State) -> (Vec<f64>, f64) {
+    let ctx = warden::solver::context(st, &TUNED);
+    let (comp, crowd) = warden::solver::composition(st, Some(12));
+    let tier = st.cells[12].inmate.expect("inmate").tier as usize;
+    let dist = replace_odds(&ctx, tier, &comp, crowd - 1).0;
+    (dist, swap_value(&ctx, tier, &comp, crowd - 1))
+}
+
+#[test]
+fn the_burning_stake_moves_low_rolls_to_legendary() {
+    let (plain, _) = replace(&replace_board(serde_json::json!([]), 0, &[]));
+    let (stake, _) = replace(&replace_board(serde_json::json!(["stake"]), 0, &[]));
+    let c = data().tool(Tool::Stake).chance / 100.0;
+    assert!((c - 0.4).abs() < 1e-12);
+    let low: f64 = plain[..3].iter().sum();
+    assert!((stake[3] - (plain[3] + c * low)).abs() < 1e-12, "{stake:?}");
+    assert!((stake.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+}
+
+#[test]
+fn the_severed_iron_maiden_lifts_a_rare_among_rares() {
+    // Every other open inmate is Rare: a Rare roll has none above and none
+    // below, so it rises 3 tiers to Chromatic.
+    let rares = [(2, 2), (8, 2), (11, 2)];
+    let (plain, plain_value) = replace(&replace_board(serde_json::json!([]), 1, &rares));
+    let (maiden, maiden_value) = replace(&replace_board(serde_json::json!(["maiden"]), 1, &rares));
+    assert_eq!(maiden[2], 0.0);
+    assert!((maiden[5] - plain[2]).abs() < 1e-12, "{maiden:?}");
+    assert!(maiden_value > plain_value + 1e-6, "{maiden_value} {plain_value}");
+}
+
+#[test]
+fn the_execution_axe_counts_the_burning_stake() {
+    // The Axe's part of a Replace's gain grows with the Stake's Legendaries.
+    let gain = |tools: Value| {
+        let st = replace_board(tools, 0, &[]);
+        swap_gain_here(&warden::solver::context(&st, &TUNED))
+    };
+    let axe = gain(serde_json::json!(["axe"])) - gain(serde_json::json!([]));
+    let axe_with_stake = gain(serde_json::json!(["axe", "stake"])) - gain(serde_json::json!(["stake"]));
+    assert!(axe > 0.0 && axe_with_stake > axe + 1e-6, "{axe_with_stake} {axe}");
 }

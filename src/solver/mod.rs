@@ -14,7 +14,7 @@ use crate::engine::devour::{can_devour_now, devour_options, start_options};
 use crate::engine::rng::rand;
 use crate::engine::state::{Pending, Phase, State};
 use crate::engine::{Action, ChoiceId};
-use chain::guillotine;
+use chain::replace_odds;
 use scores::{best_by_board, devour_scores, hunt_gain, patrol_scores, swap_gain_here};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
@@ -325,8 +325,11 @@ pub fn decide(st: &State, p: &Params, roll: &mut Rng32) -> Option<Action> {
             // inmate may still devour today.
             if swap_gain > f64::NEG_INFINITY {
                 let (mut comp, crowd) = composition(st, Some(st.position));
-                let dist = guillotine(&ctx, st.cells[st.position].inmate.map_or(0, |i| i.tier as usize), &comp, crowd - 1).0;
-                let swap_first = swap_gain + p.w_now * fresh_activation(&mut ctx, &dist, &mut comp, crowd, false);
+                let old = st.cells[st.position].inmate;
+                let dist = replace_odds(&ctx, old.map_or(0, |i| i.tier as usize), &comp, crowd - 1).0;
+                // Iron Pestle: the new inmate keeps the old one's beast.
+                let beast = old.filter(|_| st.has(Tool::Pestle)).map(|i| i.beast.index());
+                let swap_first = swap_gain + p.w_now * fresh_activation(&mut ctx, &dist, beast, &mut comp, crowd, false);
                 if swap_first > best {
                     return Some(Action::Swap);
                 }

@@ -15,7 +15,7 @@ use warden::engine::rules::steps_between;
 use warden::engine::state::{ObjectiveState, Pending, Phase, ToolReason, Used};
 use warden::engine::apply;
 use warden::solver::chain::{Meal, bite, chain_odds, devour_delta, replace_odds, rise};
-use warden::solver::scores::swap_gain_here;
+use warden::solver::scores::{patrol_scores, swap_gain_here};
 use warden::solver::values::swap_value;
 use warden::solver::solve::reason;
 use warden::solver::{Rng32, TUNED, decide};
@@ -244,6 +244,25 @@ fn glowing_door_is_scratched_only_with_filthy_claws() {
     let (st, _) = build_state(&model, 1);
     assert!(st.cells[8].scratch);
     assert!(door(&st));
+}
+
+/// Landing on a scratched door gives up the bite of an open Wolf of its
+/// rarity, so the landing scores lower; with no such Wolf the scratch costs nothing.
+#[test]
+fn opening_a_scratched_door_gives_up_the_wolf_bite() {
+    let score = |beast: Beast, claws: bool| {
+        let mut model: Model = serde_json::from_value(raw("manage.json")).expect("model");
+        model.cells[9] = CellModel::Inmate { beast, tier: 0, ivory: false, prey: None, event: None };
+        if claws {
+            model.tools.push(Tool::Claws);
+        }
+        let (st, _) = build_state(&model, 1);
+        assert_eq!(st.cells[8].scratch, claws);
+        let mut ctx = warden::solver::context(&st, &TUNED);
+        patrol_scores(&mut ctx, &[8])[0].1
+    };
+    assert!(score(Beast::Wolf, true) < score(Beast::Wolf, false));
+    assert_eq!(score(Beast::Rat, true), score(Beast::Rat, false));
 }
 
 #[test]

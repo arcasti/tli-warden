@@ -1,10 +1,10 @@
 //! Valuing moves (js/solver.js 336-497): incident markers, patrol
 //! destinations, prey marks, devours, swaps and the gift picks.
 
-use super::chain::{coin_of_fate, devour_delta, replace_odds};
+use super::chain::{best_meal, coin_of_fate, devour_delta, replace_odds};
 use super::values::{activation, execution_value, fresh_value, stair_delta, swap_value};
 use super::{Comp, Ctx, Rng32, TOP, beasts, composition, context, dist_worth, door_dist, seen_door, worth};
-use crate::engine::data::{RAINBOW, Tool, data};
+use crate::engine::data::{Beast, RAINBOW, Tool, data};
 use crate::engine::devour::{Bite, devour_options, hunt_targets, sure_gain};
 use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY};
 use crate::engine::rules::{clockwise_path, steps_between};
@@ -87,13 +87,15 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
     // The door in cell c, by whether its opening sets off the "after opening"
     // instruments; an unseen door is valued once per kind of opening.
     let mut fresh: [Option<f64>; 2] = [None; 2];
+    // The scratch bite each cell's opening gives up.
+    let loss: Vec<f64> = st.cells.iter().map(|c| scratch_loss(ctx, c)).collect();
     let mut door_now = |ctx: &mut Ctx, board: &mut Comp, c: &Cell, after: bool| {
         let seen = seen_door(c);
         if let (false, Some(value)) = (seen, fresh[usize::from(after)]) {
             return value;
         }
         let (dist, beast) = door_dist(st, Some(c), after);
-        let value = fresh_value(ctx, &dist, beast, board, crowd + 1, swap_left);
+        let value = fresh_value(ctx, &dist, beast, board, crowd + 1, swap_left) - p.w_open * loss[c.n];
         if !seen {
             fresh[usize::from(after)] = Some(value);
         }
@@ -104,7 +106,7 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
         let i = cell.inmate.expect("inmate");
         activation(ctx, i.tier as usize, i.beast.index(), &mut comp, crowd, swap_left)
     };
-    let held = HELD_TERMS.iter().any(|&t| st.has(t)).then(|| Held::of(ctx));
+    let held = HELD_TERMS.iter().any(|&t| st.has(t)).then(|| Held::of(ctx, &loss));
     let mut out = Vec::with_capacity(cells.len());
     for &n in cells {
         let c = &st.cells[n];
@@ -116,7 +118,7 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
         let (mut left, mut left_worth) = held.as_ref().map_or((0, 0.0), |h| (h.sealed, h.side));
         if held.is_some() && c.sealed && !st.chain {
             left -= 1;
-            left_worth -= side_worth(ctx, c);
+            left_worth -= side_worth(ctx, c, &loss);
         }
         if st.chain {
             // Chain Reaction opens every door on the walk from the side.
@@ -125,12 +127,12 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
                 let d = &st.cells[k];
                 if held.is_some() {
                     left -= 1;
-                    left_worth -= side_worth(ctx, d);
+                    left_worth -= side_worth(ctx, d, &loss);
                 }
                 if k == n {
                     continue;
                 }
-                opened += side_worth(ctx, d);
+                opened += side_worth(ctx, d, &loss);
             }
             let here = if c.sealed {
                 door_now(ctx, &mut board, c, false)
@@ -170,28 +172,58 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
 const HELD_TERMS: [Tool; 6] = [Tool::Keys, Tool::Forgedkey, Tool::Fire, Tool::Blacklist, Tool::Shortchain, Tool::Longchain];
 
 /// The board before a patrol, as the held instruments see it: the sealed
-/// doors and their worth opened from the side, and the open inmates' tiers.
+/// doors and their worth opened from the side, the open inmates' tiers, and
+/// the scratch bite each cell's opening gives up.
 struct Held {
     sealed: usize,
     side: f64,
     board: Vec<usize>,
+    loss: Vec<f64>,
 }
 
 impl Held {
-    fn of(ctx: &Ctx) -> Held {
+    fn of(ctx: &Ctx, loss: &[f64]) -> Held {
         let st = ctx.st;
         let doors = st.cells.iter().filter(|c| c.sealed);
         Held {
             sealed: doors.clone().count(),
-            side: doors.map(|c| side_worth(ctx, c)).sum(),
+            side: doors.map(|c| side_worth(ctx, c, loss)).sum(),
             board: st.cells.iter().filter(|c| c.on_board()).filter_map(|c| c.inmate).map(|i| i.tier as usize).collect(),
+            loss: loss.to_vec(),
         }
     }
 }
 
-/// The worth of sealed cell `c` opened from the side (no "after opening" instrument).
-fn side_worth(ctx: &Ctx, c: &Cell) -> f64 {
-    if seen_door(c) { dist_worth(&ctx.v, ctx.r, &door_dist(ctx.st, Some(c), false).0) } else { ctx.side_value }
+/// The worth of sealed cell `c` opened from the side (no "after opening"
+/// instrument), less the scratch bite its opening gives up (`loss` by cell).
+fn side_worth(ctx: &Ctx, c: &Cell, loss: &[f64]) -> f64 {
+    let worth = if seen_door(c) { dist_worth(&ctx.v, ctx.r, &door_dist(ctx.st, Some(c), false).0) } else { ctx.side_value };
+    worth - loss[c.n]
+}
+
+/// The scratch bite given up by opening sealed cell `c`. With an open Wolf of
+/// the door's tier: half the most it gains biting the door over its best
+/// other meal (it may not get its turn first). Without one: the share of the
+/// open inmates that are lower Wolves, times 3, times the scratch rise.
+fn scratch_loss(ctx: &mut Ctx, c: &Cell) -> f64 {
+    let Some(h) = c.hidden.filter(|h| c.sealed && c.scratch && h.tier < RAINBOW) else { return 0.0 };
+    let st = ctx.st;
+    let (t, wolf) = (h.tier as usize, Beast::Wolf.index());
+    let open = || st.cells.iter().filter(|w| w.on_board()).filter_map(|w| w.inmate.map(|i| (w.n, i)));
+    let wolves: Vec<usize> = open().filter(|(_, i)| i.beast == Beast::Wolf && i.tier == h.tier).map(|(n, _)| n).collect();
+    if wolves.is_empty() {
+        let lower = open().filter(|(_, i)| i.beast == Beast::Wolf && i.tier < h.tier).count();
+        let share = lower as f64 / open().count().max(1) as f64;
+        return 3.0 * share * rise_worth(ctx, t, 1 + ctx.scratch_extra as i32);
+    }
+    let mut loss = 0.0f64;
+    for n in wolves {
+        let (mut comp, crowd) = composition(st, Some(n));
+        let bite = devour_delta(ctx, t, wolf, (t, wolf), true, &mut comp, crowd);
+        let other = best_meal(ctx, t, wolf, &mut comp, crowd).0.max(0.0);
+        loss = loss.max(0.5 * (bite - other));
+    }
+    loss
 }
 
 /// What `by` tiers more are worth to an inmate of tier `t`; a Chromatic is
@@ -242,7 +274,7 @@ fn held_terms(ctx: &Ctx, h: &Held, n: usize, steps: usize, opened: Option<&[f64]
                 .into_iter()
                 .map(|k| &st.cells[k % cells])
                 .filter(|c| c.sealed && c.n != d.room)
-                .map(|c| side_worth(ctx, c))
+                .map(|c| side_worth(ctx, c, &h.loss))
                 .sum();
             gain += chance(Tool::Keys) * w_open * sides;
         }

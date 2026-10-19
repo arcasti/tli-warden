@@ -257,9 +257,8 @@ pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
 /// has seen it (engine door_inmate). A seen door holds its known rarity (even
 /// a Normal under the Sorting Hook); an unseen one rolls `door_weights`, with
 /// no Normal under the Hook. On a patrol or instrument opening (`after`),
-/// Felon's Dog Tag may raise the inmate. A scratched door still prices as
-/// unseen: opening it gives up a Wolf's scratch bite, which nothing here
-/// prices, and pricing only its known rarity lost Chromatics with the Claws.
+/// Felon's Dog Tag may raise the inmate. A scratched door prices at its known
+/// rarity; the scratch bite its opening gives up is charged by `scratch_loss`.
 pub fn door_dist(st: &State, cell: Option<&Cell>, after: bool) -> (Vec<f64>, Option<usize>) {
     let seen = cell.filter(|c| seen_door(c)).and_then(|c| c.hidden.map(|h| (h, c.known)));
     let mut dist = match seen {
@@ -286,7 +285,7 @@ pub fn door_dist(st: &State, cell: Option<&Cell>, after: bool) -> (Vec<f64>, Opt
 
 /// Whether `door_dist` prices sealed cell `c` by what the player saw behind it.
 pub fn seen_door(c: &Cell) -> bool {
-    c.known > 0 && c.hidden.is_some() && !c.scratch
+    c.known > 0 && c.hidden.is_some()
 }
 
 /// The worth of an inmate of tier t; a Chromatic is worth `r`.

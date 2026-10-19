@@ -8,6 +8,8 @@
 use super::advise::{Pick, advise};
 use super::solve::{Rollouts, playout};
 use super::{Params, Rng32, TUNED, decide};
+use crate::engine::actions::take_tool;
+use crate::engine::data::Tool;
 use crate::engine::state::{Phase, State, Stats};
 use crate::engine::{Action, apply, new_game};
 use std::sync::Mutex;
@@ -17,9 +19,14 @@ use std::sync::atomic::{AtomicU32, Ordering};
 const GUARD: u32 = 2000;
 
 /// Game `k` of `seed` with the strategy's dice for it, as
-/// the JS strategy simulator's newDrill and playGames start one (rewards on).
-pub fn start(seed: u32, k: u32) -> (State, Rng32) {
-    (new_game(&format!("{seed}-{k}")), Rng32::new(k.wrapping_mul(2654435761).wrapping_add(7)))
+/// the JS strategy simulator's newDrill and playGames start one (rewards on),
+/// holding `held` as if picked before the first move.
+pub fn start(seed: u32, k: u32, held: &[Tool]) -> (State, Rng32) {
+    let mut st = new_game(&format!("{seed}-{k}"));
+    for &tool in held {
+        take_tool(&mut st, tool);
+    }
+    (st, Rng32::new(k.wrapping_mul(2654435761).wrapping_add(7)))
 }
 
 /// One seed played by both players.
@@ -37,9 +44,9 @@ pub struct Game {
 
 /// Plays game `k` both ways; the advice runs `rollouts` playouts per option.
 pub fn play(seed: u32, k: u32, rollouts: usize) -> Game {
-    let strategy = play_strategy(seed, k, &TUNED).chromatics;
+    let strategy = play_strategy(seed, k, &[], &TUNED).chromatics;
 
-    let (mut st, mut rng) = start(seed, k);
+    let (mut st, mut rng) = start(seed, k, &[]);
     let (mut decisions, mut overruled) = (0, 0);
     for step in 0..GUARD {
         if st.phase == Phase::Ended {
@@ -83,17 +90,17 @@ pub struct Solo {
     pub stats: Stats,
 }
 
-/// Plays game `k` of `seed` with the strategy alone on weights `p`.
-pub fn play_strategy(seed: u32, k: u32, p: &Params) -> Solo {
-    let (mut st, mut rng) = start(seed, k);
+/// Plays game `k` of `seed` with the strategy alone on weights `p`, holding `held`.
+pub fn play_strategy(seed: u32, k: u32, held: &[Tool], p: &Params) -> Solo {
+    let (mut st, mut rng) = start(seed, k, held);
     playout(&mut st, p, &mut rng);
     Solo { chromatics: st.vault.len(), stats: st.stats }
 }
 
 /// Games 0..`games` of `seed` played by the strategy alone on weights `p`,
-/// on `threads` threads, in game order.
-pub fn strategy_bench(games: u32, seed: u32, threads: usize, p: &Params) -> Vec<Solo> {
-    each_game(games, threads, |k| play_strategy(seed, k, p))
+/// holding `held`, on `threads` threads, in game order.
+pub fn strategy_bench(games: u32, seed: u32, threads: usize, held: &[Tool], p: &Params) -> Vec<Solo> {
+    each_game(games, threads, |k| play_strategy(seed, k, held, p))
 }
 
 /// `play` on games 0..`games` on `threads` threads, in game order.
@@ -163,7 +170,7 @@ mod tests {
         let games = bench(2, 20, 1, 2);
         assert_eq!(games.len(), 2);
         for (k, g) in games.iter().enumerate() {
-            let (mut st, mut rng) = start(1, k as u32);
+            let (mut st, mut rng) = start(1, k as u32, &[]);
             for _ in 0..GUARD {
                 let Some(action) = decide(&st, &TUNED, &mut rng) else { break };
                 if !apply(&mut st, &action).is_ok() && !(action != Action::End && apply(&mut st, &Action::End).is_ok()) {
@@ -173,7 +180,7 @@ mod tests {
             assert_eq!(st.phase, Phase::Ended);
             assert_eq!(g.strategy, st.vault.len(), "game {k}");
             assert!(g.decisions > 0 && g.overruled <= g.decisions);
-            assert_eq!(play_strategy(1, k as u32, &TUNED), Solo { chromatics: g.strategy, stats: st.stats }, "game {k}");
+            assert_eq!(play_strategy(1, k as u32, &[], &TUNED), Solo { chromatics: g.strategy, stats: st.stats }, "game {k}");
         }
         let s = summarize(&games);
         for x in [s.strategy.0, s.strategy.1, s.advice.0, s.advice.1, s.gain.0, s.gain.1] {
@@ -186,8 +193,18 @@ mod tests {
         let mut p = TUNED.clone();
         *p.weight_mut("w_step").unwrap() = 0.0;
         assert!(p.weight_mut("w_steps").is_none());
-        let (tuned, changed) = (strategy_bench(20, 1, 2, &TUNED), strategy_bench(20, 1, 2, &p));
+        let (tuned, changed) = (strategy_bench(20, 1, 2, &[], &TUNED), strategy_bench(20, 1, 2, &[], &p));
         assert_ne!(tuned, changed);
-        assert_eq!(changed[7], play_strategy(1, 7, &p));
+        assert_eq!(changed[7], play_strategy(1, 7, &[], &p));
+    }
+
+    #[test]
+    fn held_instruments_start_in_the_tools() {
+        let (plain, _) = start(1, 3, &[]);
+        assert_eq!(plain.tools, new_game("1-3").tools);
+        let (held, _) = start(1, 3, &[Tool::Whip]);
+        assert!(held.has(Tool::Whip) && !plain.has(Tool::Whip));
+        // The Whip's "-1 destination" drops a die as on a pick.
+        assert_eq!(held.dice.len(), (plain.dice.len() - 1).max(1));
     }
 }

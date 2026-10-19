@@ -6,7 +6,7 @@
 //!   warden-cli read <frame.png> [--tools id,id]
 //!   warden-cli capture [--frames N] <title text> <out.png>
 //!   warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T]
-//!   warden-cli bench --strategy-only [--set name=value,...] [--games N] [--seed S] [--threads T]
+//!   warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--save file] [--against file] [--games N] [--seed S] [--threads T]
 //!   warden-cli --version
 
 use std::path::Path;
@@ -27,7 +27,7 @@ macro_rules! out {
     }};
 }
 
-const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] | warden-cli bench --strategy-only [--set name=value,...] [--games N] [--seed S] [--threads T] | warden-cli --version";
+const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] | warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--save file] [--against file] [--games N] [--seed S] [--threads T] | warden-cli --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -114,6 +114,7 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     let (mut games, mut rollouts, mut seed, mut threads) = (None, 400usize, 1u32, threads);
     let (mut strategy_only, mut changed) = (false, None::<Params>);
+    let (mut held, mut save, mut against) = (Vec::new(), None::<&String>, None::<&String>);
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -123,18 +124,21 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
             "--threads" => threads = number("--threads", it.next())?,
             "--strategy-only" => strategy_only = true,
             "--set" => set_weights(changed.get_or_insert_with(|| TUNED.clone()), it.next())?,
+            "--hold" => held = tools(it.next())?,
+            "--save" => save = Some(it.next().ok_or_else(|| format!("--save needs a file; {USAGE}"))?),
+            "--against" => against = Some(it.next().ok_or_else(|| format!("--against needs a file; {USAGE}"))?),
             _ => return Err(format!("unexpected argument {arg}; {USAGE}")),
         }
     }
-    if changed.is_some() && !strategy_only {
-        return Err(format!("--set needs --strategy-only; {USAGE}"));
+    if !strategy_only && (changed.is_some() || !held.is_empty() || save.is_some() || against.is_some()) {
+        return Err(format!("--set, --hold, --save and --against need --strategy-only; {USAGE}"));
     }
     let games = games.unwrap_or(if strategy_only { 2000 } else { 100 });
     if games == 0 || rollouts == 0 || threads == 0 {
         return Err(format!("--games, --rollouts and --threads must be at least 1; {USAGE}"));
     }
     if strategy_only {
-        return Ok(run_strategy_bench(games, seed, threads, changed.as_ref()));
+        return run_strategy_bench(games, seed, threads, &held, changed.as_ref(), save, against);
     }
     let clock = std::time::Instant::now();
     let s = summarize(&bench(games, rollouts, seed, threads));
@@ -160,10 +164,35 @@ fn set_weights(p: &mut Params, value: Option<&String>) -> Result<(), String> {
 
 /// `bench --strategy-only`: Chromatics and moves per run for the strategy on
 /// the tuned weights and, given `changed`, on those too, with the paired
-/// difference by game.
-fn run_strategy_bench(games: u32, seed: u32, threads: usize, changed: Option<&Params>) -> ExitCode {
+/// difference by game. Every game starts holding `held`. `save` writes the
+/// tuned Chromatics per game, one per line, and `against` reads such a file
+/// from another build and prints the paired difference to it.
+fn run_strategy_bench(
+    games: u32,
+    seed: u32,
+    threads: usize,
+    held: &[Tool],
+    changed: Option<&Params>,
+    save: Option<&String>,
+    against: Option<&String>,
+) -> Result<ExitCode, String> {
+    let saved = match against {
+        None => None,
+        Some(file) => {
+            let text = std::fs::read_to_string(file).map_err(|e| format!("--against {file}: {e}"))?;
+            let runs = text
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| l.trim().parse::<usize>().map_err(|_| format!("--against {file}: {l} is not a Chromatics count")))
+                .collect::<Result<Vec<_>, _>>()?;
+            if runs.len() != games as usize {
+                return Err(format!("--against {file} has {} games, this run {games}", runs.len()));
+            }
+            Some(runs)
+        }
+    };
     let clock = std::time::Instant::now();
-    let tuned = strategy_bench(games, seed, threads, &TUNED);
+    let tuned = strategy_bench(games, seed, threads, held, &TUNED);
     let row = |name: &str, runs: &[Solo]| {
         let (mean, se) = mean_se(&runs.iter().map(|r| r.chromatics as f64).collect::<Vec<_>>());
         let per_run = |f: fn(&Solo) -> u32| runs.iter().map(|r| f64::from(f(r))).sum::<f64>() / runs.len() as f64;
@@ -176,15 +205,28 @@ fn run_strategy_bench(games: u32, seed: u32, threads: usize, changed: Option<&Pa
         );
     };
     row("tuned", &tuned);
+    if let Some(file) = save {
+        let text: String = tuned.iter().map(|r| format!("{}\n", r.chromatics)).collect();
+        std::fs::write(file, text).map_err(|e| format!("--save {file}: {e}"))?;
+    }
+    if let Some(saved) = &saved {
+        let gain = mean_se(&tuned.iter().zip(saved).map(|(t, &s)| t.chromatics as f64 - s as f64).collect::<Vec<_>>());
+        out!("tuned - saved  {:+.3} +- {:.3} (paired)", gain.0, gain.1);
+    }
     if let Some(p) = changed {
-        let runs = strategy_bench(games, seed, threads, p);
+        let runs = strategy_bench(games, seed, threads, held, p);
         row("changed", &runs);
         let gain = mean_se(&runs.iter().zip(&tuned).map(|(c, t)| c.chromatics as f64 - t.chromatics as f64).collect::<Vec<_>>());
         out!("changed - tuned  {:+.3} +- {:.3} (paired)", gain.0, gain.1);
         out!("changed weights: {p:?}");
     }
-    out!("{games} games, seed {seed}, {threads} threads, {:.1} s", clock.elapsed().as_secs_f64());
-    ExitCode::SUCCESS
+    let holding = if held.is_empty() {
+        String::new()
+    } else {
+        format!(", holding {}", held.iter().map(|t| t.key()).collect::<Vec<_>>().join(","))
+    };
+    out!("{games} games, seed {seed}, {threads} threads{holding}, {:.1} s", clock.elapsed().as_secs_f64());
+    Ok(ExitCode::SUCCESS)
 }
 
 fn run_read(args: &[String]) -> Result<ExitCode, String> {

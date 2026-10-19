@@ -63,7 +63,7 @@ pub fn traces() -> Vec<Value> {
 /// dice, default Params) and returns every action `decide` picked, in order,
 /// with the final state; `at(i, state)` sees the state before decision `i`.
 pub fn strategy_game(k: u32, mut at: impl FnMut(usize, &State)) -> (Vec<Action>, State) {
-    let (mut st, mut rng) = bench::start(1, k);
+    let (mut st, mut rng) = bench::start(1, k, &[]);
     let mut picks = Vec::new();
     for _ in 0..2000 {
         if st.phase == Phase::Ended {

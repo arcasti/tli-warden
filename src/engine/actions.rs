@@ -250,7 +250,8 @@ pub fn choose(s: &mut State, id: &ChoiceId) -> Outcome {
     Outcome::Ok
 }
 
-fn take_tool(s: &mut State, tool: Tool) {
+/// Adds `tool` to the held instruments with the effects of picking it.
+pub fn take_tool(s: &mut State, tool: Tool) {
     s.tools.push(tool);
     // A "-1 daily destination option" instrument taken before today's move drops a die now.
     let fewer = data().tool(tool).fewer_dice;

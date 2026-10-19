@@ -1,8 +1,9 @@
 //! Chain math (js/solver.js 113-251): the exact expected outcome of a devour,
 //! including the random chain after it.
 
-use super::{Comp, Ctx, TOP, composition, eats_table, food_chain, normalize, worth};
+use super::{Comp, Ctx, Dist, TOP, composition, eats_table, food_chain, foods, normalize, worth};
 use crate::engine::data::{Beast, RAINBOW, Tool, data};
+use crate::engine::rules::weights;
 use crate::engine::state::State;
 use std::collections::HashMap;
 
@@ -11,13 +12,14 @@ fn tiers(t: Tool) -> usize {
 }
 
 /// swapDist: tier odds for a swapped-in inmate, after Hangman's Noose.
-pub fn swap_dist(ctx: &Ctx) -> Vec<f64> {
-    let mut w: Vec<f64> = ctx.st.params.tier_weights.iter().map(|&w| f64::from(w)).collect();
+pub fn swap_dist(ctx: &Ctx) -> Dist {
+    let mut w = [0.0; TOP + 1];
+    w[..TOP].copy_from_slice(&weights(&ctx.st.params.tier_weights));
     if ctx.st.has(Tool::Rope) {
         w[0] = 0.0;
         w[1] = 0.0;
     }
-    normalize(&w)
+    normalize(w)
 }
 
 /// replaceOdds: tier odds (Normal to Rainbow) for the inmate a Replace brings
@@ -32,11 +34,10 @@ pub fn swap_dist(ctx: &Ctx) -> Vec<f64> {
 ///   Legendary becomes Legendary at the data chance.
 /// - Severed Iron Maiden: a new inmate on the block with as many rarer open
 ///   inmates as less rare ones rises its tiers.
-pub fn replace_odds(ctx: &Ctx, tier: usize, comp: &Comp, others: i64) -> (Vec<f64>, f64) {
+pub fn replace_odds(ctx: &Ctx, tier: usize, comp: &Comp, others: i64) -> (Dist, f64) {
     let st = ctx.st;
     let top = st.top_tier() as usize;
     let mut dist = swap_dist(ctx);
-    dist.resize(TOP + 1, 0.0);
     let def = data().tool(Tool::Scapegoat);
     let removed = if st.has(Tool::Scapegoat) && others >= def.min_others.unwrap_or(0) as i64 && others > 0 {
         (def.count.unwrap_or(0) as i64).min(others)
@@ -49,10 +50,10 @@ pub fn replace_odds(ctx: &Ctx, tier: usize, comp: &Comp, others: i64) -> (Vec<f6
             *p = 0.0;
         }
         if dist.iter().any(|&p| p > 0.0) {
-            dist = normalize(&dist);
+            dist = normalize(dist);
         } else {
             // Nothing rarer left to roll: the engine makes one a tier up.
-            dist = vec![0.0; TOP + 1];
+            dist = [0.0; TOP + 1];
             dist[(tier + 1).min(top)] = 1.0;
         }
         let worth = comp.iter().enumerate().fold(0.0, |sum, (i, &k)| sum + f64::from(k) * ctx.v[i / 4]);
@@ -182,7 +183,7 @@ pub fn meals(ctx: &Ctx, t: usize, b: usize, comp: &Comp) -> ([Meal; 20], usize) 
     let mut out = [Meal { tier: 0, beast: 0, base: 0, chance: 0.0 }; 20];
     let mut n = 0;
     for mt in meal_tiers(ctx, t, b) {
-        for &mb in if mt == t { &ctx.eats[b] } else { &ctx.chain[b] } {
+        for mb in foods(if mt == t { ctx.eats[b] } else { ctx.chain[b] }) {
             if comp[mt * 4 + mb] > 0 {
                 out[n] = terms(ctx, t, b, mt, mb);
                 n += 1;
@@ -194,7 +195,7 @@ pub fn meals(ctx: &Ctx, t: usize, b: usize, comp: &Comp) -> ([Meal; 20], usize) 
 
 /// Whether an eater of beast b at tier t has a meal in `comp`.
 pub fn fed(ctx: &Ctx, t: usize, b: usize, comp: &Comp) -> bool {
-    meal_tiers(ctx, t, b).any(|mt| (if mt == t { &ctx.eats[b] } else { &ctx.chain[b] }).iter().any(|&mb| comp[mt * 4 + mb] > 0))
+    meal_tiers(ctx, t, b).any(|mt| foods(if mt == t { ctx.eats[b] } else { ctx.chain[b] }).any(|mb| comp[mt * 4 + mb] > 0))
 }
 
 /// rise: value from here on for an eater of beast b that just reached tier t;
@@ -225,10 +226,9 @@ fn land(ctx: &mut Ctx, t: usize, b: usize, comp: &mut Comp, crowd: i64) -> f64 {
     // Avenger's Casket: with its chance a door opens with a plain counter of
     // the new form at its tier (engine do_devour), whatever the tools widen.
     let casket = data().tool(Tool::Revenge).chance / 100.0;
-    let n = ctx.chain[b].len();
+    let n = ctx.chain[b].count_ones();
     let mut spawned = 0.0;
-    for i in 0..n {
-        let f = ctx.chain[b][i];
+    for f in foods(ctx.chain[b]) {
         comp[t * 4 + f] += 1;
         spawned += ctx.v[t] + feed(ctx, t, b, comp, crowd + 1);
         comp[t * 4 + f] -= 1;
@@ -366,9 +366,9 @@ pub fn chain_odds(st: &State, from: usize, to: usize) -> (f64, f64) {
 type Memo = HashMap<(usize, usize, usize, Vec<i32>), (f64, f64)>;
 
 struct Odds {
-    eats: [Vec<usize>; 4],
+    eats: [u8; 4],
     /// Who each beast eats without tools: the meals the Casket brings.
-    food: [Vec<usize>; 4],
+    food: [u8; 4],
     /// Avenger's Casket's chance to fire after a bite; 0 without it.
     casket: f64,
     /// A meal's cell seals again (reusable cells).
@@ -388,15 +388,15 @@ impl Odds {
         for b in 0..4 {
             let (mut pb, mut nb) = self.eat(t, b);
             if self.casket > 0.0 && self.doors > 0 {
-                let foods = self.food[b].clone();
+                let n = f64::from(self.food[b].count_ones());
                 let (mut ps, mut ns) = (0.0, 0.0);
                 self.doors -= 1;
-                for &f in &foods {
+                for f in foods(self.food[b]) {
                     self.comp[t * 4 + f] += 1;
                     let (pf, nf) = self.eat(t, b);
                     self.comp[t * 4 + f] -= 1;
-                    ps += pf / foods.len() as f64;
-                    ns += nf / foods.len() as f64;
+                    ps += pf / n;
+                    ns += nf / n;
                 }
                 self.doors += 1;
                 pb = self.casket * ps + (1.0 - self.casket) * pb;
@@ -415,13 +415,13 @@ impl Odds {
         if let Some(&hit) = self.memo.get(&key) {
             return hit;
         }
-        let foods = self.eats[b].clone();
-        let total: i32 = foods.iter().map(|&f| self.comp[t * 4 + f]).sum();
+        let eats = self.eats[b];
+        let total: i32 = foods(eats).map(|f| self.comp[t * 4 + f]).sum();
         let mut out = (0.0, 0.0);
         if total != 0 {
             let (mut p, mut n) = (0.0, 0.0);
             let reseal = usize::from(self.reseal);
-            for &f in &foods {
+            for f in foods(eats) {
                 let k = self.comp[t * 4 + f];
                 if k == 0 {
                     continue;

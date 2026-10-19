@@ -27,8 +27,8 @@ pub fn steps_between(a: usize, b: usize) -> usize {
     (b + cells - a) % cells
 }
 
-pub fn weights(list: &[u32]) -> Vec<f64> {
-    list.iter().map(|&w| f64::from(w)).collect()
+pub fn weights<const N: usize>(list: &[u32; N]) -> [f64; N] {
+    list.map(f64::from)
 }
 
 /// A held instrument's trigger roll at its data chance; no draw when not held.
@@ -43,7 +43,7 @@ pub fn make_inmate(s: &mut State, beast: Beast, tier: i32) -> Inmate {
 }
 
 /// Rarity odds for whoever is behind a door. The Sorting Hook keeps out Normals.
-pub fn door_weights(s: &State) -> Vec<f64> {
+pub fn door_weights(s: &State) -> [f64; RAINBOW as usize] {
     let mut w = weights(&s.params.tier_weights);
     if s.has(Tool::Hook) && w[1..].iter().any(|&x| x > 0.0) {
         w[0] = 0.0;

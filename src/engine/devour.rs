@@ -40,24 +40,28 @@ pub fn can_eat(s: &State, eater: &Inmate, meal: Option<&Inmate>) -> bool {
 }
 
 pub fn devour_options(s: &State, n: usize) -> Vec<Bite> {
-    let Some(eater) = s.cells[n].inmate.filter(|_| !s.cells[n].sealed) else { return Vec::new() };
-    let mut out = Vec::new();
-    for c in &s.cells {
-        if c.n == n {
-            continue;
-        }
-        if !c.sealed && can_eat(s, &eater, c.inmate.as_ref()) {
-            out.push(Bite { cell: c.n, scratch: false });
-        } else if c.sealed
-            && c.scratch
-            && eater.beast == Beast::Wolf
-            && c.hidden.is_some_and(|h| h.tier == eater.tier)
-            && eater.tier < RAINBOW
-        {
-            out.push(Bite { cell: c.n, scratch: true });
-        }
-    }
-    out
+    bites(s, n).collect()
+}
+
+/// The consumes open to the inmate in cell n, in cell order, without collecting them.
+pub fn bites(s: &State, n: usize) -> impl Iterator<Item = Bite> {
+    let eater = s.cells[n].inmate.filter(|_| !s.cells[n].sealed);
+    eater.into_iter().flat_map(move |eater| {
+        s.cells.iter().filter(move |c| c.n != n).filter_map(move |c| {
+            if !c.sealed && can_eat(s, &eater, c.inmate.as_ref()) {
+                Some(Bite { cell: c.n, scratch: false })
+            } else if c.sealed
+                && c.scratch
+                && eater.beast == Beast::Wolf
+                && c.hidden.is_some_and(|h| h.tier == eater.tier)
+                && eater.tier < RAINBOW
+            {
+                Some(Bite { cell: c.n, scratch: true })
+            } else {
+                None
+            }
+        })
+    })
 }
 
 /// One consume a day (canDevourNow); a chain's later bites don't count.

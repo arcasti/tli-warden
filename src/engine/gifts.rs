@@ -2,7 +2,7 @@
 //! (js/engine.js interrogationRoomStop and interrogate 1094-1131, applyGift 1729-1765).
 
 use super::data::{Beast, Card, Gift, RAINBOW, TYRANNY, data};
-use super::devour::{can_eat, devour_options, do_devour};
+use super::devour::{bites, can_eat, do_devour};
 use super::rng::{pick_one, shuffle};
 use super::rules::{How, add_marker, check_prey, open_cell};
 use super::state::{Inmate, Pending, State};
@@ -35,7 +35,7 @@ pub fn interrogate(s: &mut State, card: Card) {
 }
 
 fn hungry(s: &State, id: u32) -> bool {
-    s.cell_of(id).is_none_or(|n| devour_options(s, n).is_empty())
+    s.cell_of(id).is_none_or(|n| bites(s, n).next().is_none())
 }
 
 pub fn apply_gift(s: &mut State, gift: Gift) {
@@ -54,7 +54,7 @@ pub fn apply_gift(s: &mut State, gift: Gift) {
             let eaters: Vec<u32> = board_inmates(s).into_iter().filter(|i| !hungry(s, i.id)).map(|i| i.id).collect();
             for id in eaters {
                 let Some(n) = s.board_cell_of(id) else { continue };
-                let options: Vec<_> = devour_options(s, n).into_iter().filter(|o| !o.scratch).collect();
+                let options: Vec<_> = bites(s, n).filter(|o| !o.scratch).collect();
                 if options.is_empty() {
                     continue;
                 }
@@ -79,7 +79,7 @@ pub fn apply_gift(s: &mut State, gift: Gift) {
             for id in picks {
                 let Some(n) = s.board_cell_of(id) else { continue };
                 let Some(me) = s.cells[n].inmate else { continue };
-                if !devour_options(s, n).is_empty() {
+                if bites(s, n).next().is_some() {
                     continue;
                 }
                 let board = board_inmates(s);

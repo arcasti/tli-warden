@@ -118,28 +118,36 @@ pub fn composition(st: &State, exclude: Option<usize>) -> (Comp, i64) {
     (comp, crowd)
 }
 
+/// Tier odds, Normal to Rainbow.
+pub type Dist = [f64; TOP + 1];
+
 /// normalize: negative weights count as 0; all zero leaves all zero.
-pub fn normalize(weights: &[f64]) -> Vec<f64> {
+pub fn normalize<const N: usize>(weights: [f64; N]) -> [f64; N] {
     let total = weights.iter().fold(0.0, |sum, w| sum + w.max(0.0));
     let total = if total == 0.0 { 1.0 } else { total };
-    weights.iter().map(|w| w.max(0.0) / total).collect()
+    weights.map(|w| w.max(0.0) / total)
 }
 
-/// Who each beast eats, by index, without tools.
-pub fn food_chain() -> [Vec<usize>; 4] {
-    Beast::ALL.map(|b| data().food_chain[b.index()].iter().map(|f| f.index()).collect())
+/// Who each beast eats without tools: by eater, a bit per beast it eats.
+pub fn food_chain() -> [u8; 4] {
+    Beast::ALL.map(|b| data().food_chain[b.index()].iter().fold(0, |m, f| m | 1 << f.index()))
 }
 
-/// Who each beast eats, by index, with the Skewered Rat Heads and the Iron Crown.
-pub fn eats_table(st: &State) -> [Vec<usize>; 4] {
+/// Who each beast eats with the Skewered Rat Heads and the Iron Crown, as in `food_chain`.
+pub fn eats_table(st: &State) -> [u8; 4] {
     let mut eats = food_chain();
     if st.has(Tool::Skewer) {
-        eats[Beast::Rat.index()].push(Beast::Rat.index());
+        eats[Beast::Rat.index()] |= 1 << Beast::Rat.index();
     }
     if st.has(Tool::Crown) {
-        eats[Beast::Lion.index()] = (0..4).collect();
+        eats[Beast::Lion.index()] = 0b1111;
     }
     eats
+}
+
+/// The beasts set in a `food_chain` mask, by index in ascending order.
+pub fn foods(mask: u8) -> impl Iterator<Item = usize> {
+    (0..4).filter(move |&f| mask >> f & 1 == 1)
 }
 
 /// The hasher of the chain memo (FxHash's multiply-rotate mix): its keys are
@@ -177,9 +185,9 @@ impl Hasher for MemoHasher {
 pub struct Ctx<'a> {
     pub st: &'a State,
     pub p: &'a Params,
-    pub eats: [Vec<usize>; 4],
+    pub eats: [u8; 4],
     /// Who each beast counters without tools, for the cross-tier bites.
-    pub chain: [Vec<usize>; 4],
+    pub chain: [u8; 4],
     pub v: [f64; 6],
     pub r: f64,
     /// The odds of each count of extra tiers a successful bite rolls (Rusty
@@ -227,14 +235,13 @@ pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
     let side_value = dist_worth(&v, r, &door_dist(st, None, false).0);
     let chain = food_chain();
     let cage_fight = st.theme == Some(CAGE_FIGHT);
-    let mask = |foods: &[usize]| foods.iter().fold(0u8, |m, &f| m | 1 << f);
     // Under Cage Fight the eater keeps its beast; otherwise any eater may
     // re-roll into a Wolf, which eats down with the Fanged Guillotine.
     let down = std::array::from_fn(|b| {
         if cage_fight {
-            mask(&chain[b])
+            chain[b]
         } else if st.has(Tool::Guillotine) {
-            mask(&chain[Beast::Wolf.index()])
+            chain[Beast::Wolf.index()]
         } else {
             0
         }
@@ -271,21 +278,17 @@ pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
 /// no Normal under the Hook. On a patrol or instrument opening (`after`),
 /// Felon's Dog Tag may raise the inmate. A scratched door prices at its known
 /// rarity; the scratch bite its opening gives up is charged by `scratch_loss`.
-pub fn door_dist(st: &State, cell: Option<&Cell>, after: bool) -> (Vec<f64>, Option<usize>) {
+pub fn door_dist(st: &State, cell: Option<&Cell>, after: bool) -> (Dist, Option<usize>) {
     let seen = cell.filter(|c| seen_door(c)).and_then(|c| c.hidden.map(|h| (h, c.known)));
-    let mut dist = match seen {
-        Some((h, _)) => {
-            let mut d = vec![0.0; TOP + 1];
-            d[h.tier as usize] = 1.0;
-            d
-        }
-        None => normalize(&door_weights(st)),
-    };
-    dist.resize(TOP + 1, 0.0);
+    let mut dist = [0.0; TOP + 1];
+    match seen {
+        Some((h, _)) => dist[h.tier as usize] = 1.0,
+        None => dist[..TOP].copy_from_slice(&normalize(door_weights(st))),
+    }
     if after && st.has(Tool::Dogtag) {
         let def = data().tool(Tool::Dogtag);
         let (c, by, top) = (def.chance / 100.0, def.tiers.unwrap_or(0), st.top_tier());
-        let mut raised = vec![0.0; TOP + 1];
+        let mut raised = [0.0; TOP + 1];
         for (t, &p) in dist.iter().enumerate() {
             raised[t] += p * (1.0 - c);
             raised[(t as i32 + by).clamp(0, top) as usize] += p * c;

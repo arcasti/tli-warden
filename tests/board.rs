@@ -459,7 +459,7 @@ fn replace_board(tools: Value, warden_tier: i32, set: &[(usize, i32)]) -> warden
 }
 
 /// The tier odds of a Replace in the warden's cell, and its value.
-fn replace(st: &warden::engine::state::State) -> (Vec<f64>, f64) {
+fn replace(st: &warden::engine::state::State) -> (warden::solver::Dist, f64) {
     let ctx = warden::solver::context(st, &TUNED);
     let (comp, crowd) = warden::solver::composition(st, Some(12));
     let tier = st.cells[12].inmate.expect("inmate").tier as usize;

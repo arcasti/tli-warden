@@ -3,9 +3,9 @@
 
 use super::chain::{best_meal, coin_of_fate, devour_delta, replace_odds};
 use super::values::{activation, execution_value, fresh_value, stair_delta, swap_value};
-use super::{Comp, Ctx, Rng32, TOP, beasts, composition, context, dist_worth, door_dist, seen_door, worth};
+use super::{Comp, Ctx, Dist, Rng32, TOP, beasts, composition, context, dist_worth, door_dist, seen_door, worth};
 use crate::engine::data::{Beast, Card, RAINBOW, Tool, data};
-use crate::engine::devour::{Bite, devour_options, hunt_targets, sure_gain};
+use crate::engine::devour::{Bite, bites, hunt_targets, sure_gain};
 use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATWAY};
 use crate::engine::rules::{clockwise_path, land, steps_between};
 use crate::engine::state::{Cell, Inmate, State};
@@ -203,7 +203,7 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
             // A dice patrol onto a door sets off the "after opening" instruments.
             let opened = (c.sealed && !st.chain)
                 .then(|| door_dist(st, Some(c), true).0);
-            score += held_terms(ctx, h, n, steps, opened.as_deref(), left, left_worth);
+            score += held_terms(ctx, h, n, steps, opened.as_ref(), left, left_worth);
         }
         out.push((n, score));
     }
@@ -280,7 +280,7 @@ fn rise_worth(ctx: &Ctx, t: usize, by: i32) -> f64 {
 /// tier odds of the inmate a patrol opening brings out, None when the landing
 /// opens no door on the patrol; `left` doors stay sealed after the landing's
 /// own openings, worth `left_worth` in all from the side.
-fn held_terms(ctx: &Ctx, h: &Held, n: usize, steps: usize, opened: Option<&[f64]>, left: usize, left_worth: f64) -> f64 {
+fn held_terms(ctx: &Ctx, h: &Held, n: usize, steps: usize, opened: Option<&Dist>, left: usize, left_worth: f64) -> f64 {
     let st = ctx.st;
     let d = data();
     let w_open = ctx.p.w_open;
@@ -512,7 +512,7 @@ fn board_value(st: &State, v: &[f64; 6], r: f64) -> f64 {
     let mut value = st.vault.len() as f64 * r;
     for c in &st.cells {
         let Some(i) = c.inmate.filter(|_| !c.sealed) else { continue };
-        value += v[i.tier as usize] * if devour_options(st, c.n).is_empty() { 1.0 } else { 1.25 };
+        value += v[i.tier as usize] * if bites(st, c.n).next().is_none() { 1.0 } else { 1.25 };
     }
     value
 }

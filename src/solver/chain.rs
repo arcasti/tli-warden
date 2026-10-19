@@ -1,7 +1,7 @@
 //! Chain math (js/solver.js 113-251): the exact expected outcome of a devour,
 //! including the random chain after it.
 
-use super::{Comp, Ctx, TOP, composition, eats_table, food_chain, normalize};
+use super::{Comp, Ctx, TOP, composition, eats_table, food_chain, normalize, worth};
 use crate::engine::data::{Beast, RAINBOW, Tool, data};
 use crate::engine::state::State;
 use std::collections::HashMap;
@@ -125,7 +125,7 @@ pub fn coin_of_fate(ctx: &Ctx, comp: &Comp) -> f64 {
         let t = i / 4;
         let to = TOP.min(t + tiers(Tool::Coin));
         matched += k;
-        gain += f64::from(k) * ((if to >= TOP { ctx.r } else { ctx.v[to] }) - 2.0 * ctx.v[t]);
+        gain += f64::from(k) * (worth(ctx, to) - 2.0 * ctx.v[t]);
     }
     if matched == 0 {
         return 0.0;
@@ -142,18 +142,6 @@ pub struct Meal {
     pub beast: usize,
     pub base: usize,
     pub chance: f64,
-}
-
-/// The terms of a bite by an eater of beast b at tier t on a meal of tier mt
-/// and beast mb, or None when it can't eat it (engine `can_eat`).
-fn eat_terms(ctx: &Ctx, t: usize, b: usize, mt: usize, mb: usize) -> Option<Meal> {
-    let (lower, higher) = reach(ctx, b);
-    let ok = match mt.cmp(&t) {
-        std::cmp::Ordering::Less => lower && ctx.chain[b].contains(&mb),
-        std::cmp::Ordering::Greater => higher && ctx.chain[b].contains(&mb),
-        std::cmp::Ordering::Equal => ctx.eats[b].contains(&mb),
-    };
-    ok.then(|| terms(ctx, t, b, mt, mb))
 }
 
 /// Whether an eater of beast b eats countered inmates of lower tiers (Fanged
@@ -207,11 +195,6 @@ pub fn meals(ctx: &Ctx, t: usize, b: usize, comp: &Comp) -> ([Meal; 20], usize) 
 /// Whether an eater of beast b at tier t has a meal in `comp`.
 pub fn fed(ctx: &Ctx, t: usize, b: usize, comp: &Comp) -> bool {
     meal_tiers(ctx, t, b).any(|mt| (if mt == t { &ctx.eats[b] } else { &ctx.chain[b] }).iter().any(|&mb| comp[mt * 4 + mb] > 0))
-}
-
-/// The worth of an inmate of tier t.
-fn worth(ctx: &Ctx, t: usize) -> f64 {
-    if t >= TOP { ctx.r } else { ctx.v[t] }
 }
 
 /// rise: value from here on for an eater of beast b that just reached tier t;
@@ -330,8 +313,8 @@ pub fn devour_delta(ctx: &mut Ctx, tier: usize, beast: usize, meal: (usize, usiz
     let terms = if scratch {
         Meal { tier, beast: mb, base: 1 + ctx.scratch_extra, chance: 1.0 }
     } else {
-        // devour_options offers only the bites can_eat allows, which eat_terms mirrors.
-        eat_terms(ctx, tier, beast, mt, mb).unwrap_or(Meal { tier: mt, beast: mb, base: 1, chance: 1.0 })
+        // devour_options offers only the bites the engine's can_eat allows.
+        terms(ctx, tier, beast, mt, mb)
     };
     if !scratch {
         comp[i] -= 1;

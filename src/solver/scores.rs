@@ -3,7 +3,7 @@
 
 use super::chain::{coin_of_fate, devour_delta, replace_odds};
 use super::values::{activation, execution_value, fresh_value, stair_delta, swap_value};
-use super::{Comp, Ctx, Rng32, TOP, composition, context, dist_worth, door_dist, seen_door};
+use super::{Comp, Ctx, Rng32, TOP, beasts, composition, context, dist_worth, door_dist, seen_door, worth};
 use crate::engine::data::{RAINBOW, Tool, data};
 use crate::engine::devour::{Bite, devour_options, hunt_targets, sure_gain};
 use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY};
@@ -27,8 +27,7 @@ pub fn incident_score(ctx: &Ctx, c: &Cell, comp: &Comp) -> f64 {
             return c.inmate.map_or(0.0, |i| execution_value(ctx, i.tier as usize, i.beast.index(), comp));
         }
         let (dist, beast) = door_dist(ctx.st, Some(c), !ctx.st.chain);
-        let beasts = beast.map_or(0..4, |b| b..b + 1);
-        let share = 1.0 / beasts.len() as f64;
+        let (beasts, share) = beasts(beast);
         let mut exec = 0.0;
         for (t, &p) in dist.iter().enumerate() {
             for b in beasts.clone() {
@@ -121,7 +120,7 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
         }
         if st.chain {
             // Chain Reaction opens every door on the walk from the side.
-            let (mut unseen, mut seen) = (0, 0.0);
+            let mut opened = 0.0;
             for &k in clockwise_path(st, n).iter().filter(|&&k| st.cells[k].sealed) {
                 let d = &st.cells[k];
                 if held.is_some() {
@@ -131,11 +130,7 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
                 if k == n {
                     continue;
                 }
-                if seen_door(d) {
-                    seen += dist_worth(&ctx.v, ctx.r, &door_dist(st, Some(d), false).0);
-                } else {
-                    unseen += 1;
-                }
+                opened += side_worth(ctx, d);
             }
             let here = if c.sealed {
                 door_now(ctx, &mut board, c, false)
@@ -144,7 +139,7 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
             } else {
                 0.0
             };
-            score += p.w_open * unseen as f64 * ctx.side_value + p.w_open * seen + here;
+            score += p.w_open * opened + here;
         } else if c.sealed {
             score += door_now(ctx, &mut board, c, true);
             // Squirming Iron Box: the patrol opens the door's own inmate and
@@ -162,7 +157,7 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
         if let Some(h) = &held {
             // A dice patrol onto a door sets off the "after opening" instruments.
             let opened = (c.sealed && !st.chain)
-                .then(|| if seen_door(c) { door_dist(st, Some(c), true).0 } else { ctx.open_dist.clone() });
+                .then(|| door_dist(st, Some(c), true).0);
             score += held_terms(ctx, h, n, steps, opened.as_deref(), left, left_worth);
         }
         out.push((n, score));
@@ -202,8 +197,7 @@ fn side_worth(ctx: &Ctx, c: &Cell) -> f64 {
 /// What `by` tiers more are worth to an inmate of tier `t`; a Chromatic is
 /// worth `r` and nothing rises past the top tier.
 fn rise_worth(ctx: &Ctx, t: usize, by: i32) -> f64 {
-    let worth = |t: usize| if t >= TOP { ctx.r } else { ctx.v[t] };
-    worth((t as i32 + by).clamp(0, ctx.st.top_tier()) as usize) - worth(t)
+    worth(ctx, (t as i32 + by).clamp(0, ctx.st.top_tier()) as usize) - worth(ctx, t)
 }
 
 /// What the held opening and movement instruments add to a dice landing on
@@ -276,7 +270,7 @@ pub fn link_value(ctx: &Ctx, lion: u32, prey: u32, rounds: i32) -> f64 {
         let Some(i) = ctx.st.cell_of(id).and_then(|n| ctx.st.cells[n].inmate) else { continue };
         let t = i.tier as usize;
         let to = TOP.min((i.tier + rounds) as usize);
-        value += (if to >= TOP { ctx.r } else { ctx.v[to] }) - ctx.v[t];
+        value += worth(ctx, to) - ctx.v[t];
     }
     value
 }
@@ -320,14 +314,13 @@ fn chains_loss(ctx: &Ctx, ring: &[i8]) -> f64 {
     let Some(&top) = ring.iter().max().filter(|&&t| t >= 0) else { return 0.0 };
     let def = data().tool(Tool::Chains);
     let (p, by) = (def.chance / 100.0, def.tiers.unwrap_or(0));
-    let worth = |t: i8| if t as usize >= TOP { ctx.r } else { ctx.v[t as usize] };
     let n = ring.len();
     let (mut tops, mut loss) = (0, 0.0);
     for c in (0..n).filter(|&c| ring[c] == top) {
         tops += 1;
         let sides = [ring[(c + n - 1) % n], ring[(c + 1) % n]];
         let removed = sides.iter().filter(|&&t| t >= 0).count();
-        loss += sides.iter().filter(|&&t| t >= 0).map(|&t| worth(t)).sum::<f64>();
+        loss += sides.iter().filter(|&&t| t >= 0).map(|&t| worth(ctx, t as usize)).sum::<f64>();
         // At most two removals: j of them land in [1, removed, 1] ways.
         for j in 0..=removed {
             let odds = [1.0, removed as f64, 1.0][j] * p.powi(j as i32) * (1.0 - p).powi((removed - j) as i32);

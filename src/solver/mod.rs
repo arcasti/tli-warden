@@ -199,9 +199,8 @@ pub struct Ctx<'a> {
     /// chain can read (the memo key of `chain::feed`).
     pub down: [u8; 4],
     pub scratch_extra: usize,
-    /// Tier odds (Normal to Rainbow) and worth of whoever comes out of an
-    /// unseen door on a patrol or instrument opening (`door_dist`).
-    pub open_dist: Vec<f64>,
+    /// The worth of whoever comes out of an unseen door on a patrol or
+    /// instrument opening (`door_dist`).
     pub open_value: f64,
     /// The worth of an unseen door opened from the side (Chain Reaction walk,
     /// Crowded Beastcage), which sets off no "after opening" instrument.
@@ -213,8 +212,7 @@ pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
     let v = [0, 1, 2, 3, 4, 5].map(|t| p.tier_base.powi(t));
     // A full vault stops inmates at Ultimate: the top tier is worth no more.
     let r = if st.top_tier() < RAINBOW { v[RAINBOW as usize - 1] } else { v[RAINBOW as usize] * p.rainbow_mult };
-    let open_dist = door_dist(st, None, true).0;
-    let open_value = dist_worth(&v, r, &open_dist);
+    let open_value = dist_worth(&v, r, &door_dist(st, None, true).0);
     let side_value = dist_worth(&v, r, &door_dist(st, None, false).0);
     let chain = food_chain();
     let cage_fight = st.theme == Some(CAGE_FIGHT);
@@ -248,7 +246,6 @@ pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
         fangs: st.has(Tool::Guillotine),
         cage_fight,
         scratch_extra: 1 + usize::from(st.params.scratch_stacks_base),
-        open_dist,
         open_value,
         side_value,
         memo: HashMap::default(),
@@ -290,6 +287,19 @@ pub fn door_dist(st: &State, cell: Option<&Cell>, after: bool) -> (Vec<f64>, Opt
 /// Whether `door_dist` prices sealed cell `c` by what the player saw behind it.
 pub fn seen_door(c: &Cell) -> bool {
     c.known > 0 && c.hidden.is_some() && !c.scratch
+}
+
+/// The worth of an inmate of tier t; a Chromatic is worth `r`.
+pub fn worth(ctx: &Ctx, t: usize) -> f64 {
+    if t >= TOP { ctx.r } else { ctx.v[t] }
+}
+
+/// The beasts an inmate may be and the odds of each: beast `beast` when it is
+/// known, else any of the 4 at even odds.
+pub fn beasts(beast: Option<usize>) -> (std::ops::Range<usize>, f64) {
+    let beasts = beast.map_or(0..4, |b| b..b + 1);
+    let share = 1.0 / beasts.len() as f64;
+    (beasts, share)
 }
 
 /// The expected worth of an inmate with tier odds `dist`; a Chromatic is worth `r`.

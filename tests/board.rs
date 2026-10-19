@@ -488,7 +488,7 @@ fn the_sorting_hook_and_the_dog_tag_raise_an_unseen_door() {
     let ctx_of = |tools: Value| {
         let st = duel(tools, (Beast::Wolf, 2), 2);
         let ctx = warden::solver::context(&st, &TUNED);
-        (ctx.open_dist.clone(), ctx.open_value)
+        (warden::solver::door_dist(&st, None, true).0, ctx.open_value)
     };
     let (plain_dist, plain) = ctx_of(serde_json::json!([]));
     let (hook_dist, hook) = ctx_of(serde_json::json!(["hook"]));

@@ -2,7 +2,7 @@
 //! inmate can do once the warden stands with it, and Executions.
 
 use super::chain::{best_meal, fed, replace_odds};
-use super::{Comp, Ctx, TOP, dist_worth};
+use super::{Comp, Ctx, TOP, beasts, dist_worth, worth};
 use crate::engine::data::data;
 
 /// stair: how ready the block is for chains; at each tier, the share of beasts
@@ -34,8 +34,7 @@ pub fn stair_fresh(ctx: &Ctx, dist: &[f64], beast: Option<usize>, comp: &mut Com
     if ctx.p.w_stair == 0.0 {
         return 0.0;
     }
-    let beasts = beast.map_or(0..4, |b| b..b + 1);
-    let share = 1.0 / beasts.len() as f64;
+    let (beasts, share) = beasts(beast);
     let mut sum = 0.0;
     for (t, &p) in dist.iter().enumerate() {
         for b in beasts.clone() {
@@ -52,7 +51,7 @@ pub fn stair_fresh(ctx: &Ctx, dist: &[f64], beast: Option<usize>, comp: &mut Com
 /// Guillotine may remove.
 pub fn swap_value(ctx: &Ctx, tier: usize, comp: &Comp, others: i64) -> f64 {
     let (dist, loss) = replace_odds(ctx, tier, comp, others);
-    dist.iter().enumerate().fold(0.0, |sum, (t, p)| sum + p * if t >= TOP { ctx.r } else { ctx.v[t] }) - ctx.v[tier] - loss
+    dist_worth(&ctx.v, ctx.r, &dist) - ctx.v[tier] - loss
 }
 
 /// activation: the inmate's best devour or a swap, whichever is worth more,
@@ -72,8 +71,7 @@ pub fn activation(ctx: &mut Ctx, tier: usize, beast: usize, comp: &mut Comp, cro
 /// of beast `beast` when it is known (the Iron Pestle keeps the replaced
 /// inmate's), else any of the 4 at even odds.
 pub fn fresh_activation(ctx: &mut Ctx, dist: &[f64], beast: Option<usize>, comp: &mut Comp, crowd: i64, swap_left: bool) -> f64 {
-    let beasts = beast.map_or(0..4, |b| b..b + 1);
-    let share = 1.0 / beasts.len() as f64;
+    let (beasts, share) = beasts(beast);
     let mut sum = 0.0;
     for (t, &p) in dist.iter().enumerate() {
         if p == 0.0 {
@@ -109,5 +107,5 @@ pub fn execution_value(ctx: &Ctx, tier: usize, beast: usize, comp: &Comp) -> f64
         return 0.0;
     }
     let to = TOP.min((tier as i32 + count) as usize);
-    (if to >= TOP { ctx.r } else { ctx.v[to] }) - ctx.v[tier] - lost
+    worth(ctx, to) - ctx.v[tier] - lost
 }

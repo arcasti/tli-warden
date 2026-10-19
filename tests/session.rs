@@ -1155,3 +1155,22 @@ fn a_treasure_without_a_theme_has_one_pick() {
     assert_eq!(read_next(&mut s, "rec6-t225.png").screen, Screen::Unknown);
     assert_eq!(treasure_pick(&s), None);
 }
+
+#[test]
+fn rollouts_same_on_any_thread_count() {
+    let (st, problems) = common::build("ratway.json");
+    assert!(problems.is_empty(), "{problems:?}");
+    let ranked = |threads: usize| {
+        let mut r = Rollouts::new(&st, 7, &TUNED);
+        assert_eq!(r.run_on(60, threads), 60);
+        r.ranking()
+    };
+    let one = ranked(1);
+    assert!(one.len() > 2, "{} candidates", one.len());
+    assert_eq!(ranked(4), one);
+    // In steps, with a thread count that does not divide the rounds.
+    let mut r = Rollouts::new(&st, 7, &TUNED);
+    r.run(25);
+    r.run_on(35, 3);
+    assert_eq!(r.ranking(), one);
+}

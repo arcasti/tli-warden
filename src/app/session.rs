@@ -1130,10 +1130,15 @@ impl Session {
         self.rx = Some(rx);
         self.solving = true;
         let (notify, rollouts) = (self.notify.clone(), self.rollouts);
+        // The playouts use all cores but one, below normal priority so the
+        // game keeps its frame rate.
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get().saturating_sub(1).max(1));
         std::thread::spawn(move || {
+            #[cfg(windows)]
+            crate::solver::solve::set_priority(windows::Win32::System::Threading::THREAD_PRIORITY_BELOW_NORMAL.0);
             let mut r = Rollouts::with(&st, SEED, &TUNED, first.then_some(&bites[..]));
             loop {
-                let ran = r.run(ROUND.min(rollouts - r.rounds()));
+                let ran = r.run_on(ROUND.min(rollouts - r.rounds()), threads);
                 let done = ran == 0 || r.rounds() >= rollouts;
                 let progress = Progress { rounds: r.rounds(), done, options: r.ranking() };
                 if tx.send(progress).is_err() {

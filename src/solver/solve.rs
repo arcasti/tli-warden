@@ -197,7 +197,8 @@ pub fn solve(st: &State, rollouts: usize, seed: u32, p: &Params) -> Vec<SolveOpt
 
 /// `solve` in steps: `run` adds rounds and `ranking` ranks the rounds so far,
 /// so a caller can show partial rankings. Running N rounds in any number of
-/// steps gives the same ranking as `solve` with N rollouts.
+/// steps, on any number of threads, gives the same ranking as `solve` with N
+/// rollouts.
 pub struct Rollouts<'a> {
     base: State,
     p: &'a Params,
@@ -241,27 +242,65 @@ impl<'a> Rollouts<'a> {
     /// Plays up to `rounds` more rounds and returns how many ran (none with
     /// fewer than two candidates: there is nothing to compare).
     pub fn run(&mut self, rounds: usize) -> usize {
+        self.run_on(rounds, 1)
+    }
+
+    /// `run` on up to `threads` threads: the seeds are drawn in order first
+    /// and the results kept in seed order, so the ranking does not depend on
+    /// the thread count. On Windows the extra threads take the caller's
+    /// priority.
+    pub fn run_on(&mut self, rounds: usize, threads: usize) -> usize {
         if self.list.len() < 2 {
             return 0;
         }
-        for _ in 0..rounds {
-            let seed = (self.random.roll() * 4294967296.0) as u32;
-            for (k, c) in self.list.iter().enumerate() {
-                let mut trial = self.base.clone();
-                hide_future(&mut trial, seed);
-                if !apply(&mut trial, &c.action).is_ok() {
-                    self.vals[k].push(f64::NAN);
-                    continue;
+        let seeds: Vec<u32> = (0..rounds).map(|_| (self.random.roll() * 4294967296.0) as u32).collect();
+        let threads = threads.clamp(1, rounds.max(1));
+        let results: Vec<Vec<(f64, Option<f64>)>> = if threads == 1 {
+            seeds.iter().map(|&seed| self.round(seed)).collect()
+        } else {
+            let (this, priority) = (&*self, priority());
+            std::thread::scope(|s| {
+                let workers: Vec<_> = seeds
+                    .chunks(rounds.div_ceil(threads))
+                    .map(|chunk| {
+                        s.spawn(move || {
+                            set_priority(priority);
+                            chunk.iter().map(|&seed| this.round(seed)).collect::<Vec<_>>()
+                        })
+                    })
+                    .collect();
+                workers.into_iter().flat_map(|w| w.join().expect("a playout thread panicked")).collect()
+            })
+        };
+        for round in results {
+            for (k, (val, best)) in round.into_iter().enumerate() {
+                self.vals[k].push(val);
+                if let Some(best) = best {
+                    self.best[k] += best;
                 }
-                playout(&mut trial, self.p, &mut Rng32::new(seed ^ 0x9e3779b9));
-                self.vals[k].push(trial.vault.len() as f64);
-                // Second measure: the best rarity reached.
-                let top = trial.cells.iter().filter_map(|c| c.inmate.filter(|_| !c.sealed)).map(|i| i.tier).max().unwrap_or(0);
-                self.best[k] += f64::from(top.max(if trial.vault.is_empty() { 0 } else { RAINBOW }).max(0));
             }
             self.rounds += 1;
         }
         rounds
+    }
+
+    /// One round on `seed`: per candidate, Rainbows vaulted (NaN when the
+    /// move does not apply) and the best rarity reached.
+    fn round(&self, seed: u32) -> Vec<(f64, Option<f64>)> {
+        self.list
+            .iter()
+            .map(|c| {
+                let mut trial = self.base.clone();
+                hide_future(&mut trial, seed);
+                if !apply(&mut trial, &c.action).is_ok() {
+                    return (f64::NAN, None);
+                }
+                playout(&mut trial, self.p, &mut Rng32::new(seed ^ 0x9e3779b9));
+                // Second measure: the best rarity reached.
+                let top = trial.cells.iter().filter_map(|c| c.inmate.filter(|_| !c.sealed)).map(|i| i.tier).max().unwrap_or(0);
+                (trial.vault.len() as f64, Some(f64::from(top.max(if trial.vault.is_empty() { 0 } else { RAINBOW }).max(0))))
+            })
+            .collect()
     }
 
     /// The candidates ranked on the rounds played so far.
@@ -300,6 +339,28 @@ impl<'a> Rollouts<'a> {
             .collect()
     }
 }
+
+/// The calling thread's priority, for threads that work on its behalf.
+#[cfg(windows)]
+fn priority() -> i32 {
+    use windows::Win32::System::Threading::{GetCurrentThread, GetThreadPriority};
+    unsafe { GetThreadPriority(GetCurrentThread()) }
+}
+
+#[cfg(not(windows))]
+fn priority() -> i32 {
+    0
+}
+
+/// Gives the current thread a priority [`priority`] returned.
+#[cfg(windows)]
+pub(crate) fn set_priority(priority: i32) {
+    use windows::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY};
+    let _ = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY(priority)) };
+}
+
+#[cfg(not(windows))]
+pub(crate) fn set_priority(_: i32) {}
 
 /// The strategy's pick with its label and a short reason (instant: no playouts).
 #[derive(Clone, Debug, PartialEq)]

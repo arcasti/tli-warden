@@ -105,6 +105,7 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
         let i = cell.inmate.expect("inmate");
         activation(ctx, i.tier as usize, i.beast.index(), &mut comp, crowd, swap_left)
     };
+    let held = HELD_TERMS.iter().any(|&t| st.has(t)).then(|| Held::of(ctx));
     let mut out = Vec::with_capacity(cells.len());
     for &n in cells {
         let c = &st.cells[n];
@@ -112,11 +113,24 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
         let mut score = p.w_step * steps as f64;
         // Landing on a marker fires its incident, which can't be declined.
         score += incident_score(ctx, c, &board);
+        // The sealed doors left after this landing's own openings.
+        let (mut left, mut left_worth) = held.as_ref().map_or((0, 0.0), |h| (h.sealed, h.side));
+        if held.is_some() && c.sealed && !st.chain {
+            left -= 1;
+            left_worth -= side_worth(ctx, c);
+        }
         if st.chain {
             // Chain Reaction opens every door on the walk from the side.
             let (mut unseen, mut seen) = (0, 0.0);
-            for &k in clockwise_path(st, n).iter().filter(|&&k| k != n && st.cells[k].sealed) {
+            for &k in clockwise_path(st, n).iter().filter(|&&k| st.cells[k].sealed) {
                 let d = &st.cells[k];
+                if held.is_some() {
+                    left -= 1;
+                    left_worth -= side_worth(ctx, d);
+                }
+                if k == n {
+                    continue;
+                }
                 if seen_door(d) {
                     seen += dist_worth(&ctx.v, ctx.r, &door_dist(st, Some(d), false).0);
                 } else {
@@ -138,10 +152,114 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
         } else if c.inmate.is_some() {
             score += p.w_walk * known(ctx, c);
         }
+        if let Some(h) = &held {
+            // A dice patrol onto a door sets off the "after opening" instruments.
+            let opened = (c.sealed && c.nest.is_none() && !st.chain)
+                .then(|| if seen_door(c) { door_dist(st, Some(c), true).0 } else { ctx.open_dist.clone() });
+            score += held_terms(ctx, h, n, steps, opened.as_deref(), left, left_worth);
+        }
         out.push((n, score));
     }
     best_first(&mut out);
     out
+}
+
+/// The instruments `held_terms` prices on a patrol landing.
+const HELD_TERMS: [Tool; 6] = [Tool::Keys, Tool::Forgedkey, Tool::Fire, Tool::Blacklist, Tool::Shortchain, Tool::Longchain];
+
+/// The board before a patrol, as the held instruments see it: the sealed
+/// doors and their worth opened from the side, and the open inmates' tiers.
+struct Held {
+    sealed: usize,
+    side: f64,
+    board: Vec<usize>,
+}
+
+impl Held {
+    fn of(ctx: &Ctx) -> Held {
+        let st = ctx.st;
+        let doors = st.cells.iter().filter(|c| c.sealed);
+        Held {
+            sealed: doors.clone().count(),
+            side: doors.map(|c| side_worth(ctx, c)).sum(),
+            board: st.cells.iter().filter(|c| c.on_board()).filter_map(|c| c.inmate).map(|i| i.tier as usize).collect(),
+        }
+    }
+}
+
+/// The worth of sealed cell `c` opened from the side (no "after opening" instrument).
+fn side_worth(ctx: &Ctx, c: &Cell) -> f64 {
+    if seen_door(c) { dist_worth(&ctx.v, ctx.r, &door_dist(ctx.st, Some(c), false).0) } else { ctx.side_value }
+}
+
+/// What `by` tiers more are worth to an inmate of tier `t`; a Chromatic is
+/// worth `r` and nothing rises past the top tier.
+fn rise_worth(ctx: &Ctx, t: usize, by: i32) -> f64 {
+    let worth = |t: usize| if t >= TOP { ctx.r } else { ctx.v[t] };
+    worth((t as i32 + by).clamp(0, ctx.st.top_tier()) as usize) - worth(t)
+}
+
+/// What the held opening and movement instruments add to a dice landing on
+/// cell `n`, `steps` away (engine after_opening and shackles). `opened` is the
+/// tier odds of the inmate a patrol opening brings out, None when the landing
+/// opens no door on the patrol; `left` doors stay sealed after the landing's
+/// own openings, worth `left_worth` in all from the side.
+fn held_terms(ctx: &Ctx, h: &Held, n: usize, steps: usize, opened: Option<&[f64]>, left: usize, left_worth: f64) -> f64 {
+    let st = ctx.st;
+    let d = data();
+    let w_open = ctx.p.w_open;
+    let chance = |t: Tool| if st.has(t) { d.tool(t).chance / 100.0 } else { 0.0 };
+    // A random sealed door left, opened from the side.
+    let random_door = if left > 0 { left_worth / left as f64 } else { 0.0 };
+    // The open inmates after the landing, the opened one included, and the
+    // sum of what `by` tiers more are worth to them.
+    let board = h.board.len() + usize::from(opened.is_some());
+    let rises = |by: i32| {
+        let mut sum: f64 = h.board.iter().map(|&t| rise_worth(ctx, t, by)).sum();
+        if let Some(dist) = opened {
+            sum += dist.iter().enumerate().map(|(t, p)| p * rise_worth(ctx, t, by)).sum::<f64>();
+        }
+        sum
+    };
+    let mut gain = 0.0;
+    if let Some(dist) = opened {
+        // Executioner's Blacklist: with few doors left after this one (counted
+        // before the Iron, Keys and Forged Key open theirs), random inmates rise.
+        let black = d.tool(Tool::Blacklist);
+        if st.has(Tool::Blacklist) && left <= black.max_sealed.unwrap_or(0) {
+            let picks = black.count.unwrap_or(0).min(board);
+            gain += picks as f64 / board as f64 * rises(black.tiers.unwrap_or(0));
+        }
+        // Searing Branding Iron: a copy of the opened inmate opens another door.
+        if left > 0 {
+            gain += chance(Tool::Fire) * w_open * dist_worth(&ctx.v, ctx.r, dist);
+        }
+        // Lost Ring of Keys: the doors on both sides open from the side.
+        if st.has(Tool::Keys) {
+            let cells = d.cell_count;
+            let sides: f64 = [n + cells - 1, n + 1]
+                .into_iter()
+                .map(|k| &st.cells[k % cells])
+                .filter(|c| c.sealed && c.n != d.room)
+                .map(|c| side_worth(ctx, c))
+                .sum();
+            gain += chance(Tool::Keys) * w_open * sides;
+        }
+        // Forged Key: more random doors open from the side.
+        let forged = d.tool(Tool::Forgedkey).count.unwrap_or(0).min(left);
+        gain += chance(Tool::Forgedkey) * w_open * forged as f64 * random_door;
+    }
+    // Short-Chained Shackles: a short move opens random doors.
+    let short = d.tool(Tool::Shortchain);
+    if steps > 0 && steps <= short.max_steps.unwrap_or(0) {
+        gain += chance(Tool::Shortchain) * w_open * short.count.unwrap_or(0).min(left) as f64 * random_door;
+    }
+    // Long-Chained Shackles: a long move raises a random open inmate.
+    let long = d.tool(Tool::Longchain);
+    if steps >= long.min_steps.unwrap_or(usize::MAX) && board > 0 {
+        gain += chance(Tool::Longchain) * rises(long.tiers.unwrap_or(0)) / board as f64;
+    }
+    gain
 }
 
 /// linkValue: what a prey mark still promises; both inmates rise a tier each morning.

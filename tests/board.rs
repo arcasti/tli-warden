@@ -525,3 +525,47 @@ fn a_revealed_legendary_door_outscores_an_unseen_one() {
     let both = score(&st);
     assert!(rarity > unseen + 1e-6 && both > unseen + 1e-6, "{rarity} {both} {unseen}");
 }
+
+#[test]
+fn the_ring_of_keys_prices_the_sealed_doors_beside_a_patrolled_one() {
+    // Door 7 sits between two sealed cells; door 12's neighbours are open.
+    let mut st = duel(serde_json::json!([]), (Beast::Wolf, 2), 2);
+    for n in [11, 13] {
+        st.cells[n].sealed = false;
+    }
+    let gap = |st: &warden::engine::state::State| {
+        let mut ctx = warden::solver::context(st, &TUNED);
+        let scores = warden::solver::scores::patrol_scores(&mut ctx, &[7, 12]);
+        let of = |n: usize| scores.iter().find(|s| s.0 == n).expect("scored").1;
+        (of(7) - of(12), ctx.side_value)
+    };
+    let (plain, _) = gap(&st);
+    st.tools = vec![Tool::Keys];
+    let (keys, side) = gap(&st);
+    // The Keys open their doors from the side: no "after opening" instrument.
+    let want = 2.0 * data().tool(Tool::Keys).chance / 100.0 * TUNED.w_open * side;
+    assert!((keys - plain - want).abs() < 1e-9, "{keys} {plain} {want}");
+}
+
+#[test]
+fn the_short_shackles_price_a_short_move_only() {
+    let mut st = duel(serde_json::json!([]), (Beast::Wolf, 2), 2);
+    let short = data().tool(Tool::Shortchain);
+    let max = short.max_steps.unwrap_or(0);
+    assert!((2..5).contains(&max), "{max}");
+    let at = |steps: usize| {
+        st.sealed_cells().into_iter().find(|&n| steps_between(st.position, n) == steps).expect("a door that far")
+    };
+    let (near, far) = (at(2), at(5));
+    let score = |st: &warden::engine::state::State, n: usize| {
+        let mut ctx = warden::solver::context(st, &TUNED);
+        (warden::solver::scores::patrol_scores(&mut ctx, &[n])[0].1, ctx.side_value)
+    };
+    let (near_plain, far_plain) = (score(&st, near).0, score(&st, far).0);
+    st.tools = vec![Tool::Shortchain];
+    let (near_held, side) = score(&st, near);
+    let doors = short.count.unwrap_or(0).min(st.sealed_cells().len() - 1);
+    let want = short.chance / 100.0 * TUNED.w_open * doors as f64 * side;
+    assert!(want > 0.0 && (near_held - near_plain - want).abs() < 1e-9, "{near_held} {near_plain} {want}");
+    assert!((score(&st, far).0 - far_plain).abs() < 1e-12);
+}

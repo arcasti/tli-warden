@@ -12,7 +12,8 @@ pub mod values;
 use crate::engine::data::{Beast, CAGE_FIGHT, RAINBOW, Tool, data};
 use crate::engine::devour::{can_devour_now, devour_options, start_options};
 use crate::engine::rng::rand;
-use crate::engine::state::{Pending, Phase, State};
+use crate::engine::rules::door_weights;
+use crate::engine::state::{Cell, Pending, Phase, State};
 use crate::engine::{Action, ChoiceId};
 use chain::replace_odds;
 use scores::{best_by_board, devour_scores, hunt_gain, patrol_scores, swap_gain_here};
@@ -201,15 +202,23 @@ pub struct Ctx<'a> {
     /// chain can read (the memo key of `chain::feed`).
     pub down: [u8; 4],
     pub scratch_extra: usize,
+    /// Tier odds (Normal to Rainbow) and worth of whoever comes out of an
+    /// unseen door on a patrol or instrument opening (`door_dist`).
     pub open_dist: Vec<f64>,
     pub open_value: f64,
+    /// The worth of an unseen door opened from the side (Chain Reaction walk,
+    /// Crowded Beastcage), which sets off no "after opening" instrument.
+    pub side_value: f64,
     pub memo: HashMap<(u32, u128), f64, BuildHasherDefault<MemoHasher>>,
 }
 
 pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
     let v = [0, 1, 2, 3, 4, 5].map(|t| p.tier_base.powi(t));
-    let open_dist = normalize(&st.params.tier_weights.iter().map(|&w| f64::from(w)).collect::<Vec<_>>());
-    let open_value = open_dist.iter().enumerate().fold(0.0, |sum, (t, p)| sum + p * v[t]);
+    // A full vault stops inmates at Ultimate: the top tier is worth no more.
+    let r = if st.top_tier() < RAINBOW { v[RAINBOW as usize - 1] } else { v[RAINBOW as usize] * p.rainbow_mult };
+    let open_dist = door_dist(st, None, true).0;
+    let open_value = dist_worth(&v, r, &open_dist);
+    let side_value = dist_worth(&v, r, &door_dist(st, None, false).0);
     let chain = food_chain();
     let cage_fight = st.theme == Some(CAGE_FIGHT);
     let mask = |foods: &[usize]| foods.iter().fold(0u8, |m, &f| m | 1 << f);
@@ -231,8 +240,7 @@ pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
         chain,
         down,
         v,
-        // A full vault stops inmates at Ultimate: the top tier is worth no more.
-        r: if st.top_tier() < RAINBOW { v[RAINBOW as usize - 1] } else { v[RAINBOW as usize] * p.rainbow_mult },
+        r,
         extra: [false, true].map(|chained| extra_tiers(st, chained)),
         muzzle: st.has(Tool::Muzzle),
         skewer: st.has(Tool::Skewer),
@@ -245,8 +253,51 @@ pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
         scratch_extra: 1 + usize::from(st.params.scratch_stacks_base),
         open_dist,
         open_value,
+        side_value,
         memo: HashMap::default(),
     }
+}
+
+/// doorDist: tier odds (Normal to Rainbow) for whoever comes out of sealed
+/// cell `cell`, or of an unseen door when None, and its beast when the player
+/// has seen it (engine door_inmate). A seen door holds its known rarity (even
+/// a Normal under the Sorting Hook); an unseen one rolls `door_weights`, with
+/// no Normal under the Hook. On a patrol or instrument opening (`after`),
+/// Felon's Dog Tag may raise the inmate. A scratched door still prices as
+/// unseen: opening it gives up a Wolf's scratch bite, which nothing here
+/// prices, and pricing only its known rarity lost Chromatics with the Claws.
+pub fn door_dist(st: &State, cell: Option<&Cell>, after: bool) -> (Vec<f64>, Option<usize>) {
+    let seen = cell.filter(|c| seen_door(c)).and_then(|c| c.hidden.map(|h| (h, c.known)));
+    let mut dist = match seen {
+        Some((h, _)) => {
+            let mut d = vec![0.0; TOP + 1];
+            d[h.tier as usize] = 1.0;
+            d
+        }
+        None => normalize(&door_weights(st)),
+    };
+    dist.resize(TOP + 1, 0.0);
+    if after && st.has(Tool::Dogtag) {
+        let def = data().tool(Tool::Dogtag);
+        let (c, by, top) = (def.chance / 100.0, def.tiers.unwrap_or(0), st.top_tier());
+        let mut raised = vec![0.0; TOP + 1];
+        for (t, &p) in dist.iter().enumerate() {
+            raised[t] += p * (1.0 - c);
+            raised[(t as i32 + by).clamp(0, top) as usize] += p * c;
+        }
+        dist = raised;
+    }
+    (dist, seen.filter(|&(_, k)| k >= 2).map(|(h, _)| h.beast.index()))
+}
+
+/// Whether `door_dist` prices sealed cell `c` by what the player saw behind it.
+pub fn seen_door(c: &Cell) -> bool {
+    c.known > 0 && c.hidden.is_some() && !c.scratch
+}
+
+/// The expected worth of an inmate with tier odds `dist`; a Chromatic is worth `r`.
+pub fn dist_worth(v: &[f64; 6], r: f64, dist: &[f64]) -> f64 {
+    dist.iter().enumerate().fold(0.0, |sum, (t, p)| sum + p * if t >= TOP { r } else { v[t] })
 }
 
 /// The odds of 0 to 3 extra tiers on a successful bite (engine do_devour):

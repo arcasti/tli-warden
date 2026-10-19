@@ -419,8 +419,8 @@ fn the_crowded_beastcage_counts_the_reopened_cell_with_reusable_cells() {
         rise(&mut ctx, 3, Beast::Wolf.index(), &mut [0; 24], 1) - rise(&mut plain, 3, Beast::Wolf.index(), &mut [0; 24], 1)
     };
     let c = data().tool(Tool::Beastcage).chance / 100.0;
-    let open_value = warden::solver::context(&st, &TUNED).open_value;
-    assert!((gain(&st) - c * open_value).abs() < 1e-9 && gain(&st) > 0.0);
+    let side_value = warden::solver::context(&st, &TUNED).side_value;
+    assert!((gain(&st) - c * side_value).abs() < 1e-9 && gain(&st) > 0.0);
     st.params.reusable_cells = false;
     assert_eq!(gain(&st), 0.0);
 }
@@ -481,4 +481,47 @@ fn the_execution_axe_counts_the_burning_stake() {
     let axe = gain(serde_json::json!(["axe"])) - gain(serde_json::json!([]));
     let axe_with_stake = gain(serde_json::json!(["axe", "stake"])) - gain(serde_json::json!(["stake"]));
     assert!(axe > 0.0 && axe_with_stake > axe + 1e-6, "{axe_with_stake} {axe}");
+}
+
+#[test]
+fn the_sorting_hook_and_the_dog_tag_raise_an_unseen_door() {
+    let ctx_of = |tools: Value| {
+        let st = duel(tools, (Beast::Wolf, 2), 2);
+        let ctx = warden::solver::context(&st, &TUNED);
+        (ctx.open_dist.clone(), ctx.open_value)
+    };
+    let (plain_dist, plain) = ctx_of(serde_json::json!([]));
+    let (hook_dist, hook) = ctx_of(serde_json::json!(["hook"]));
+    assert!(plain_dist[0] > 0.0 && hook_dist[0] == 0.0, "{hook_dist:?}");
+    assert!(hook > plain + 1e-6, "{hook} {plain}");
+    // With its chance the Dog Tag lifts the opened inmate its tiers.
+    let (tag_dist, tag) = ctx_of(serde_json::json!(["dogtag"]));
+    let def = data().tool(Tool::Dogtag);
+    let (c, by) = (def.chance / 100.0, def.tiers.unwrap_or(0) as usize);
+    for t in 0..tag_dist.len() {
+        let want = (1.0 - c) * plain_dist[t] + if t >= by { c * plain_dist[t - by] } else { 0.0 };
+        assert!((tag_dist[t] - want).abs() < 1e-12, "{tag_dist:?}");
+    }
+    assert!(tag > plain + 1e-6, "{tag} {plain}");
+}
+
+#[test]
+fn a_revealed_legendary_door_outscores_an_unseen_one() {
+    let mut st = duel(serde_json::json!([]), (Beast::Wolf, 2), 2);
+    let door = 7;
+    let score = |st: &warden::engine::state::State| {
+        let mut ctx = warden::solver::context(st, &TUNED);
+        warden::solver::scores::patrol_scores(&mut ctx, &[door])[0].1
+    };
+    // The solver stays blind to the inmate behind an unseen door.
+    st.cells[door].hidden = Some(warden::engine::state::Inmate { id: 999, beast: Beast::Lion, tier: 3 });
+    let unseen = score(&st);
+    st.cells[door].hidden = None;
+    assert_eq!(score(&st), unseen);
+    st.cells[door].hidden = Some(warden::engine::state::Inmate { id: 999, beast: Beast::Lion, tier: 3 });
+    st.cells[door].known = 1;
+    let rarity = score(&st);
+    st.cells[door].known = 2;
+    let both = score(&st);
+    assert!(rarity > unseen + 1e-6 && both > unseen + 1e-6, "{rarity} {both} {unseen}");
 }

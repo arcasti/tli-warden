@@ -3,7 +3,7 @@
 
 use super::chain::{coin_of_fate, devour_delta, replace_odds};
 use super::values::{activation, execution_value, fresh_value, stair_delta, swap_value};
-use super::{Comp, Ctx, Rng32, TOP, composition, context};
+use super::{Comp, Ctx, Rng32, TOP, composition, context, dist_worth, door_dist, seen_door};
 use crate::engine::data::{RAINBOW, Tool, data};
 use crate::engine::devour::{Bite, devour_options, hunt_targets};
 use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY};
@@ -20,15 +20,19 @@ fn best_first(out: &mut [(usize, f64)]) {
 /// incidentScore: the value of the incident marker on a destination. Only
 /// the two incidents the engine simulates have a value.
 pub fn incident_score(ctx: &Ctx, c: &Cell, comp: &Comp) -> f64 {
-    // Behind a door the executioner is whoever comes out.
+    // Behind a door the executioner is whoever comes out; a Chain Reaction
+    // landing opens it from the side.
     let execution = || {
         if !c.sealed {
             return c.inmate.map_or(0.0, |i| execution_value(ctx, i.tier as usize, i.beast.index(), comp));
         }
+        let (dist, beast) = door_dist(ctx.st, Some(c), !ctx.st.chain);
+        let beasts = beast.map_or(0..4, |b| b..b + 1);
+        let share = 1.0 / beasts.len() as f64;
         let mut exec = 0.0;
-        for t in 0..ctx.open_dist.len() {
-            for b in 0..4 {
-                exec += (ctx.open_dist[t] / 4.0) * execution_value(ctx, t, b, comp);
+        for (t, &p) in dist.iter().enumerate() {
+            for b in beasts.clone() {
+                exec += (p * share) * execution_value(ctx, t, b, comp);
             }
         }
         exec
@@ -81,12 +85,20 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
     let p = ctx.p;
     let (mut board, crowd) = composition(st, None);
     let swap_left = st.used.swap < st.params.swaps_per_day;
-    let mut fresh: Option<f64> = None;
-    let mut fresh_now = |ctx: &mut Ctx, board: &mut Comp| {
-        *fresh.get_or_insert_with(|| {
-            let dist = ctx.open_dist.clone();
-            fresh_value(ctx, &dist, board, crowd + 1, swap_left)
-        })
+    // The door in cell c, by whether its opening sets off the "after opening"
+    // instruments; an unseen door is valued once per kind of opening.
+    let mut fresh: [Option<f64>; 2] = [None; 2];
+    let mut door_now = |ctx: &mut Ctx, board: &mut Comp, c: &Cell, after: bool| {
+        let seen = seen_door(c);
+        if let (false, Some(value)) = (seen, fresh[usize::from(after)]) {
+            return value;
+        }
+        let (dist, beast) = door_dist(st, Some(c), after);
+        let value = fresh_value(ctx, &dist, beast, board, crowd + 1, swap_left);
+        if !seen {
+            fresh[usize::from(after)] = Some(value);
+        }
+        value
     };
     let known = |ctx: &mut Ctx, cell: &Cell| {
         let (mut comp, crowd) = composition(st, Some(cell.n));
@@ -101,19 +113,28 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
         // Landing on a marker fires its incident, which can't be declined.
         score += incident_score(ctx, c, &board);
         if st.chain {
-            let sealed = clockwise_path(st, n).iter().filter(|&&k| st.cells[k].sealed).count() as i64;
+            // Chain Reaction opens every door on the walk from the side.
+            let (mut unseen, mut seen) = (0, 0.0);
+            for &k in clockwise_path(st, n).iter().filter(|&&k| k != n && st.cells[k].sealed) {
+                let d = &st.cells[k];
+                if seen_door(d) {
+                    seen += dist_worth(&ctx.v, ctx.r, &door_dist(st, Some(d), false).0);
+                } else {
+                    unseen += 1;
+                }
+            }
             let here = if c.sealed {
-                fresh_now(ctx, &mut board)
+                door_now(ctx, &mut board, c, false)
             } else if c.inmate.is_some() {
                 p.w_walk * known(ctx, c)
             } else {
                 0.0
             };
-            score += p.w_open * (sealed - i64::from(c.sealed)) as f64 * ctx.open_value + here;
+            score += p.w_open * unseen as f64 * ctx.side_value + p.w_open * seen + here;
         } else if c.sealed && c.nest.is_some() {
             score += p.w_nest;
         } else if c.sealed {
-            score += fresh_now(ctx, &mut board);
+            score += door_now(ctx, &mut board, c, true);
         } else if c.inmate.is_some() {
             score += p.w_walk * known(ctx, c);
         }

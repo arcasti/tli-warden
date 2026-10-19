@@ -220,7 +220,7 @@ fn worth(ctx: &Ctx, t: usize) -> f64 {
 /// cell may open with a fresh door inmate (engine do_devour); only its worth
 /// is counted, not the chain it could feed.
 pub fn rise(ctx: &mut Ctx, t: usize, b: usize, comp: &mut Comp, crowd: i64) -> f64 {
-    let cage = ctx.beastcage * ctx.open_value;
+    let cage = ctx.beastcage * ctx.side_value;
     if t >= TOP {
         return ctx.r + cage;
     }

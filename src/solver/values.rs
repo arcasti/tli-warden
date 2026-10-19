@@ -2,7 +2,7 @@
 //! inmate can do once the warden stands with it, and Executions.
 
 use super::chain::{best_meal, fed, replace_odds};
-use super::{Comp, Ctx, TOP};
+use super::{Comp, Ctx, TOP, dist_worth};
 use crate::engine::data::data;
 
 /// stair: how ready the block is for chains; at each tier, the share of beasts
@@ -28,16 +28,19 @@ pub fn stair_delta(ctx: &Ctx, comp: &mut Comp, tier: usize, beast: usize, sign: 
     ctx.p.w_stair * (after - before)
 }
 
-/// stairFresh: expected readiness change from a new inmate with tier odds `dist`.
-pub fn stair_fresh(ctx: &Ctx, dist: &[f64], comp: &mut Comp) -> f64 {
+/// stairFresh: expected readiness change from a new inmate with tier odds
+/// `dist`, of beast `beast` when it is known, else any of the 4 at even odds.
+pub fn stair_fresh(ctx: &Ctx, dist: &[f64], beast: Option<usize>, comp: &mut Comp) -> f64 {
     if ctx.p.w_stair == 0.0 {
         return 0.0;
     }
+    let beasts = beast.map_or(0..4, |b| b..b + 1);
+    let share = 1.0 / beasts.len() as f64;
     let mut sum = 0.0;
     for (t, &p) in dist.iter().enumerate() {
-        for b in 0..4 {
+        for b in beasts.clone() {
             if p != 0.0 {
-                sum += (p / 4.0) * stair_delta(ctx, comp, t, b, 1);
+                sum += (p * share) * stair_delta(ctx, comp, t, b, 1);
             }
         }
     }
@@ -84,10 +87,10 @@ pub fn fresh_activation(ctx: &mut Ctx, dist: &[f64], beast: Option<usize>, comp:
 }
 
 /// freshValue: a new inmate behind a door, its own worth plus what it could
-/// do today from the warden's cell.
-pub fn fresh_value(ctx: &mut Ctx, dist: &[f64], comp: &mut Comp, crowd: i64, swap_left: bool) -> f64 {
-    let worth = dist.iter().enumerate().fold(0.0, |sum, (t, p)| sum + p * ctx.v[t]);
-    ctx.p.w_open * worth + ctx.p.w_now * fresh_activation(ctx, dist, None, comp, crowd, swap_left) + stair_fresh(ctx, dist, comp)
+/// do today from the warden's cell; of beast `beast` when the player has seen it.
+pub fn fresh_value(ctx: &mut Ctx, dist: &[f64], beast: Option<usize>, comp: &mut Comp, crowd: i64, swap_left: bool) -> f64 {
+    let worth = dist_worth(&ctx.v, ctx.r, dist);
+    ctx.p.w_open * worth + ctx.p.w_now * fresh_activation(ctx, dist, beast, comp, crowd, swap_left) + stair_fresh(ctx, dist, beast, comp)
 }
 
 /// executionValue: an Execution by an inmate of this tier and beast.

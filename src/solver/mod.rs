@@ -354,11 +354,11 @@ pub fn decide(st: &State, p: &Params, roll: &mut Rng32) -> Option<Action> {
             }
             Pending::Gift { options, .. } => {
                 let keys: Vec<&str> = options.iter().map(|g| g.key()).collect();
-                name(best_by_board(&ctx, &keys, roll))
+                name(best_by_board(&ctx, &keys, true, roll))
             }
             Pending::Interrogation { options } => {
                 let keys: Vec<&str> = options.iter().map(|c| c.key()).collect();
-                name(best_by_board(&ctx, &keys, roll))
+                name(best_by_board(&ctx, &keys, false, roll))
             }
             // Sewer Ratway: the cell a patrol would score best.
             Pending::Cell { options, .. } => {

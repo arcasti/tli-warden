@@ -7,8 +7,8 @@ use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
 use warden::board::{CellModel, ChoiceKind, EventMark, Model, ObjectiveModel, build_state};
-use warden::engine::actions::Action;
-use warden::engine::data::{Beast, Tool, data};
+use warden::engine::actions::{Action, ChoiceId};
+use warden::engine::data::{Beast, Gift, Tool, data};
 use warden::engine::devour::devour_options;
 use warden::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATWAY};
 use warden::engine::rules::steps_between;
@@ -663,4 +663,25 @@ fn the_last_day_replaces_an_inmate_that_cannot_make_a_chromatic() {
     };
     assert_eq!(pick(19), Some(Action::End));
     assert_eq!(pick(20), Some(Action::Swap));
+}
+
+#[test]
+fn an_early_gift_opens_doors_over_raising_one_rare() {
+    // Day 5, a Rare Wolf in the warden's cell with no target and every other
+    // door sealed. Under 2.75^t tiers Wine (the Rare rises to Epic) outweighed
+    // three doors; under 2^t the doors win.
+    let mut m = raw("guillotine-last-day.json");
+    m["day"] = serde_json::json!(5);
+    m["tools"] = serde_json::json!([]);
+    m["vault"] = serde_json::json!([]);
+    for n in 1..16 {
+        m["cells"][n] = serde_json::json!({"kind": "sealed", "event": null});
+    }
+    m["cells"][12] = serde_json::json!({"kind": "inmate", "beast": "wolf", "tier": 2});
+    let model: Model = serde_json::from_value(m).expect("model");
+    let mut st = build_state(&model, 1).0;
+    assert!(devour_options(&st, 12).is_empty());
+    st.pending = vec![Pending::Gift { options: vec![Gift::Ring, Gift::Wine], picks: 1 }];
+    let ring = Action::Choose { id: ChoiceId::Name(Gift::Ring.key().to_string()) };
+    assert_eq!(decide(&st, &TUNED, &mut Rng32::new(1)), Some(ring));
 }

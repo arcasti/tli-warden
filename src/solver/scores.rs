@@ -463,21 +463,38 @@ pub fn swap_gain_here(ctx: &Ctx) -> f64 {
     if ctx.last_day || f64::from(inmate.tier) <= ctx.p.swap_max_tier { gain } else { f64::NEG_INFINITY }
 }
 
-/// boardValue: tier values plus vaulted Rainbows, with a bonus for inmates
-/// that have something to eat.
-pub fn board_value(ctx: &Ctx) -> f64 {
+/// boardValue: tier values `v` plus vaulted Rainbows worth `r` each, with a
+/// bonus for inmates that have something to eat.
+fn board_value(ctx: &Ctx, v: &[f64; 6], r: f64) -> f64 {
     let st = ctx.st;
-    let mut value = st.vault.len() as f64 * ctx.r;
+    let mut value = st.vault.len() as f64 * r;
     for c in &st.cells {
         let Some(i) = c.inmate.filter(|_| !c.sealed) else { continue };
-        value += ctx.v[i.tier as usize] * if devour_options(st, c.n).is_empty() { 1.0 } else { 1.25 };
+        value += v[i.tier as usize] * if devour_options(st, c.n).is_empty() { 1.0 } else { 1.25 };
     }
     value
 }
 
+/// The tier values and Rainbow worth a gift pick weighs the board with. Two
+/// inmates of a tier make one of the next, so early on an inmate counts as the
+/// inmates it took to make: 2^t. With fewer than 4 days left the tiers still
+/// to climb weigh more than the inmates spent, 3^t. The last day keeps the
+/// strategy's own values, where only a Chromatic counts.
+fn gift_tiers(ctx: &Ctx) -> ([f64; 6], f64) {
+    let st = ctx.st;
+    if ctx.last_day {
+        return (ctx.v, ctx.r);
+    }
+    let base: f64 = if st.max_days - st.day < 4 { 3.0 } else { 2.0 };
+    let v = [0, 1, 2, 3, 4, 5].map(|t| base.powi(t));
+    // A full vault stops inmates at Ultimate, as in `context`.
+    (v, if st.top_tier() < RAINBOW { v[TOP - 1] } else { v[TOP] * ctx.p.rainbow_mult })
+}
+
 /// bestByBoard: the option whose result has the highest board value; random
-/// ones are sampled three times. Gifts and the Interrogation Room's cards use it.
-pub fn best_by_board<'k>(ctx: &Ctx, options: &[&'k str], roll: &mut Rng32) -> &'k str {
+/// ones are sampled three times. Gifts (`gift`) weigh tiers by `gift_tiers`;
+/// the Interrogation Room's cards by the strategy's tier values.
+pub fn best_by_board<'k>(ctx: &Ctx, options: &[&'k str], gift: bool, roll: &mut Rng32) -> &'k str {
     let mut best: Option<(&str, f64)> = None;
     for &id in options {
         let mut value = 0.0;
@@ -488,7 +505,9 @@ pub fn best_by_board<'k>(ctx: &Ctx, options: &[&'k str], roll: &mut Rng32) -> &'
             if !apply(&mut trial, &Action::Choose { id: ChoiceId::Name(id.to_string()) }).is_ok() {
                 continue;
             }
-            value += board_value(&context(&trial, ctx.p));
+            let after = context(&trial, ctx.p);
+            let (v, r) = if gift { gift_tiers(&after) } else { (after.v, after.r) };
+            value += board_value(&after, &v, r);
         }
         value /= f64::from(samples);
         if best.is_none_or(|(_, v)| value > v) {

@@ -1,7 +1,7 @@
 //! Valuing positions (js/solver.js 255-334): chain readiness, swaps, what an
 //! inmate can do once the warden stands with it, and Executions.
 
-use super::chain::{best_meal, guillotine};
+use super::chain::{best_meal, fed, guillotine};
 use super::{Comp, Ctx, TOP};
 use crate::engine::data::data;
 
@@ -10,7 +10,7 @@ use crate::engine::data::data;
 pub fn stair(ctx: &Ctx, comp: &Comp) -> f64 {
     let mut value = 0.0;
     for t in 0..TOP {
-        let fed = (0..4).filter(|&b| ctx.eats[b].iter().any(|&f| comp[t * 4 + f] > 0)).count();
+        let fed = (0..4).filter(|&b| fed(ctx, t, b, comp)).count();
         value += (fed as f64 / 4.0) * ctx.v[t];
     }
     value

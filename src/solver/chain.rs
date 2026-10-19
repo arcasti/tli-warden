@@ -69,42 +69,133 @@ pub fn coin_of_fate(ctx: &Ctx, comp: &Comp) -> f64 {
     (1.0 - miss.powi(mornings as i32)) * gain / f64::from(matched)
 }
 
-/// rise: value from here on for an eater that just reached tier t; its beast
-/// re-rolls, then it chains into a random valid meal if it has one.
-pub fn rise(ctx: &mut Ctx, t: usize, comp: &mut Comp, crowd: i64) -> f64 {
+/// A meal an eater can take: its tier and beast, the tiers the bite adds
+/// before Muzzle, Skewer, Crown and the rolls, and the odds it upgrades at all.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Meal {
+    pub tier: usize,
+    pub beast: usize,
+    pub base: usize,
+    pub chance: f64,
+}
+
+/// The terms of a bite by an eater of beast b at tier t on a meal of tier mt
+/// and beast mb, or None when it can't eat it (engine `can_eat`).
+fn eat_terms(ctx: &Ctx, t: usize, b: usize, mt: usize, mb: usize) -> Option<Meal> {
+    let (lower, higher) = reach(ctx, b);
+    let ok = match mt.cmp(&t) {
+        std::cmp::Ordering::Less => lower && ctx.chain[b].contains(&mb),
+        std::cmp::Ordering::Greater => higher && ctx.chain[b].contains(&mb),
+        std::cmp::Ordering::Equal => ctx.eats[b].contains(&mb),
+    };
+    ok.then(|| terms(ctx, t, b, mt, mb))
+}
+
+/// Whether an eater of beast b eats countered inmates of lower tiers (Fanged
+/// Guillotine for a Wolf, Cage Fight for any) and of higher ones (the Maul
+/// for a Mammoth).
+fn reach(ctx: &Ctx, b: usize) -> (bool, bool) {
+    ((b == Beast::Wolf.index() && ctx.fangs) || ctx.cage_fight, b == Beast::Mammoth.index() && ctx.maul)
+}
+
+/// The terms of a bite it can make. The base is `sure_gain`'s before the
+/// bonuses: the Maul lands a Mammoth `above` tiers over the meal, at least +1.
+/// The chance is `upgrade_chance`: Oppress costs a Wolf with the Fanged
+/// Guillotine `oppress_per_tier` percent per tier below it.
+fn terms(ctx: &Ctx, t: usize, b: usize, mt: usize, mb: usize) -> Meal {
+    let mut base = 1;
+    if b == Beast::Mammoth.index() && ctx.maul {
+        let above = data().tool(Tool::Maul).above.unwrap_or(0) as i64;
+        base = base.max(mt as i64 + above - t as i64);
+    }
+    let mut chance = 1.0;
+    if mt < t && b == Beast::Wolf.index() && ctx.fangs {
+        chance = (100.0 - data().oppress_per_tier * (t - mt) as f64).max(0.0) / 100.0;
+    }
+    Meal { tier: mt, beast: mb, base: base as usize, chance }
+}
+
+/// The tiers an eater of beast b at tier t takes meals from: its own, then
+/// the lower and higher ones it reaches.
+fn meal_tiers(ctx: &Ctx, t: usize, b: usize) -> impl Iterator<Item = usize> {
+    let (lower, higher) = reach(ctx, b);
+    std::iter::once(t).chain(if lower { 0 } else { t }..t).chain(t + 1..if higher { TOP } else { t + 1 })
+}
+
+/// meals: the meals in `comp` an eater of beast b at tier t can take, in a
+/// fixed buffer (one slot per tier and beast) and their count: the same-tier
+/// ones first in `ctx.eats` order, then the lower and higher tiers it reaches.
+pub fn meals(ctx: &Ctx, t: usize, b: usize, comp: &Comp) -> ([Meal; 20], usize) {
+    let mut out = [Meal { tier: 0, beast: 0, base: 0, chance: 0.0 }; 20];
+    let mut n = 0;
+    for mt in meal_tiers(ctx, t, b) {
+        for &mb in if mt == t { &ctx.eats[b] } else { &ctx.chain[b] } {
+            if comp[mt * 4 + mb] > 0 {
+                out[n] = terms(ctx, t, b, mt, mb);
+                n += 1;
+            }
+        }
+    }
+    (out, n)
+}
+
+/// Whether an eater of beast b at tier t has a meal in `comp`.
+pub fn fed(ctx: &Ctx, t: usize, b: usize, comp: &Comp) -> bool {
+    meal_tiers(ctx, t, b).any(|mt| (if mt == t { &ctx.eats[b] } else { &ctx.chain[b] }).iter().any(|&mb| comp[mt * 4 + mb] > 0))
+}
+
+/// The worth of an inmate of tier t.
+fn worth(ctx: &Ctx, t: usize) -> f64 {
+    if t >= TOP { ctx.r } else { ctx.v[t] }
+}
+
+/// rise: value from here on for an eater of beast b that just reached tier t;
+/// its beast re-rolls (kept under Cage Fight), then it chains into a random
+/// valid meal if it has one.
+pub fn rise(ctx: &mut Ctx, t: usize, b: usize, comp: &mut Comp, crowd: i64) -> f64 {
     if t >= TOP {
         return ctx.r;
     }
+    if ctx.cage_fight {
+        return land(ctx, t, b, comp, crowd);
+    }
     let mut sum = 0.0;
     for b in 0..4 {
-        if ctx.revenge {
-            // Avenger's Casket: 30% of the time a meal for the new form appears.
-            let foods = ctx.eats[b].clone();
-            let mut spawned = 0.0;
-            for &f in &foods {
-                comp[t * 4 + f] += 1;
-                spawned += ctx.v[t] + feed(ctx, t, b, comp, crowd + 1);
-                comp[t * 4 + f] -= 1;
-            }
-            sum += (0.3 * spawned) / foods.len() as f64 + 0.7 * feed(ctx, t, b, comp, crowd);
-        } else {
-            sum += feed(ctx, t, b, comp, crowd);
-        }
+        sum += land(ctx, t, b, comp, crowd);
     }
     sum / 4.0
 }
 
-/// The memo key of feed: tier, beast, the Muzzle crowd bucket and the counts
-/// from tier t up, as the JS string key tells positions apart.
+/// land: value from here on for an eater of beast b settled at tier t.
+fn land(ctx: &mut Ctx, t: usize, b: usize, comp: &mut Comp, crowd: i64) -> f64 {
+    if !ctx.revenge {
+        return feed(ctx, t, b, comp, crowd);
+    }
+    // Avenger's Casket: 30% of the time a meal for the new form appears.
+    let foods = ctx.eats[b].clone();
+    let mut spawned = 0.0;
+    for &f in &foods {
+        comp[t * 4 + f] += 1;
+        spawned += ctx.v[t] + feed(ctx, t, b, comp, crowd + 1);
+        comp[t * 4 + f] -= 1;
+    }
+    (0.3 * spawned) / foods.len() as f64 + 0.7 * feed(ctx, t, b, comp, crowd)
+}
+
+/// The memo key of feed: tier, beast, the exact crowd under the Muzzle (its
+/// bonus starts once the chain has shrunk the crowd to max_inmates) and the
+/// counts an eater at tier t can reach.
 fn feed_key(ctx: &Ctx, t: usize, b: usize, comp: &Comp, crowd: i64) -> (u32, u128) {
     let mut head = t as u32 | (b as u32) << 3;
     if ctx.muzzle {
-        let bucket = crowd.min(data().tool(Tool::Muzzle).max_inmates.unwrap_or(0) as i64 + 1);
-        head |= 1 << 5 | ((bucket + 1024) as u32) << 6;
+        head |= 1 << 5 | ((crowd + 1024) as u32) << 6;
     }
     let mut counts = 0u128;
-    for (i, &k) in comp.iter().enumerate().take(20).skip(t * 4) {
-        counts |= ((k + 2) as u128 & 63) << (6 * i);
+    for (i, &k) in comp.iter().enumerate().take(20) {
+        // Below tier t only the beasts the chain can eat down.
+        if i >= t * 4 || ctx.down[b] >> (i % 4) & 1 == 1 {
+            counts |= ((k + 2) as u128 & 63) << (6 * i);
+        }
     }
     (head, counts)
 }
@@ -116,19 +207,17 @@ pub fn feed(ctx: &mut Ctx, t: usize, b: usize, comp: &mut Comp, crowd: i64) -> f
     if let Some(&hit) = ctx.memo.get(&key) {
         return hit;
     }
-    let foods = ctx.eats[b].clone();
-    let total: i32 = foods.iter().map(|&f| comp[t * 4 + f]).sum();
+    let (options, n) = meals(ctx, t, b, comp);
+    let total: i32 = options[..n].iter().map(|m| comp[m.tier * 4 + m.beast]).sum();
     let mut out = ctx.v[t];
     if total != 0 {
         let mut sum = 0.0;
-        for &f in &foods {
-            let k = comp[t * 4 + f];
-            if k == 0 {
-                continue;
-            }
-            comp[t * 4 + f] -= 1;
-            sum += f64::from(k) * bite(ctx, t, b, comp, crowd, 0);
-            comp[t * 4 + f] += 1;
+        for &m in &options[..n] {
+            let i = m.tier * 4 + m.beast;
+            let k = comp[i];
+            comp[i] -= 1;
+            sum += f64::from(k) * bite(ctx, t, b, m, comp, crowd);
+            comp[i] += 1;
         }
         out = sum / f64::from(total);
     }
@@ -136,9 +225,11 @@ pub fn feed(ctx: &mut Ctx, t: usize, b: usize, comp: &mut Comp, crowd: i64) -> f
     out
 }
 
-/// bite: one bite at tier t; the meal is gone and the eater rises.
-pub fn bite(ctx: &mut Ctx, t: usize, b: usize, comp: &mut Comp, crowd: i64, extra: usize) -> f64 {
-    let mut gain = 1 + extra;
+/// bite: one bite by an eater at tier t; the meal is gone and the eater rises
+/// (engine do_devour). A failed Oppress roll adds nothing, Saw included, and
+/// the eater stays at tier t.
+pub fn bite(ctx: &mut Ctx, t: usize, b: usize, meal: Meal, comp: &mut Comp, crowd: i64) -> f64 {
+    let mut gain = meal.base;
     if ctx.muzzle && crowd <= data().tool(Tool::Muzzle).max_inmates.unwrap_or(0) as i64 {
         gain += tiers(Tool::Muzzle);
     }
@@ -148,20 +239,29 @@ pub fn bite(ctx: &mut Ctx, t: usize, b: usize, comp: &mut Comp, crowd: i64, extr
     if ctx.crown && b == Beast::Lion.index() {
         gain += tiers(Tool::Crown);
     }
-    let mut after = |ctx: &mut Ctx, g: usize| rise(ctx, TOP.min(t + g), comp, crowd - 1);
-    let rest = if ctx.saw { 0.75 * after(ctx, gain) + 0.25 * after(ctx, gain + 1) } else { after(ctx, gain) };
-    -ctx.v[t] + rest
+    let mut after = |ctx: &mut Ctx, g: usize| rise(ctx, TOP.min(t + g), b, comp, crowd - 1);
+    let saw = data().tool(Tool::Saw).chance / 100.0;
+    let won = if ctx.saw { (1.0 - saw) * after(ctx, gain) + saw * after(ctx, gain + 1) } else { after(ctx, gain) };
+    let rest = if meal.chance < 1.0 { meal.chance * won + (1.0 - meal.chance) * after(ctx, 0) } else { won };
+    -worth(ctx, meal.tier) + rest
 }
 
 /// devourDelta: expected change in value from a devour, the chosen first meal
-/// then the random chain. `comp` leaves out the eater and still holds the meal.
-pub fn devour_delta(ctx: &mut Ctx, tier: usize, beast: usize, meal: usize, scratch: bool, comp: &mut Comp, crowd: i64) -> f64 {
-    let i = tier * 4 + meal;
+/// (tier, beast) then the random chain. `comp` leaves out the eater and still
+/// holds the meal.
+pub fn devour_delta(ctx: &mut Ctx, tier: usize, beast: usize, meal: (usize, usize), scratch: bool, comp: &mut Comp, crowd: i64) -> f64 {
+    let (mt, mb) = meal;
+    let i = mt * 4 + mb;
+    let terms = if scratch {
+        Meal { tier, beast: mb, base: 1 + ctx.scratch_extra, chance: 1.0 }
+    } else {
+        // devour_options offers only the bites can_eat allows, which eat_terms mirrors.
+        eat_terms(ctx, tier, beast, mt, mb).unwrap_or(Meal { tier: mt, beast: mb, base: 1, chance: 1.0 })
+    };
     if !scratch {
         comp[i] -= 1;
     }
-    let extra = if scratch { ctx.scratch_extra } else { 0 };
-    let value = bite(ctx, tier, beast, comp, crowd, extra) - ctx.v[tier];
+    let value = bite(ctx, tier, beast, terms, comp, crowd) - ctx.v[tier];
     if !scratch {
         comp[i] += 1;
     }
@@ -169,16 +269,14 @@ pub fn devour_delta(ctx: &mut Ctx, tier: usize, beast: usize, meal: usize, scrat
 }
 
 /// bestMeal: the best first meal for an eater of this tier and beast, as
-/// (value, meal); (-inf, None) when it has none.
-pub fn best_meal(ctx: &mut Ctx, tier: usize, beast: usize, comp: &mut Comp, crowd: i64) -> (f64, Option<usize>) {
+/// (value, (meal tier, meal beast)); (-inf, None) when it has none.
+pub fn best_meal(ctx: &mut Ctx, tier: usize, beast: usize, comp: &mut Comp, crowd: i64) -> (f64, Option<(usize, usize)>) {
     let mut best = (f64::NEG_INFINITY, None);
-    for f in ctx.eats[beast].clone() {
-        if comp[tier * 4 + f] == 0 {
-            continue;
-        }
-        let value = devour_delta(ctx, tier, beast, f, false, comp, crowd);
+    let (options, n) = meals(ctx, tier, beast, comp);
+    for &m in &options[..n] {
+        let value = devour_delta(ctx, tier, beast, (m.tier, m.beast), false, comp, crowd);
         if value > best.0 {
-            best = (value, Some(f));
+            best = (value, Some((m.tier, m.beast)));
         }
     }
     best

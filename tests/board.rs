@@ -14,7 +14,7 @@ use warden::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATW
 use warden::engine::rules::steps_between;
 use warden::engine::state::{ObjectiveState, Pending, Phase, ToolReason, Used};
 use warden::engine::apply;
-use warden::solver::chain::chain_odds;
+use warden::solver::chain::{chain_odds, devour_delta};
 use warden::solver::solve::reason;
 use warden::solver::{Rng32, TUNED, decide};
 
@@ -318,4 +318,53 @@ fn coin_of_fate_keeps_the_last_pair() {
         let st = with_tools("coin-pair-day15.json", tools.clone());
         assert_eq!(decide(&st, &TUNED, &mut Rng32::new(1)), Some(want), "{tools}");
     }
+}
+
+/// A block of two open inmates, the eater in cell 5 and its meal in cell 9,
+/// every other cell sealed, with these instruments held; the meal is the
+/// first beast the eater counters, at `meal_tier`.
+fn duel(tools: Value, eater: (Beast, i32), meal_tier: i32) -> warden::engine::state::State {
+    let mut m = raw("coin-pair-day15.json");
+    m["tools"] = tools;
+    let meal = data().food_chain[eater.0.index()][0];
+    for (n, cell) in m["cells"].as_array_mut().expect("cells").iter_mut().enumerate().skip(1) {
+        *cell = serde_json::json!({ "kind": "sealed", "event": null });
+        if n == 5 || n == 9 {
+            let (beast, tier) = if n == 5 { eater } else { (meal, meal_tier) };
+            *cell = serde_json::json!({ "kind": "inmate", "beast": beast, "tier": tier });
+        }
+    }
+    let model: Model = serde_json::from_value(m).expect("model");
+    build_state(&model, 1).0
+}
+
+#[test]
+fn the_maul_lands_a_mammoth_two_tiers_above_its_meal() {
+    // A Normal Mammoth eats a Rare inmate it counters: the meal leaves the
+    // Rare tier and the Mammoth lands at Ultimate, with nothing left to eat.
+    let st = duel(serde_json::json!(["maul"]), (Beast::Mammoth, 0), 2);
+    assert_eq!(devour_options(&st, 5).iter().map(|o| o.cell).collect::<Vec<_>>(), [9]);
+    let mut ctx = warden::solver::context(&st, &TUNED);
+    let (mut comp, crowd) = warden::solver::composition(&st, Some(5));
+    let before = comp;
+    let meal = st.cells[9].inmate.expect("meal");
+    let delta = devour_delta(&mut ctx, 0, Beast::Mammoth.index(), (2, meal.beast.index()), false, &mut comp, crowd);
+    assert!((delta - (ctx.v[4] - ctx.v[2] - ctx.v[0])).abs() < 1e-9, "{delta}");
+    assert_eq!(comp, before);
+}
+
+#[test]
+fn the_fanged_guillotine_prices_oppress() {
+    // An Ultimate Wolf eats a Normal Rat: Oppress lets it rise to Chromatic
+    // 80% of the time (5% per tier below); else it stays Ultimate.
+    let st = duel(serde_json::json!(["guillotine"]), (Beast::Wolf, 4), 0);
+    assert_eq!(devour_options(&st, 5).iter().map(|o| o.cell).collect::<Vec<_>>(), [9]);
+    let p = 1.0 - 4.0 * data().oppress_per_tier / 100.0;
+    assert!((p - 0.8).abs() < 1e-12);
+    let mut ctx = warden::solver::context(&st, &TUNED);
+    let (mut comp, crowd) = warden::solver::composition(&st, Some(5));
+    assert_eq!(st.cells[9].inmate.map(|i| i.beast), Some(Beast::Rat));
+    let delta = devour_delta(&mut ctx, 4, Beast::Wolf.index(), (0, Beast::Rat.index()), false, &mut comp, crowd);
+    let want = -ctx.v[0] + p * ctx.r + (1.0 - p) * ctx.v[4] - ctx.v[4];
+    assert!((delta - want).abs() < 1e-9, "{delta} {want}");
 }

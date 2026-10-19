@@ -190,7 +190,7 @@ pub fn devour_scores(ctx: &mut Ctx, options: Vec<Bite>) -> Vec<(usize, f64)> {
             let gone = [eater, meal];
             loss += coin_loss(ctx, &board, &gone[..if o.scratch { 1 } else { 2 }]);
             let stair_loss = if o.scratch { 0.0 } else { stair_delta(ctx, &mut comp, meal.tier as usize, meal.beast.index(), -1) };
-            let delta = devour_delta(ctx, tier, beast, meal.beast.index(), o.scratch, &mut comp, crowd);
+            let delta = devour_delta(ctx, tier, beast, (meal.tier as usize, meal.beast.index()), o.scratch, &mut comp, crowd);
             (o.cell, delta - loss + stair_loss)
         })
         .collect();

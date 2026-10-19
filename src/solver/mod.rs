@@ -9,7 +9,7 @@ pub mod scores;
 pub mod solve;
 pub mod values;
 
-use crate::engine::data::{Beast, RAINBOW, Tool, data};
+use crate::engine::data::{Beast, CAGE_FIGHT, RAINBOW, Tool, data};
 use crate::engine::devour::{can_devour_now, devour_options, start_options};
 use crate::engine::rng::rand;
 use crate::engine::state::{Pending, Phase, State};
@@ -17,6 +17,7 @@ use crate::engine::{Action, ChoiceId};
 use chain::guillotine;
 use scores::{best_by_board, devour_scores, hunt_gain, patrol_scores, swap_gain_here};
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 use values::fresh_activation;
 
 /// Torture Instruments by Chromatics per run (TOOL_RANK).
@@ -139,11 +140,44 @@ pub fn eats_table(st: &State) -> [Vec<usize>; 4] {
     eats
 }
 
+/// The hasher of the chain memo (FxHash's multiply-rotate mix): its keys are
+/// counts the solver builds, so SipHash's guard against chosen keys only costs.
+#[derive(Default, Clone, Copy)]
+pub struct MemoHasher(u64);
+
+impl MemoHasher {
+    fn add(&mut self, word: u64) {
+        self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+
+impl Hasher for MemoHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for chunk in bytes.chunks(8) {
+            let mut word = [0u8; 8];
+            word[..chunk.len()].copy_from_slice(chunk);
+            self.add(u64::from_le_bytes(word));
+        }
+    }
+    fn write_u32(&mut self, n: u32) {
+        self.add(u64::from(n));
+    }
+    fn write_u128(&mut self, n: u128) {
+        self.add(n as u64);
+        self.add((n >> 64) as u64);
+    }
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
 /// Everything a decision needs, computed once per position (context).
 pub struct Ctx<'a> {
     pub st: &'a State,
     pub p: &'a Params,
     pub eats: [Vec<usize>; 4],
+    /// Who each beast counters without tools, for the cross-tier bites.
+    pub chain: [Vec<usize>; 4],
     pub v: [f64; 6],
     pub r: f64,
     pub saw: bool,
@@ -151,20 +185,45 @@ pub struct Ctx<'a> {
     pub skewer: bool,
     pub crown: bool,
     pub revenge: bool,
+    /// Elephant-Foot Maul: a Mammoth eats higher countered inmates.
+    pub maul: bool,
+    /// Fanged Guillotine: a Wolf eats lower countered inmates, with Oppress.
+    pub fangs: bool,
+    /// Cage Fight theme: any eater eats lower countered inmates and keeps its beast.
+    pub cage_fight: bool,
+    /// By the eater's beast, a bit per beast whose lower-tier counts its
+    /// chain can read (the memo key of `chain::feed`).
+    pub down: [u8; 4],
     pub scratch_extra: usize,
     pub open_dist: Vec<f64>,
     pub open_value: f64,
-    pub memo: HashMap<(u32, u128), f64>,
+    pub memo: HashMap<(u32, u128), f64, BuildHasherDefault<MemoHasher>>,
 }
 
 pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
     let v = [0, 1, 2, 3, 4, 5].map(|t| p.tier_base.powi(t));
     let open_dist = normalize(&st.params.tier_weights.iter().map(|&w| f64::from(w)).collect::<Vec<_>>());
     let open_value = open_dist.iter().enumerate().fold(0.0, |sum, (t, p)| sum + p * v[t]);
+    let chain = food_chain();
+    let cage_fight = st.theme == Some(CAGE_FIGHT);
+    let mask = |foods: &[usize]| foods.iter().fold(0u8, |m, &f| m | 1 << f);
+    // Under Cage Fight the eater keeps its beast; otherwise any eater may
+    // re-roll into a Wolf, which eats down with the Fanged Guillotine.
+    let down = std::array::from_fn(|b| {
+        if cage_fight {
+            mask(&chain[b])
+        } else if st.has(Tool::Guillotine) {
+            mask(&chain[Beast::Wolf.index()])
+        } else {
+            0
+        }
+    });
     Ctx {
         st,
         p,
         eats: eats_table(st),
+        chain,
+        down,
         v,
         // A full vault stops inmates at Ultimate: the top tier is worth no more.
         r: if st.top_tier() < RAINBOW { v[RAINBOW as usize - 1] } else { v[RAINBOW as usize] * p.rainbow_mult },
@@ -173,10 +232,13 @@ pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
         skewer: st.has(Tool::Skewer),
         crown: st.has(Tool::Crown),
         revenge: st.has(Tool::Revenge) && st.cells.iter().any(|c| c.sealed),
+        maul: st.has(Tool::Maul),
+        fangs: st.has(Tool::Guillotine),
+        cage_fight,
         scratch_extra: 1 + usize::from(st.params.scratch_stacks_base),
         open_dist,
         open_value,
-        memo: HashMap::new(),
+        memo: HashMap::default(),
     }
 }
 

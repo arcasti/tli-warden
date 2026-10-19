@@ -569,3 +569,62 @@ fn the_short_shackles_price_a_short_move_only() {
     assert!(want > 0.0 && (near_held - near_plain - want).abs() < 1e-9, "{near_held} {near_plain} {want}");
     assert!((score(&st, far).0 - far_plain).abs() < 1e-12);
 }
+
+#[test]
+fn ravenous_chains_price_a_meal_beside_the_top_inmate() {
+    // A Magic Wolf in cell 5 eats Magic meals in cells 9, 11 and 13; the
+    // Legendary in cell 10 is the top inmate the Chains feed with 9 and 11.
+    let mut st = duel(serde_json::json!([]), (Beast::Wolf, 1), 1);
+    let meal = st.cells[9].inmate.expect("meal");
+    for (n, id, tier) in [(10, 900, 3), (11, 901, 1), (13, 902, 1)] {
+        st.cells[n].sealed = false;
+        st.cells[n].inmate = Some(warden::engine::state::Inmate { id, tier, ..meal });
+    }
+    st.position = 5;
+    assert_eq!(devour_options(&st, 5).iter().map(|o| o.cell).collect::<Vec<_>>(), [9, 11, 13]);
+    let scores = |st: &warden::engine::state::State| {
+        let mut ctx = warden::solver::context(st, &TUNED);
+        warden::solver::scores::devour_scores(&mut ctx, devour_options(st, 5))
+    };
+    let plain = scores(&st);
+    st.tools = vec![Tool::Chains];
+    let held = scores(&st);
+    let loss = |n: usize| {
+        let of = |s: &[(usize, f64)]| s.iter().find(|s| s.0 == n).expect("scored").1;
+        of(&plain) - of(&held)
+    };
+    // Eating cell 9 leaves the Legendary one Magic neighbour to remove and one
+    // roll, against two of each; the meal in cell 13 changes nothing.
+    let ctx = warden::solver::context(&st, &TUNED);
+    let (v, r, p) = (ctx.v, ctx.r, data().tool(Tool::Chains).chance / 100.0);
+    let one = p * (v[4] - v[3]);
+    let two = 2.0 * p * (1.0 - p) * (v[4] - v[3]) + p * p * (r - v[3]);
+    let want = two - one - v[1];
+    assert!(loss(13).abs() < 1e-9 && (loss(9) - loss(11)).abs() < 1e-9, "{} {}", loss(9), loss(13));
+    assert!((loss(9) - want).abs() < 1e-9, "{} {want}", loss(9));
+}
+
+#[test]
+fn a_tusk_cell_outscores_the_same_cell_unmarked() {
+    let mut st = duel(serde_json::json!(["tongs"]), (Beast::Wolf, 2), 2);
+    let score = |st: &warden::engine::state::State| {
+        let mut ctx = warden::solver::context(st, &TUNED);
+        warden::solver::scores::patrol_scores(&mut ctx, &[9])[0].1
+    };
+    let plain = score(&st);
+    st.cells[9].ivory = true;
+    assert!(score(&st) > plain + 1e-6, "{plain}");
+}
+
+#[test]
+fn a_rat_nest_due_in_the_run_scores_below_a_plain_door() {
+    let mut st = duel(serde_json::json!(["ironbox"]), (Beast::Wolf, 2), 2);
+    let score = |st: &warden::engine::state::State| {
+        let mut ctx = warden::solver::context(st, &TUNED);
+        warden::solver::scores::patrol_scores(&mut ctx, &[7])[0].1
+    };
+    let plain = score(&st);
+    assert!(st.day < st.max_days);
+    st.cells[7].nest = Some(warden::engine::state::Nest { due: st.day + 1 });
+    assert!(score(&st) < plain - 1e-6, "{plain}");
+}

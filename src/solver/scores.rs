@@ -5,7 +5,7 @@ use super::chain::{coin_of_fate, devour_delta, replace_odds};
 use super::values::{activation, execution_value, fresh_value, stair_delta, swap_value};
 use super::{Comp, Ctx, Rng32, TOP, composition, context, dist_worth, door_dist, seen_door};
 use crate::engine::data::{RAINBOW, Tool, data};
-use crate::engine::devour::{Bite, devour_options, hunt_targets};
+use crate::engine::devour::{Bite, devour_options, hunt_targets, sure_gain};
 use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY};
 use crate::engine::rules::{clockwise_path, steps_between};
 use crate::engine::state::{Cell, Inmate, State};
@@ -145,16 +145,23 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
                 0.0
             };
             score += p.w_open * unseen as f64 * ctx.side_value + p.w_open * seen + here;
-        } else if c.sealed && c.nest.is_some() {
-            score += p.w_nest;
         } else if c.sealed {
             score += door_now(ctx, &mut board, c, true);
+            // Squirming Iron Box: the patrol opens the door's own inmate and
+            // destroys the nest, whose Rare Rat hatches if it is due in the run.
+            if c.nest.is_some_and(|nest| nest.due <= st.max_days) {
+                score -= ctx.v[st.params.nest_tier as usize];
+            }
         } else if c.inmate.is_some() {
             score += p.w_walk * known(ctx, c);
         }
+        // Iron Tongs of Lust: a Replace left for the Tusk cell's inmate.
+        if swap_left && c.ivory && c.on_board() {
+            score += p.w_walk * tusk_gain(ctx);
+        }
         if let Some(h) = &held {
             // A dice patrol onto a door sets off the "after opening" instruments.
-            let opened = (c.sealed && c.nest.is_none() && !st.chain)
+            let opened = (c.sealed && !st.chain)
                 .then(|| if seen_door(c) { door_dist(st, Some(c), true).0 } else { ctx.open_dist.clone() });
             score += held_terms(ctx, h, n, steps, opened.as_deref(), left, left_worth);
         }
@@ -296,6 +303,50 @@ fn coin_loss(ctx: &Ctx, board: &Comp, gone: &[Inmate]) -> f64 {
     coin_of_fate(ctx, board) - coin_of_fate(ctx, &after)
 }
 
+/// The open inmates' tiers by cell, as Ravenous Chains reads them, -1 where
+/// none stands; empty without the Chains or a morning left.
+fn chains_ring(st: &State) -> Vec<i8> {
+    if !st.has(Tool::Chains) || st.max_days <= st.day {
+        return Vec::new();
+    }
+    st.cells.iter().map(|c| c.inmate.filter(|_| !c.sealed).map_or(-1, |i| i.tier as i8)).collect()
+}
+
+/// chainsLoss: what Ravenous Chains takes on the next morning from the board
+/// `ring` (`chains_ring`, 0 when empty): over the tied top inmates, the worth
+/// of the open ring neighbours it removes less the expected worth of the
+/// centre's rise, one roll per removal.
+fn chains_loss(ctx: &Ctx, ring: &[i8]) -> f64 {
+    let Some(&top) = ring.iter().max().filter(|&&t| t >= 0) else { return 0.0 };
+    let def = data().tool(Tool::Chains);
+    let (p, by) = (def.chance / 100.0, def.tiers.unwrap_or(0));
+    let worth = |t: i8| if t as usize >= TOP { ctx.r } else { ctx.v[t as usize] };
+    let n = ring.len();
+    let (mut tops, mut loss) = (0, 0.0);
+    for c in (0..n).filter(|&c| ring[c] == top) {
+        tops += 1;
+        let sides = [ring[(c + n - 1) % n], ring[(c + 1) % n]];
+        let removed = sides.iter().filter(|&&t| t >= 0).count();
+        loss += sides.iter().filter(|&&t| t >= 0).map(|&t| worth(t)).sum::<f64>();
+        // At most two removals: j of them land in [1, removed, 1] ways.
+        for j in 0..=removed {
+            let odds = [1.0, removed as f64, 1.0][j] * p.powi(j as i32) * (1.0 - p).powi((removed - j) as i32);
+            loss -= odds * rise_worth(ctx, top as usize, j as i32 * by);
+        }
+    }
+    loss / f64::from(tops)
+}
+
+/// The Tusk's gain on a Replace in a marked cell: random open inmates below
+/// Rainbow rise a tier each.
+fn tusk_gain(ctx: &Ctx) -> f64 {
+    let st = ctx.st;
+    let board: Vec<usize> =
+        st.cells.iter().filter_map(|c| c.inmate.filter(|i| !c.sealed && i.tier < RAINBOW)).map(|i| i.tier as usize).collect();
+    let lift = board.iter().fold(0.0, |sum, &t| sum + ctx.v[t + 1] - ctx.v[t]) / board.len().max(1) as f64;
+    (st.params.ivory_count as usize).min(board.len()) as f64 * lift
+}
+
 /// huntGain: what a Hunt now adds, the value of the prey marks it would place.
 pub fn hunt_gain(ctx: &Ctx) -> f64 {
     let st = ctx.st;
@@ -317,6 +368,9 @@ pub fn devour_scores(ctx: &mut Ctx, options: Vec<Bite>) -> Vec<(usize, f64)> {
     let tier = eater.tier as usize;
     let beast = eater.beast.index();
     let own = link_loss(ctx, Some(eater), false);
+    let mut ring = chains_ring(st);
+    let chains_before = chains_loss(ctx, &ring);
+    let block = if ring.is_empty() { 0 } else { st.board_cells().len() };
     let mut out: Vec<(usize, f64)> = options
         .into_iter()
         .map(|o| {
@@ -328,6 +382,17 @@ pub fn devour_scores(ctx: &mut Ctx, options: Vec<Bite>) -> Vec<(usize, f64)> {
             // The eater leaves its tier and the meal the board (the chain after is not priced).
             let gone = [eater, meal];
             loss += coin_loss(ctx, &board, &gone[..if o.scratch { 1 } else { 2 }]);
+            // Ravenous Chains: the meal's cell empties and the eater lands
+            // its sure gain up (a Chromatic leaves for the vault).
+            if !ring.is_empty() {
+                let (e, m) = (ring[st.position], ring[o.cell]);
+                let landing = (eater.tier + sure_gain(st, &eater, &meal, o.scratch, block)).min(st.top_tier());
+                ring[o.cell] = -1;
+                ring[st.position] = if landing >= RAINBOW { -1 } else { landing as i8 };
+                loss += chains_loss(ctx, &ring) - chains_before;
+                ring[o.cell] = m;
+                ring[st.position] = e;
+            }
             let stair_loss = if o.scratch { 0.0 } else { stair_delta(ctx, &mut comp, meal.tier as usize, meal.beast.index(), -1) };
             let delta = devour_delta(ctx, tier, beast, (meal.tier as usize, meal.beast.index()), o.scratch, &mut comp, crowd);
             (o.cell, delta - loss + stair_loss)
@@ -356,12 +421,19 @@ pub fn swap_gain_here(ctx: &Ctx) -> f64 {
         let rise: f64 = replace_odds(ctx, inmate.tier as usize, &comp, crowd - 1).0.iter().skip(inmate.tier as usize + 1).sum();
         gain += rise * doors as f64 * ctx.p.w_open * ctx.open_value;
     }
+    // Ravenous Chains: the new inmate's tier follows the Replace odds.
+    let mut ring = chains_ring(st);
+    if !ring.is_empty() {
+        let before = chains_loss(ctx, &ring);
+        let mut after = 0.0;
+        for (t, &p) in replace_odds(ctx, inmate.tier as usize, &comp, crowd - 1).0.iter().enumerate().filter(|&(_, &p)| p > 0.0) {
+            ring[st.position] = if t >= TOP { -1 } else { t as i8 };
+            after += p * chains_loss(ctx, &ring);
+        }
+        gain -= after - before;
+    }
     if here.ivory {
-        let board: Vec<usize> =
-            st.cells.iter().filter_map(|c| c.inmate.filter(|i| !c.sealed && i.tier < RAINBOW)).map(|i| i.tier as usize).collect();
-        let lift = board.iter().fold(0.0, |sum, &t| sum + ctx.v[t + 1] - ctx.v[t]) / board.len().max(1) as f64;
-        gain += (st.params.ivory_count as usize).min(board.len()) as f64 * lift;
-        return gain;
+        return gain + tusk_gain(ctx);
     }
     if f64::from(inmate.tier) <= ctx.p.swap_max_tier { gain } else { f64::NEG_INFINITY }
 }

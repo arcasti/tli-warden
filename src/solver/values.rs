@@ -61,7 +61,7 @@ pub fn activation(ctx: &mut Ctx, tier: usize, beast: usize, comp: &mut Comp, cro
     if tier < TOP {
         value = value.max(best_meal(ctx, tier, beast, comp, crowd).0);
     }
-    if swap_left && tier as f64 <= ctx.p.swap_max_tier {
+    if swap_left && (ctx.last_day || tier as f64 <= ctx.p.swap_max_tier) {
         value = value.max(swap_value(ctx, tier, comp, crowd - 1));
     }
     value

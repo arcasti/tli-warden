@@ -460,7 +460,7 @@ pub fn swap_gain_here(ctx: &Ctx) -> f64 {
     if here.ivory {
         return gain + tusk_gain(ctx);
     }
-    if f64::from(inmate.tier) <= ctx.p.swap_max_tier { gain } else { f64::NEG_INFINITY }
+    if ctx.last_day || f64::from(inmate.tier) <= ctx.p.swap_max_tier { gain } else { f64::NEG_INFINITY }
 }
 
 /// boardValue: tier values plus vaulted Rainbows, with a bonus for inmates

@@ -492,9 +492,11 @@ fn the_severed_iron_maiden_lifts_a_rare_among_rares() {
 
 #[test]
 fn the_execution_axe_counts_the_burning_stake() {
-    // The Axe's part of a Replace's gain grows with the Stake's Legendaries.
+    // The Axe's part of a Replace's gain grows with the Stake's Legendaries;
+    // before the last day, when the doors it opens still count.
     let gain = |tools: Value| {
-        let st = replace_board(tools, 0, &[]);
+        let mut st = replace_board(tools, 0, &[]);
+        st.day = 10;
         swap_gain_here(&warden::solver::context(&st, &TUNED))
     };
     let axe = gain(serde_json::json!(["axe"])) - gain(serde_json::json!([]));
@@ -646,4 +648,19 @@ fn a_rat_nest_due_in_the_run_scores_below_a_plain_door() {
     assert!(st.day < st.max_days);
     st.cells[7].nest = Some(warden::engine::state::Nest { due: st.day + 1 });
     assert!(score(&st) < plain - 1e-6, "{plain}");
+}
+
+#[test]
+fn the_last_day_replaces_an_inmate_that_cannot_make_a_chromatic() {
+    // The warden's Epic Wolf has no meal, and a Legendary Lion sits in 08: a
+    // new inmate may bite it into a Chromatic today. Before the last day the
+    // Epic is worth keeping; on the last day only that Chromatic counts.
+    let pick = |day: u32| {
+        let mut st = replace_board(serde_json::json!([]), 3, &[(8, 4)]);
+        st.day = day;
+        assert!(devour_options(&st, 12).is_empty());
+        decide(&st, &TUNED, &mut Rng32::new(1))
+    };
+    assert_eq!(pick(19), Some(Action::End));
+    assert_eq!(pick(20), Some(Action::Swap));
 }

@@ -456,6 +456,9 @@ pub fn reason(st: &State, action: &Action) -> String {
             if here.ivory {
                 return "A Tusk cell: replacing it raises other Inmates a tier.".to_string();
             }
+            if st.day >= st.max_days {
+                return "The last day: only a Chromatic counts now, and the new Inmate may still consume its way to one today.".to_string();
+            }
             format!("{} Inmates are worth less than a fresh roll on average.", tier_name(here.inmate.expect("inmate").tier))
         }
         Action::End => {

@@ -205,13 +205,20 @@ pub struct Ctx<'a> {
     /// The worth of an unseen door opened from the side (Chain Reaction walk,
     /// Crowded Beastcage), which sets off no "after opening" instrument.
     pub side_value: f64,
+    /// The run's last day: only a Chromatic made today counts, so every tier
+    /// below the top is worth 0 and a Replace of any tier may pay.
+    pub last_day: bool,
     pub memo: HashMap<(u32, u128), f64, BuildHasherDefault<MemoHasher>>,
 }
 
 pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
-    let v = [0, 1, 2, 3, 4, 5].map(|t| p.tier_base.powi(t));
+    let mut v = [0, 1, 2, 3, 4, 5].map(|t| p.tier_base.powi(t));
     // A full vault stops inmates at Ultimate: the top tier is worth no more.
     let r = if st.top_tier() < RAINBOW { v[RAINBOW as usize - 1] } else { v[RAINBOW as usize] * p.rainbow_mult };
+    let last_day = st.day >= st.max_days;
+    if last_day {
+        v[..TOP].fill(0.0);
+    }
     let open_value = dist_worth(&v, r, &door_dist(st, None, true).0);
     let side_value = dist_worth(&v, r, &door_dist(st, None, false).0);
     let chain = food_chain();
@@ -248,6 +255,7 @@ pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
         scratch_extra: 1 + usize::from(st.params.scratch_stacks_base),
         open_value,
         side_value,
+        last_day,
         memo: HashMap::default(),
     }
 }
@@ -380,21 +388,27 @@ pub fn decide(st: &State, p: &Params, roll: &mut Rng32) -> Option<Action> {
         if let Some(&(to, best)) = devours.first().filter(|d| d.1 >= p.min_devour) {
             // A swap first can be worth more than a weak devour: the new
             // inmate may still devour today.
-            if swap_gain > f64::NEG_INFINITY {
-                let (mut comp, crowd) = composition(st, Some(st.position));
-                let old = st.cells[st.position].inmate;
-                let dist = replace_odds(&ctx, old.map_or(0, |i| i.tier as usize), &comp, crowd - 1).0;
-                // Iron Pestle: the new inmate keeps the old one's beast.
-                let beast = old.filter(|_| st.has(Tool::Pestle)).map(|i| i.beast.index());
-                let swap_first = swap_gain + p.w_now * fresh_activation(&mut ctx, &dist, beast, &mut comp, crowd, false);
-                if swap_first > best {
-                    return Some(Action::Swap);
-                }
+            if swap_gain > f64::NEG_INFINITY && swap_first(&mut ctx, swap_gain) > best {
+                return Some(Action::Swap);
             }
             return Some(Action::Devour { to });
         }
     }
-    Some(if swap_gain > 0.0 { Action::Swap } else { Action::End })
+    // On the last day a Replace buys only what the new inmate can still do today.
+    let gain = if ctx.last_day && swap_gain > f64::NEG_INFINITY { swap_first(&mut ctx, swap_gain) } else { swap_gain };
+    Some(if gain > 0.0 { Action::Swap } else { Action::End })
+}
+
+/// A Replace in the warden's cell worth `swap_gain`, plus what the new inmate
+/// may still do today.
+fn swap_first(ctx: &mut Ctx, swap_gain: f64) -> f64 {
+    let st = ctx.st;
+    let (mut comp, crowd) = composition(st, Some(st.position));
+    let old = st.cells[st.position].inmate;
+    let dist = replace_odds(ctx, old.map_or(0, |i| i.tier as usize), &comp, crowd - 1).0;
+    // Iron Pestle: the new inmate keeps the old one's beast.
+    let beast = old.filter(|_| st.has(Tool::Pestle)).map(|i| i.beast.index());
+    swap_gain + ctx.p.w_now * fresh_activation(ctx, &dist, beast, &mut comp, crowd, false)
 }
 
 /// The strategy's bite once Consume is pressed: decide's own, else the best

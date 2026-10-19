@@ -22,7 +22,7 @@ name = "warden-cli"
 path = "src/bin/warden-cli.rs"
 
 [profile.release]
-opt-level = "z"
+opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"

@@ -685,3 +685,36 @@ fn an_early_gift_opens_doors_over_raising_one_rare() {
     let ring = Action::Choose { id: ChoiceId::Name(Gift::Ring.key().to_string()) };
     assert_eq!(decide(&st, &TUNED, &mut Rng32::new(1)), Some(ring));
 }
+
+#[test]
+fn an_extra_portion_marker_beats_a_plain_door() {
+    // Day 5, three Rares on the block and every other door sealed. The
+    // patrol picks a door over an empty cell; an Extra Portion there, which
+    // raises inmates, turns the pick around.
+    let d = data();
+    let mut m = raw("guillotine-last-day.json");
+    m["day"] = serde_json::json!(5);
+    m["tools"] = serde_json::json!([]);
+    m["vault"] = serde_json::json!([]);
+    for n in 1..16 {
+        m["cells"][n] = serde_json::json!({"kind": "sealed", "event": null});
+    }
+    for n in [2, 3, 4] {
+        m["cells"][n] = serde_json::json!({"kind": "inmate", "beast": "wolf", "tier": 2});
+    }
+    let model: Model = serde_json::from_value(m).expect("model");
+    let mut st = build_state(&model, 1).0;
+    let free: Vec<usize> = (5..16).filter(|&n| n != d.room).take(2).collect();
+    let (marker, door) = (free[0], free[1]);
+    st.cells[marker].sealed = false;
+    st.cells[marker].inmate = None;
+    st.pending.clear();
+    st.event = None;
+    st.phase = Phase::Patrol;
+    st.destinations = vec![marker, door];
+    let plain = decide(&st, &TUNED, &mut Rng32::new(1));
+    assert_eq!(plain, Some(Action::Patrol { cell: door }));
+    st.cells[marker].event = Some(212);
+    st.cells[marker].event_known = Some(true);
+    assert_eq!(decide(&st, &TUNED, &mut Rng32::new(1)), Some(Action::Patrol { cell: marker }));
+}

@@ -4,10 +4,10 @@
 use super::chain::{best_meal, coin_of_fate, devour_delta, replace_odds};
 use super::values::{activation, execution_value, fresh_value, stair_delta, swap_value};
 use super::{Comp, Ctx, Rng32, TOP, beasts, composition, context, dist_worth, door_dist, seen_door, worth};
-use crate::engine::data::{Beast, RAINBOW, Tool, data};
+use crate::engine::data::{Beast, Card, RAINBOW, Tool, data};
 use crate::engine::devour::{Bite, devour_options, hunt_targets, sure_gain};
-use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY};
-use crate::engine::rules::{clockwise_path, steps_between};
+use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATWAY};
+use crate::engine::rules::{clockwise_path, land, steps_between};
 use crate::engine::state::{Cell, Inmate, State};
 use crate::engine::text::{an, describe, incident_name, plural};
 use crate::engine::{Action, ChoiceId, apply};
@@ -43,6 +43,63 @@ pub fn incident_score(ctx: &Ctx, c: &Cell, comp: &Comp) -> f64 {
         Some(CHAIN_REACTION) => ctx.p.w_chain,
         _ => 0.0,
     }
+}
+
+/// Whether the marker on `c` is priced by playing its incident on a copy:
+/// a known one other than the two `incident_score` prices.
+fn played(c: &Cell, id: u32) -> bool {
+    c.event_known != Some(false) && id != EXECUTION_EFFICIENCY && id != CHAIN_REACTION
+}
+
+/// Incidents whose effect rolls no dice, played once.
+const SURE_INCIDENTS: [u32; 4] = [213, 231, 232, SEWER_RATWAY];
+
+/// The seed of sample `k` of a copy landed on cell `n`: fixed, so a copy
+/// never reads the game's own dice.
+fn sample_seed(st: &State, n: usize, k: u32) -> u32 {
+    st.day.wrapping_mul(0x9e37_79b9) ^ (n as u32).wrapping_mul(0x85eb_ca6b) ^ (k + 1).wrapping_mul(0xc2b2_ae35)
+}
+
+/// A copy of `st` with the warden landed on cell `n`, its marker's incident
+/// pending. A Sewer Ratway choice in progress is this landing.
+fn landed(st: &State, n: usize, seed: u32) -> State {
+    let mut trial = st.clone();
+    trial.rng = seed;
+    trial.pending.clear();
+    land(&mut trial, n);
+    trial
+}
+
+/// The mean board gain, by tiers `(v, r)`, of the incident `id` that waits on
+/// cell `n`, over the landing that fires it.
+fn event_worth(st: &State, n: usize, id: u32, &(v, r): &([f64; 6], f64)) -> f64 {
+    let samples = if SURE_INCIDENTS.contains(&id) { 1 } else { 3 };
+    let mut gain = 0.0;
+    for k in 0..samples {
+        let mut trial = landed(st, n, sample_seed(st, n, k));
+        let before = board_value(&trial, &v, r);
+        if apply(&mut trial, &Action::Event).is_ok() {
+            gain += board_value(&trial, &v, r) - before;
+        }
+    }
+    gain / f64::from(samples)
+}
+
+/// The Interrogation Room's worth: Bestow's mean board gain, by tiers
+/// `(v, r)`, over the landing there. Instigate's marker adds no board value
+/// (pricing it as a share of its incident's worth benched lower).
+fn room_worth(st: &State, &(v, r): &([f64; 6], f64)) -> f64 {
+    let room = data().room;
+    let bestow = Action::Choose { id: ChoiceId::Name(Card::Bestow.key().to_string()) };
+    let mut gain = 0.0;
+    for k in 0..3 {
+        let mut trial = landed(st, room, sample_seed(st, room, k));
+        let before = board_value(&trial, &v, r);
+        if apply(&mut trial, &bestow).is_ok() {
+            gain += board_value(&trial, &v, r) - before;
+        }
+    }
+    gain / 3.0
 }
 
 /// The `why` of incidentScore: what waits on the marker, if there is one.
@@ -107,6 +164,7 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
         activation(ctx, i.tier as usize, i.beast.index(), &mut comp, crowd, swap_left)
     };
     let held = HELD_TERMS.iter().any(|&t| st.has(t)).then(|| Held::of(ctx, &loss));
+    let tiers = gift_tiers(ctx);
     let mut out = Vec::with_capacity(cells.len());
     for &n in cells {
         let c = &st.cells[n];
@@ -114,6 +172,11 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
         let mut score = p.w_step * steps as f64;
         // Landing on a marker fires its incident, which can't be declined.
         score += incident_score(ctx, c, &board);
+        if let Some(id) = c.event.filter(|&id| played(c, id)) {
+            score += p.w_event * event_worth(st, n, id, &tiers);
+        } else if n == data().room {
+            score += p.w_event * room_worth(st, &tiers);
+        }
         // The sealed doors left after this landing's own openings.
         let (mut left, mut left_worth) = held.as_ref().map_or((0, 0.0), |h| (h.sealed, h.side));
         if held.is_some() && c.sealed && !st.chain {
@@ -465,8 +528,7 @@ pub fn swap_gain_here(ctx: &Ctx) -> f64 {
 
 /// boardValue: tier values `v` plus vaulted Rainbows worth `r` each, with a
 /// bonus for inmates that have something to eat.
-fn board_value(ctx: &Ctx, v: &[f64; 6], r: f64) -> f64 {
-    let st = ctx.st;
+fn board_value(st: &State, v: &[f64; 6], r: f64) -> f64 {
     let mut value = st.vault.len() as f64 * r;
     for c in &st.cells {
         let Some(i) = c.inmate.filter(|_| !c.sealed) else { continue };
@@ -507,7 +569,7 @@ pub fn best_by_board<'k>(ctx: &Ctx, options: &[&'k str], gift: bool, roll: &mut 
             }
             let after = context(&trial, ctx.p);
             let (v, r) = if gift { gift_tiers(&after) } else { (after.v, after.r) };
-            value += board_value(&after, &v, r);
+            value += board_value(&trial, &v, r);
         }
         value /= f64::from(samples);
         if best.is_none_or(|(_, v)| value > v) {

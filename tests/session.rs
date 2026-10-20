@@ -6,7 +6,7 @@
 use std::path::Path;
 mod common;
 use warden::app::runlog::RunLog;
-use warden::app::session::{CellEdit, consume_targets, DaysClock, HELD_BLOCKS, MAX_WAIT, ROUND, Reading, SETTLE, Session, Watch, differs, fingerprint};
+use warden::app::session::{CellEdit, consume_targets, DaysClock, HELD_BLOCKS, MAX_WAIT, RECHECK, ROUND, Reading, SETTLE, Session, Watch, differs, fingerprint};
 use warden::board::{CellModel, ChoiceKind, EventMark, Step, build_state};
 use warden::engine::data::{Beast, OPULENCE, Tool};
 use warden::engine::devour::{devour_options, start_options};
@@ -247,6 +247,37 @@ fn watch_reads_settled_screens_once() {
     // Another screen: read once it settles.
     let reads = (0..SETTLE + 3).filter(|_| w.sample(print(10, 0))).count();
     assert_eq!(reads, 1);
+}
+
+/// A screen that stays the same after a read is never read again.
+#[test]
+fn watch_never_rereads_an_unchanged_screen() {
+    let mut w = Watch::default();
+    assert_eq!((0..SETTLE + 1).filter(|_| w.sample(print(200, 0))).count(), 1);
+    assert!((0..40).all(|_| !w.sample(print(200, 0))));
+}
+
+/// A lasting change under the threshold, such as an incident marker on a cell,
+/// is read once [`RECHECK`] samples passed since the last read, then not again.
+#[test]
+fn watch_rechecks_a_small_change() {
+    let mut w = Watch::default();
+    assert_eq!((0..SETTLE + 1).filter(|_| w.sample(print(200, 0))).count(), 1);
+    assert!(!differs(&print(200, 0), &print(200, 2)));
+    let reads: Vec<bool> = (0..RECHECK).map(|_| w.sample(print(200, 2))).collect();
+    assert_eq!(reads.iter().position(|&r| r), Some(RECHECK - 1), "{reads:?}");
+    assert_eq!(reads.iter().filter(|&&r| r).count(), 1);
+    assert!((0..40).all(|_| !w.sample(print(200, 2))));
+}
+
+/// A big change is still read after [`SETTLE`] samples.
+#[test]
+fn watch_reads_a_big_change_after_settle() {
+    let mut w = Watch::default();
+    assert_eq!((0..SETTLE + 1).filter(|_| w.sample(print(200, 0))).count(), 1);
+    let reads: Vec<bool> = (0..SETTLE + 3).map(|_| w.sample(print(10, 0))).collect();
+    assert_eq!(reads.iter().position(|&r| r), Some(SETTLE), "{reads:?}");
+    assert_eq!(reads.iter().filter(|&&r| r).count(), 1);
 }
 
 /// A screen marked read, or the sample after `adopt_next`, is not read again.

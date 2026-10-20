@@ -337,9 +337,18 @@ pub const SETTLE: usize = 2;
 /// edges pulse by up to 90 blocks a sample and never hold.
 pub const MAX_WAIT: usize = 6;
 
+/// Samples since the last read after which a screen that moved fewer than
+/// [`CHANGED_BLOCKS`] blocks from it, but at least one, is read again: 5 s at 4
+/// samples a second. A Prison Incident "!" that appears on a cell moves only 2
+/// blocks (measured on a player's screenshot), and a hover glow that comes and
+/// goes costs at most one read per 5 s.
+pub const RECHECK: usize = 20;
+
 /// Auto read's decision, one fingerprint per sample of the game: read a screen
 /// once it differs from the last one read and has settled, or has differed
-/// for longer than [`MAX_WAIT`] samples.
+/// for longer than [`MAX_WAIT`] samples; read a screen that moved less than
+/// that, but by at least one block, once [`RECHECK`] samples passed since the
+/// last read.
 #[derive(Default)]
 pub struct Watch {
     /// The print of the last screen read; none before the first.
@@ -350,6 +359,8 @@ pub struct Watch {
     stable: usize,
     /// Samples in a row that differed from the last screen read.
     waited: usize,
+    /// Samples since the last screen read.
+    since: usize,
     /// The next sample counts as read: a screenshot is on show.
     adopt: bool,
 }
@@ -366,8 +377,13 @@ impl Watch {
             self.mark_read(print);
             return false;
         }
-        if self.read.as_ref().is_some_and(|r| !differs(r, &print)) {
+        self.since += 1;
+        if let Some(r) = self.read.as_ref().filter(|r| !differs(r, &print)) {
             self.waited = 0;
+            if changed(r, &print) > 0 && self.since >= RECHECK {
+                self.mark_read(print);
+                return true;
+            }
             return false;
         }
         self.waited += 1;
@@ -382,6 +398,7 @@ impl Watch {
     pub fn mark_read(&mut self, print: Vec<u8>) {
         self.read = Some(print);
         self.waited = 0;
+        self.since = 0;
     }
 
     /// Counts the next sample as read, so an opened screenshot stays on show

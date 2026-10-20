@@ -139,7 +139,8 @@ pub struct WardenApp {
 }
 
 impl WardenApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, settings: Settings, preload: Option<&Path>) -> WardenApp {
+    /// `current` is this exe, and `installed` whether it runs from the install folder.
+    pub fn new(cc: &eframe::CreationContext<'_>, settings: Settings, preload: Option<&Path>, current: Option<PathBuf>, installed: bool) -> WardenApp {
         cc.egui_ctx.set_theme(egui::Theme::Dark);
         let mut session = Session::new(settings.rollouts, settings.held_tools(), settings.theme, settings.tools_days);
         session.log = settings.run_log.then(RunLog::in_appdata).flatten();
@@ -164,19 +165,15 @@ impl WardenApp {
             placed: false,
             tab: Tab::Board,
             warned: 0,
-            current: None,
-            installed: false,
+            current,
+            installed,
             checking: None,
             release: None,
             check_error: None,
             updating: None,
         };
-        if let Ok(current) = std::env::current_exe() {
-            app.installed = install::installed_here(&current);
-            app.current = Some(current);
-            if app.settings.check_updates {
-                app.checking = Some(in_background(&app.ctx, update::check));
-            }
+        if app.current.is_some() && app.settings.check_updates {
+            app.checking = Some(in_background(&app.ctx, update::check));
         }
         app.watch();
         for which in [Which::Read, Which::Auto] {

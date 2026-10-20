@@ -6,20 +6,19 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 /// The latest release, as the GitHub API gives it.
-#[cfg(windows)]
 const LATEST: &str = "https://api.github.com/repos/arcasti/tli-warden/releases/latest";
 
 /// The release asset, the only one.
-const ASSET: &str = "warden.exe";
+pub(crate) const ASSET: &str = "warden.exe";
 
 /// The name a downloaded exe takes beside the running one until it is swapped in.
-const NEW: &str = "warden.new.exe";
+pub(crate) const NEW: &str = "warden.new.exe";
 
 /// The name the replaced exe takes until the next start deletes it.
 const OLD: &str = "warden.old.exe";
 
 /// A release on GitHub, with its warden.exe asset.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct Release {
     pub version: [u32; 3],
     /// The release's web page.
@@ -84,7 +83,6 @@ fn verified(bytes: &[u8], release: &Release) -> Result<(), String> {
 }
 
 /// The latest release when it is newer than the running app.
-#[cfg(windows)]
 pub fn check() -> Result<Option<Release>, String> {
     let json = latest_json()?;
     let release = parse_release(&json).ok_or_else(|| format!("{LATEST}: no {ASSET} with a SHA-256 digest in the latest release"))?;
@@ -92,14 +90,12 @@ pub fn check() -> Result<Option<Release>, String> {
 }
 
 /// The latest-release API's JSON.
-#[cfg(windows)]
 fn latest_json() -> Result<String, String> {
     String::from_utf8(get(LATEST, "application/vnd.github+json")?).map_err(|e| format!("{LATEST}: {e}"))
 }
 
 /// Downloads the release's warden.exe into `dir` as warden.new.exe, once it
 /// checks out against the release's size and SHA-256.
-#[cfg(windows)]
 pub fn download(release: &Release, dir: &Path) -> Result<PathBuf, String> {
     let bytes = get(&release.url, "application/octet-stream")?;
     verified(&bytes, release)?;
@@ -110,7 +106,6 @@ pub fn download(release: &Release, dir: &Path) -> Result<PathBuf, String> {
 
 /// The body of a GET of `url`. HttpClient follows redirects, such as the
 /// release asset's to objects.githubusercontent.com.
-#[cfg(windows)]
 fn get(url: &str, accept: &str) -> Result<Vec<u8>, String> {
     use windows::Foundation::Uri;
     use windows::Storage::Streams::DataReader;
@@ -155,12 +150,10 @@ pub fn clean_old(current: &Path) {
 }
 
 /// The environment variable [`restart`] passes this process's id in.
-#[cfg(windows)]
 const WAIT_PID: &str = "WARDEN_WAIT_PID";
 
 /// Starts `current` on its own, with no arguments; the caller then exits.
 /// The new process waits for this one in [`wait_for_previous`].
-#[cfg(windows)]
 pub fn restart(current: &Path) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     const DETACHED_PROCESS: u32 = 0x0000_0008;
@@ -175,7 +168,6 @@ pub fn restart(current: &Path) -> Result<(), String> {
 /// Waits up to 5 s for the Warden that started this one with [`restart`] to
 /// exit, so its hotkeys and its exe file are free; returns at once on a
 /// normal start.
-#[cfg(windows)]
 pub fn wait_for_previous() {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
@@ -264,7 +256,6 @@ mod tests {
 
     /// The live API, for manual runs: `cargo test --lib live_latest_release -- --ignored`.
     /// Also downloads the asset, through GitHub's redirect, and checks it.
-    #[cfg(windows)]
     #[test]
     #[ignore]
     fn live_latest_release() {

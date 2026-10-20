@@ -16,7 +16,8 @@ fn main() -> ExitCode {
     let result = match args.as_slice() {
         [] => gui(None),
         [cmd, frame] if cmd == "open" => gui(Some(Path::new(frame))),
-        [cmd] if cmd == "uninstall" => uninstall(),
+        #[cfg(windows)]
+        [cmd] if cmd == "uninstall" => warden::app::install::uninstall(),
         _ => Err(USAGE.to_string()),
     };
     match result {
@@ -36,17 +37,6 @@ fn gui(preload: Option<&Path>) -> Result<(), String> {
 #[cfg(not(windows))]
 fn gui(_: Option<&Path>) -> Result<(), String> {
     Err("the window runs on Windows only; use warden-cli".to_string())
-}
-
-/// Removes the install, after asking; the folder goes once this process exits.
-#[cfg(windows)]
-fn uninstall() -> Result<(), String> {
-    warden::app::install::uninstall()
-}
-
-#[cfg(not(windows))]
-fn uninstall() -> Result<(), String> {
-    Err("warden is installed on Windows only".to_string())
 }
 
 /// There is no console to print to, so errors go to a message box.

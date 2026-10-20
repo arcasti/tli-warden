@@ -12,9 +12,6 @@ use windows::core::{HSTRING, w};
 /// The installed apps entry, under HKEY_CURRENT_USER.
 const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Warden";
 
-/// The installed exe's name.
-const EXE: &str = "warden.exe";
-
 /// %LOCALAPPDATA%\Programs\Warden; None when LOCALAPPDATA is not set.
 pub fn install_dir() -> Option<PathBuf> {
     std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("Programs").join("Warden"))
@@ -46,11 +43,11 @@ fn same_path(a: &Path, b: &Path) -> bool {
 pub fn install(current: &Path) -> Result<PathBuf, String> {
     let dir = install_dir().ok_or("LOCALAPPDATA is not set")?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let exe = dir.join(EXE);
+    let exe = dir.join(update::ASSET);
     if !same_path(current, &exe) {
         let copy = |to: &Path| std::fs::copy(current, to).map(drop).map_err(|e| format!("{} to {}: {e}", current.display(), to.display()));
         if exe.exists() {
-            let new = dir.join("warden.new.exe");
+            let new = dir.join(update::NEW);
             copy(&new)?;
             update::swap(&exe, &new)?;
         } else {
@@ -183,9 +180,9 @@ mod tests {
     #[test]
     fn installed_here_paths() {
         let dir = install_dir().unwrap();
-        assert!(installed_here(&dir.join(EXE)));
-        assert!(installed_here(Path::new(&dir.join(EXE).to_string_lossy().to_uppercase())));
-        assert!(!installed_here(&std::env::temp_dir().join(EXE)));
-        assert!(!installed_here(&dir.join("sub").join(EXE)));
+        assert!(installed_here(&dir.join(update::ASSET)));
+        assert!(installed_here(Path::new(&dir.join(update::ASSET).to_string_lossy().to_uppercase())));
+        assert!(!installed_here(&std::env::temp_dir().join(update::ASSET)));
+        assert!(!installed_here(&dir.join("sub").join(update::ASSET)));
     }
 }

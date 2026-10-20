@@ -833,9 +833,9 @@ impl Session {
 
     /// Logs the window auto read captures, as the watcher describes it, and
     /// the language Windows OCR reads in (null with none installed).
-    pub fn log_window(&self, window: &str) {
-        if let Some(log) = &self.log {
-            log.event("window", SystemTime::now(), json!({ "window": window, "ocr": crate::reader::ocr::language() }));
+    pub fn log_window(&mut self, window: &str) {
+        if let Some(log) = &mut self.log {
+            log.window(json!({ "window": window, "ocr": crate::reader::ocr::language() }));
         }
     }
 

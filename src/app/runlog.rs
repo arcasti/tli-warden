@@ -45,6 +45,9 @@ pub struct RunLog {
     /// The screen and board of the last frame saved, and when; no board for
     /// a read that installed none.
     last: Option<(Screen, Option<Model>, Instant)>,
+    /// The fields of the last "window" line, which every later run's folder
+    /// starts with: the window is reported only when it changes.
+    window: Option<Value>,
     tx: Option<Sender<Job>>,
     writer: Option<JoinHandle<()>>,
 }
@@ -77,7 +80,7 @@ impl RunLog {
             }
         });
         let dir = root.join(folder_name(SystemTime::now()));
-        RunLog { root, dir, frames: 0, last: None, tx: Some(tx), writer: Some(writer) }
+        RunLog { root, dir, frames: 0, last: None, window: None, tx: Some(tx), writer: Some(writer) }
     }
 
     /// A log under %APPDATA%\warden\runs; None when APPDATA is not set.
@@ -90,8 +93,15 @@ impl RunLog {
         &self.dir
     }
 
+    /// Writes the "window" line, and again at the top of each later run's
+    /// folder.
+    pub fn window(&mut self, fields: Value) {
+        self.event("window", SystemTime::now(), fields.clone());
+        self.window = Some(fields);
+    }
+
     /// Starts a new run's folder, named from now; a second one in the same
-    /// second gets a suffix.
+    /// second gets a suffix. It starts with the last window line.
     pub fn new_run(&mut self) {
         let name = folder_name(SystemTime::now());
         let mut dir = self.root.join(&name);
@@ -103,6 +113,9 @@ impl RunLog {
         self.dir = dir;
         self.frames = 0;
         self.last = None;
+        if let Some(fields) = self.window.clone() {
+            self.event("window", SystemTime::now(), fields);
+        }
     }
 
     /// Writes one line: `at`, `kind`, then `fields` (a JSON object).
@@ -299,10 +312,16 @@ mod tests {
         let first = log.dir().to_path_buf();
         assert!(first.join("frame-0005.jpg").is_file() && first.join("log.jsonl").is_file());
 
-        // A new run numbers from 1 again, in another folder.
+        // A new run numbers from 1 again, in another folder, which starts with
+        // the window line again.
+        log.window(serde_json::json!({ "window": "w", "ocr": "en-US" }));
         log.new_run();
         assert_ne!(log.dir(), first);
         assert_eq!(log.frame(Screen::Manage, Some(&other), pixel()).as_deref(), Some("frame-0001.jpg"));
+        log.wait();
+        let text = std::fs::read_to_string(log.dir().join("log.jsonl")).unwrap();
+        let line: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        assert_eq!((&line["kind"], &line["window"], &line["ocr"]), (&"window".into(), &"w".into(), &"en-US".into()));
         drop(log);
         std::fs::remove_dir_all(&root).unwrap();
     }

@@ -434,27 +434,20 @@ impl WardenApp {
             _ => None,
         };
         let pick = advice.as_ref().and_then(|a| action_cell(&a.action, warden));
-        let marks = Marks {
-            pick,
-            then: then.and_then(|n| action_cell(&n.action, warden)),
-            near: advice
-                .as_ref()
-                .map(|a| also_good(&s.ranking, a.option))
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|k| action_cell(&s.ranking[k].action, warden))
-                .filter(|&c| Some(c) != pick)
-                .collect(),
-        };
-        // The good moves of no cell, which the ring can't mark, are named.
-        let also: Vec<&str> = advice
+        // The good moves on a cell are marked on the ring, the others named.
+        let (near, also): (Vec<_>, Vec<_>) = advice
             .as_ref()
             .map(|a| also_good(&s.ranking, a.option))
             .unwrap_or_default()
             .into_iter()
-            .filter(|&k| action_cell(&s.ranking[k].action, warden).is_none())
-            .map(|k| short(&s.ranking[k].label))
-            .collect();
+            .map(|k| (action_cell(&s.ranking[k].action, warden), k))
+            .partition(|(c, _)| c.is_some());
+        let marks = Marks {
+            pick,
+            then: then.and_then(|n| action_cell(&n.action, warden)),
+            near: near.into_iter().filter_map(|(c, _)| c).filter(|&c| Some(c) != pick).collect(),
+        };
+        let also: Vec<&str> = also.into_iter().map(|(_, k)| short(&s.ranking[k].label)).collect();
         let also = (!also.is_empty()).then(|| format!("as good: {}", also.join(", ")));
         let kept = reading.kept_lines();
         for line in &kept {

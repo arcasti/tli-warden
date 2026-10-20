@@ -83,8 +83,6 @@ pub struct Panels {
     /// Buttons on screen: "Consume", "Replace", "End", or "Cancel" on a
     /// target pick.
     pub decision: Vec<&'static str>,
-    /// Names of the cards on an instrument or treasure pick, in card order.
-    pub offers: Vec<String>,
     /// The instruments on an instrument pick, in card order.
     pub instruments: Vec<Tool>,
     /// Filled Chromatic Prisoner slots.
@@ -397,7 +395,6 @@ pub fn read_panels(img: &Rgba) -> Panels {
         days: days(&days_lines),
         doors: Vec::new(),
         decision: Vec::new(),
-        offers: Vec::new(),
         instruments: Vec::new(),
         vault: Vec::new(),
         tool_icons: icon_score(img) >= ICON_SPREAD,
@@ -408,13 +405,9 @@ pub fn read_panels(img: &Rgba) -> Panels {
     if has(&title, "Select a Torture Instrument", 0.75) {
         p.screen = Screen::InstrumentPick;
         let names: Vec<String> = d.tool_ids.iter().map(|&t| d.tool_names[t as usize].clone()).collect();
-        let found = offers(&name_lines, &names);
-        p.instruments = found.iter().map(|&i| d.tool_ids[i]).collect();
-        p.offers = found.into_iter().map(|i| names[i].clone()).collect();
+        p.instruments = offers(&name_lines, &names).into_iter().map(|i| d.tool_ids[i]).collect();
     } else if has(&title, "Warden's Treasure", 0.75) || title.iter().any(|l| squash(&l.text).contains("treasure")) {
         p.screen = Screen::TreasurePick;
-        // The treasure always offers the four gifts, in Gift::ALL order left to right.
-        p.offers = d.gift_names.clone();
     } else if has(&status, "Return to Selection", 0.75) {
         p.screen = Screen::PrisonStatus;
     } else if has(&target, "Select an Inmate to Consume", 0.75) || has(&cancel, "Cancel", 0.8) {

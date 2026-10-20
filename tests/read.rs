@@ -6,7 +6,7 @@
 use serde_json::Value;
 use std::path::Path;
 use warden::board::build_state;
-use warden::engine::data::Tool;
+use warden::engine::data::{Tool, data};
 use warden::reader::load_png;
 use warden::reader::model::to_model;
 use warden::reader::panels::read_panels;
@@ -59,8 +59,12 @@ fn panels_against_labels() {
             }
         }
 
-        let offers = strings(&l["offers"]);
-        tally[4].check(p.offers == offers, || format!("{f} offers read {:?} label {offers:?}", p.offers));
+        // A treasure pick always offers the four gifts, so only instrument picks are read.
+        if screen != "treasurePick" {
+            let offers = strings(&l["offers"]);
+            let read: Vec<&str> = p.instruments.iter().map(|&t| data().tool_names[t as usize].as_str()).collect();
+            tally[4].check(read == offers, || format!("{f} offers read {read:?} label {offers:?}"));
+        }
 
         let chromatic = l["chromatic"].as_u64().unwrap() as usize;
         tally[5].check(p.vault.len() == chromatic, || format!("{f} chromatic read {} label {chromatic}", p.vault.len()));

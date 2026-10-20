@@ -1213,7 +1213,10 @@ impl Session {
     /// with the run (nothing on it can be played or corrected any more); the
     /// line says how many Chromatic Prisoners the last reading had vaulted.
     /// The held instruments and the days count go too. The riot screen read
-    /// again keeps the line.
+    /// again keeps the line. The run log gets a run_end and the next run's
+    /// folder only when the last reading was on the run's last day: the riot
+    /// screen also shows right after a run ends, and a board read in between
+    /// (a day 1 with an empty vault) is no run of its own.
     fn end_run(&mut self) {
         if self.run_over.is_some() {
             return;
@@ -1223,9 +1226,10 @@ impl Session {
             Some(n) => format!("The run is over: {n} Chromatic Prisoners vaulted."),
             None => "The run is over.".to_string(),
         });
-        if let Some(log) = &mut self.log {
-            let vaulted = self.reading.as_ref().map(|r| r.model.vault.len());
-            log.event("run_end", SystemTime::now(), json!({ "vaulted": vaulted }));
+        if let Some(log) = &mut self.log
+            && let Some(r) = self.reading.as_ref().filter(|r| r.model.day >= r.model.max_days)
+        {
+            log.event("run_end", SystemTime::now(), json!({ "vaulted": r.model.vault.len() }));
             log.new_run();
         }
         self.stop();

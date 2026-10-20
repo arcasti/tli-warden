@@ -619,6 +619,46 @@ fn off_board_frame_then_run_end() {
     assert_eq!(s.reading.as_ref().unwrap().screen, Screen::Manage);
 }
 
+/// The riot screen after the last day (rec4-t412, day 20) logs one run_end
+/// and starts the next run's folder; a day-1 board read after it (rec1-t055)
+/// and the riot screen again show the line but log no second run_end and
+/// start no folder.
+#[test]
+fn run_end_logs_once() {
+    if !have(&["rec4-t412.png", "rec4-t422.png", "rec1-t055.png"]) {
+        return;
+    }
+    let root = std::env::temp_dir().join(format!("warden-run-end-once-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let mut s = Session::new(20, Vec::new(), None, None);
+    s.log = Some(RunLog::new(root.clone()));
+    let last = read_next(&mut s, "rec4-t412.png");
+    assert_eq!((last.model.day, last.model.max_days), (20, 20));
+    let first = s.log.as_ref().unwrap().dir().to_path_buf();
+    s.read_in_background(frame("rec4-t422.png"));
+    s.wait();
+    assert!(s.run_over.is_some());
+    let next = s.log.as_ref().unwrap().dir().to_path_buf();
+    assert_ne!(next, first);
+
+    let day1 = read_next(&mut s, "rec1-t055.png");
+    assert_eq!(day1.model.day, 1);
+    s.read_in_background(frame("rec4-t422.png"));
+    s.wait();
+    assert_eq!(s.run_over.as_deref(), Some("The run is over: 0 Chromatic Prisoners vaulted."));
+    assert!(s.reading.is_none());
+    assert_eq!(s.log.as_ref().unwrap().dir(), next);
+    drop(s);
+
+    let run_ends = |dir: &Path| {
+        let text = std::fs::read_to_string(dir.join("log.jsonl")).unwrap_or_default();
+        text.lines().map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()).filter(|l| l["kind"] == "run_end").map(|l| l["vaulted"].clone()).collect::<Vec<_>>()
+    };
+    assert_eq!(run_ends(&first), vec![serde_json::json!(last.model.vault.len())]);
+    assert!(run_ends(&next).is_empty());
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
 /// A game dialog keeps the last reading and its solve on show.
 #[test]
 fn popup_keeps_the_last_reading() {

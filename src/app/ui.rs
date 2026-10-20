@@ -569,21 +569,13 @@ impl WardenApp {
             _ => None,
         };
         let pick = advice.as_ref().and_then(|a| action_cell(&a.action, warden));
-        // The good moves on a cell are marked on the ring, the others named.
-        let (near, also): (Vec<_>, Vec<_>) = advice
-            .as_ref()
-            .map(|a| also_good(&s.ranking, a.option))
-            .unwrap_or_default()
-            .into_iter()
-            .map(|k| (action_cell(&s.ranking[k].action, warden), k))
-            .partition(|(c, _)| c.is_some());
+        // The good moves on a cell are marked on the ring.
+        let near = advice.as_ref().map(|a| also_good(&s.ranking, a.option)).unwrap_or_default();
         let marks = Marks {
             pick,
             then: then.and_then(|n| action_cell(&n.action, warden)),
-            near: near.into_iter().filter_map(|(c, _)| c).filter(|&c| Some(c) != pick).collect(),
+            near: near.into_iter().filter_map(|k| action_cell(&s.ranking[k].action, warden)).filter(|&c| Some(c) != pick).collect(),
         };
-        let also: Vec<&str> = also.into_iter().map(|(_, k)| short(&s.ranking[k].label)).collect();
-        let also = (!also.is_empty()).then(|| format!("as good: {}", also.join(", ")));
         let kept = reading.kept_lines();
         for line in &kept {
             ui.label(RichText::new(*line).small().color(Color32::YELLOW));
@@ -606,7 +598,7 @@ impl WardenApp {
         }
         let pick = advice.as_ref().map(|a| move_name(&a.action, short(&a.label)));
         let next = then.map(|n| move_name(&n.action, short(&n.label)));
-        courtyard(ui, court, &day, pick.as_deref(), also.as_deref(), next.as_deref(), s.solving);
+        courtyard(ui, court, &day, pick.as_deref(), next.as_deref(), s.solving);
         if let Some(a) = &advice {
             ui.interact(court, egui::Id::unique("warden-courtyard"), Sense::hover()).on_hover_text(format!("{}\n{}", a.label, a.why));
         }
@@ -1095,9 +1087,8 @@ fn dashed_outline(p: &egui::Painter, rect: Rect, stroke: Stroke) {
 }
 
 /// The pick written in the ring's courtyard, centred: the day, the move with
-/// a spinner while the playouts run, the moves as good that the ring can't
-/// mark, and the move after it.
-fn courtyard(ui: &egui::Ui, court: Rect, day: &str, pick: Option<&str>, also: Option<&str>, then: Option<&str>, solving: bool) {
+/// a spinner while the playouts run, and the move after it.
+fn courtyard(ui: &egui::Ui, court: Rect, day: &str, pick: Option<&str>, then: Option<&str>, solving: bool) {
     let p = ui.painter().with_clip_rect(court);
     let small = egui::TextStyle::Small.resolve(ui.style());
     let spin = 14.0;
@@ -1112,9 +1103,6 @@ fn courtyard(ui: &egui::Ui, court: Rect, day: &str, pick: Option<&str>, also: Op
         Some(pick) => lines.push((layout(pick.to_string(), FontId::proportional(15.0), LEADER, wrap - spin), solving)),
         None if solving => lines.push((layout("Solving...".to_string(), small.clone(), ui.visuals().text_color(), wrap - spin), true)),
         None => {}
-    }
-    if let Some(also) = also {
-        lines.push((layout(also.to_string(), small.clone(), ui.visuals().weak_text_color(), wrap), false));
     }
     if let Some(then) = then {
         lines.push((layout(format!("then {then}"), small, Color32::from_gray(207), wrap), false));

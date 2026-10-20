@@ -5,7 +5,7 @@
 //! slots and the instrument icons are read from pixels.
 
 use super::instruments::read_held;
-use super::ocr::{Line, ocr};
+use super::ocr::{Line, ocr, ocr_all};
 use super::scene::beast_at;
 use super::{Rect, Rgba};
 use crate::engine::data::{Beast, Tool, data};
@@ -146,10 +146,6 @@ const SLOT_FILLED: f32 = 60.0;
 const ICON: (i32, i32) = (122, 390);
 /// Luma standard deviation over the first icon spot above which an icon is there.
 const ICON_SPREAD: f32 = 30.0;
-
-fn read(img: &Rgba, (rect, scale): (Rect, f32)) -> Vec<Line> {
-    ocr(img, rect, scale)
-}
 
 /// Lowercase ASCII letters and digits only: spacing and punctuation are the
 /// parts OCR gets wrong most.
@@ -388,9 +384,16 @@ pub fn icon_score(img: &Rgba) -> f32 {
 
 pub fn read_panels(img: &Rgba) -> Panels {
     let d = data();
+    // Every fixed region but the pick screens' cards is read at once, whether the screen needs it or not.
+    const REGIONS: [(Rect, f32); 13] = [DAYS, TITLE, HEADING, CARDS, TARGET, CANCEL, BANNER, DIALOG, INCIDENT, THEME, OBJECTIVE, STATUS, RIOT];
+    let Ok([days_lines, title, heading, cards, target, cancel, banner, dialog, incident, theme_lines, objective_lines, status, riot]) =
+        <[Vec<Line>; 13]>::try_from(ocr_all(img, &REGIONS))
+    else {
+        unreachable!("ocr_all returns one reading per region")
+    };
     let mut p = Panels {
         screen: Screen::Unknown,
-        days: days(&read(img, DAYS)),
+        days: days(&days_lines),
         doors: Vec::new(),
         decision: Vec::new(),
         offers: Vec::new(),
@@ -401,29 +404,26 @@ pub fn read_panels(img: &Rgba) -> Panels {
         objective: None,
         held: None,
     };
-    let title = read(img, TITLE);
     if has(&title, "Select a Torture Instrument", 0.75) {
         p.screen = Screen::InstrumentPick;
         let names: Vec<String> = d.tool_ids.iter().map(|&t| d.tool_names[t as usize].clone()).collect();
-        let found = offers(&read(img, PICK), &names);
+        let found = offers(&ocr(img, PICK.0, PICK.1), &names);
         p.instruments = found.iter().map(|&i| d.tool_ids[i]).collect();
         p.offers = found.into_iter().map(|i| names[i].clone()).collect();
     } else if has(&title, "Warden's Treasure", 0.75) || title.iter().any(|l| squash(&l.text).contains("treasure")) {
         p.screen = Screen::TreasurePick;
-        p.offers = offers(&read(img, PICK), &d.gift_names).into_iter().map(|i| d.gift_names[i].clone()).collect();
-    } else if has(&read(img, STATUS), "Return to Selection", 0.75) {
+        p.offers = offers(&ocr(img, PICK.0, PICK.1), &d.gift_names).into_iter().map(|i| d.gift_names[i].clone()).collect();
+    } else if has(&status, "Return to Selection", 0.75) {
         p.screen = Screen::PrisonStatus;
-    } else if has(&read(img, TARGET), "Select an Inmate to Consume", 0.75) || has(&read(img, CANCEL), "Cancel", 0.8) {
+    } else if has(&target, "Select an Inmate to Consume", 0.75) || has(&cancel, "Cancel", 0.8) {
         p.screen = Screen::ChainTarget;
         p.decision = vec!["Cancel"];
-    } else if let Some(id) = theme(&read(img, THEME)) {
+    } else if let Some(id) = theme(&theme_lines) {
         p.screen = Screen::Theme;
         p.theme = Some(id);
-    } else if popup(&read(img, DIALOG), &read(img, INCIDENT)) {
+    } else if popup(&dialog, &incident) {
         p.screen = Screen::Popup;
     } else {
-        let heading = read(img, HEADING);
-        let cards = read(img, CARDS);
         p.decision = buttons(&cards);
         let doors = doors(&cards, |x| reread(img, x));
         if has(&heading, "Select an Objective", 0.75) {
@@ -438,9 +438,9 @@ pub fn read_panels(img: &Rgba) -> Panels {
             p.decision.clear();
         } else if has(&heading, "Make Your Decision", 0.75) || !p.decision.is_empty() {
             p.screen = Screen::Manage;
-        } else if read(img, BANNER).iter().any(|l| squash(&l.text).starts_with("day")) {
+        } else if banner.iter().any(|l| squash(&l.text).starts_with("day")) {
             p.screen = Screen::DayBanner;
-        } else if has(&read(img, RIOT), "A Riot has broken out in Tartarus", 0.75) {
+        } else if has(&riot, "A Riot has broken out in Tartarus", 0.75) {
             p.screen = Screen::RunEnd;
         }
     }
@@ -450,7 +450,7 @@ pub fn read_panels(img: &Rgba) -> Panels {
     }
     let pick_or_end = matches!(p.screen, Screen::InstrumentPick | Screen::TreasurePick | Screen::RunEnd);
     if !pick_or_end && p.screen != Screen::Theme {
-        p.objective = objective(&read(img, OBJECTIVE));
+        p.objective = objective(&objective_lines);
     }
     // The riot screen shows no Chromatic Prisoner slots.
     if !pick_or_end {

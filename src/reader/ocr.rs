@@ -39,25 +39,42 @@ pub struct Line {
 /// (small game text reads better at 2-3x). Empty when the region is empty
 /// or OCR is not available.
 pub fn ocr(img: &Rgba, rect: Rect, scale: f32) -> Vec<Line> {
-    let crop = img.crop(rect);
-    if crop.w == 0 || crop.h == 0 {
-        return Vec::new();
-    }
-    let (w, h) = ((crop.w as f32 * scale).round() as usize, (crop.h as f32 * scale).round() as usize);
-    let big = stretch(&crop.resize(w.max(1), h.max(1)));
-    let lines = imp::recognize(&big).unwrap_or_default();
-    lines
-        .into_iter()
-        .map(|(text, [x, y, lw, lh])| Line {
-            text,
-            rect: Rect::new(
-                rect.x + (x / scale).round() as i32,
-                rect.y + (y / scale).round() as i32,
-                (lw / scale).round() as i32,
-                (lh / scale).round() as i32,
-            ),
+    ocr_all(img, &[(rect, scale)]).pop().unwrap_or_default()
+}
+
+/// The lines of each `(rect, scale)` region as `ocr` reads them, in order,
+/// with the regions read at the same time.
+pub fn ocr_all(img: &Rgba, regions: &[(Rect, f32)]) -> Vec<Vec<Line>> {
+    let inputs: Vec<Option<Rgba>> = regions.iter().map(|&(rect, scale)| prepare(img, rect, scale)).collect();
+    regions
+        .iter()
+        .zip(imp::recognize_all(inputs))
+        .map(|(&(rect, scale), lines)| {
+            lines
+                .into_iter()
+                .map(|(text, [x, y, lw, lh])| Line {
+                    text,
+                    rect: Rect::new(
+                        rect.x + (x / scale).round() as i32,
+                        rect.y + (y / scale).round() as i32,
+                        (lw / scale).round() as i32,
+                        (lh / scale).round() as i32,
+                    ),
+                })
+                .collect()
         })
         .collect()
+}
+
+/// The OCR input for `rect`: the crop upscaled by `scale` with its contrast
+/// stretched. None when the region is empty.
+fn prepare(img: &Rgba, rect: Rect, scale: f32) -> Option<Rgba> {
+    let crop = img.crop(rect);
+    if crop.w == 0 || crop.h == 0 {
+        return None;
+    }
+    let (w, h) = ((crop.w as f32 * scale).round() as usize, (crop.h as f32 * scale).round() as usize);
+    Some(stretch(&crop.resize(w.max(1), h.max(1))))
 }
 
 /// Stretches the contrast so the 1st to 99th percentile of luma spans 0-255:
@@ -80,7 +97,13 @@ fn stretch(img: &Rgba) -> Rgba {
         return img.clone();
     }
     let k = 255.0 / (hi - lo);
-    let data = img.data.iter().enumerate().map(|(i, &v)| if i % 4 == 3 { v } else { ((v as f32 - lo) * k).clamp(0.0, 255.0) as u8 }).collect();
+    let table: [u8; 256] = std::array::from_fn(|v| ((v as f32 - lo) * k).clamp(0.0, 255.0) as u8);
+    let mut data = img.data.clone();
+    for p in data.as_chunks_mut::<4>().0 {
+        for v in &mut p[..3] {
+            *v = table[*v as usize];
+        }
+    }
     Rgba { w: img.w, h: img.h, data }
 }
 
@@ -91,8 +114,9 @@ fn luma(p: &[u8; 4]) -> u8 {
 #[cfg(windows)]
 mod imp {
     use super::Rgba;
+    use std::sync::{Arc, Mutex, OnceLock, mpsc};
     use windows::Graphics::Imaging::{BitmapAlphaMode, BitmapPixelFormat, SoftwareBitmap};
-    use windows::Media::Ocr::OcrEngine;
+    use windows::Media::Ocr::{OcrEngine, OcrResult};
     use windows::Storage::Streams::DataWriter;
     use windows::core::Result;
 
@@ -112,8 +136,57 @@ mod imp {
         ENGINE.with(|e| Some(e.as_ref()?.RecognizerLanguage().ok()?.LanguageTag().ok()?.to_string()))
     }
 
-    /// Lines with their boxes (x, y, w, h) in the pixels of `img`.
-    pub fn recognize(img: &Rgba) -> Result<Vec<(String, [f32; 4])>> {
+    type Lines = Vec<(String, [f32; 4])>;
+    type Job = (Rgba, mpsc::Sender<(usize, Lines)>, usize);
+
+    /// Reader threads, each with its own engine: one engine given several
+    /// reads at once returns some of them empty.
+    const WORKERS: usize = 4;
+
+    /// The queue the reader threads take images from, started on first use.
+    fn pool() -> &'static mpsc::Sender<Job> {
+        static POOL: OnceLock<mpsc::Sender<Job>> = OnceLock::new();
+        POOL.get_or_init(|| {
+            let (jobs, queue) = mpsc::channel::<Job>();
+            let queue = Arc::new(Mutex::new(queue));
+            for _ in 0..WORKERS {
+                let queue = Arc::clone(&queue);
+                std::thread::spawn(move || {
+                    while let Ok((img, back, i)) = queue.lock().map_err(drop).and_then(|q| q.recv().map_err(drop)) {
+                        let _ = back.send((i, recognize(&img)));
+                    }
+                });
+            }
+            jobs
+        })
+    }
+
+    /// The lines of each image with their boxes (x, y, w, h) in its pixels;
+    /// none for a missing image or a failed read. Several images are read on
+    /// the reader threads at once.
+    pub fn recognize_all(imgs: Vec<Option<Rgba>>) -> Vec<Lines> {
+        let mut out = vec![Vec::new(); imgs.len()];
+        let (back, done) = mpsc::channel();
+        for (i, img) in imgs.into_iter().enumerate() {
+            if let Some(img) = img {
+                let _ = pool().send((img, back.clone(), i));
+            }
+        }
+        drop(back);
+        for (i, lines) in done {
+            out[i] = lines;
+        }
+        out
+    }
+
+    /// The lines of `img` read on this thread's engine; none when the read fails.
+    fn recognize(img: &Rgba) -> Lines {
+        let read = || lines(&ENGINE.with(|e| e.as_ref().map(|e| e.RecognizeAsync(&bitmap(img)?))).ok_or_else(windows::core::Error::empty)??.join()?);
+        read().unwrap_or_default()
+    }
+
+    /// `img` as a Bgra8 bitmap, shrunk to the engine's largest size.
+    fn bitmap(img: &Rgba) -> Result<SoftwareBitmap> {
         let max = OcrEngine::MaxImageDimension()? as usize;
         let img = if img.w > max || img.h > max {
             let k = max as f32 / img.w.max(img.h) as f32;
@@ -124,14 +197,17 @@ mod imp {
         let bgra: Vec<u8> = img.data.as_chunks::<4>().0.iter().flat_map(|&[r, g, b, _]| [b, g, r, 255]).collect();
         let writer = DataWriter::new()?;
         writer.WriteBytes(&bgra)?;
-        let bitmap = SoftwareBitmap::CreateCopyWithAlphaFromBuffer(
+        SoftwareBitmap::CreateCopyWithAlphaFromBuffer(
             &writer.DetachBuffer()?,
             BitmapPixelFormat::Bgra8,
             img.w as i32,
             img.h as i32,
             BitmapAlphaMode::Ignore,
-        )?;
-        let result = ENGINE.with(|e| e.as_ref().map(|e| e.RecognizeAsync(&bitmap))).ok_or_else(windows::core::Error::empty)??.join()?;
+        )
+    }
+
+    /// The lines of a result with their boxes (x, y, w, h).
+    fn lines(result: &OcrResult) -> Result<Vec<(String, [f32; 4])>> {
         let mut out = Vec::new();
         for line in result.Lines()? {
             let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
@@ -152,8 +228,8 @@ mod imp {
 mod imp {
     use super::Rgba;
 
-    pub fn recognize(_: &Rgba) -> Result<Vec<(String, [f32; 4])>, ()> {
-        Err(())
+    pub fn recognize_all(imgs: Vec<Option<Rgba>>) -> Vec<Vec<(String, [f32; 4])>> {
+        vec![Vec::new(); imgs.len()]
     }
 
     pub fn language() -> Option<String> {

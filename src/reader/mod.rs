@@ -72,21 +72,26 @@ impl Rgba {
         let mut data = vec![0u8; w * h * 4];
         let sx = self.w as f32 / w as f32;
         let sy = self.h as f32 / h as f32;
-        for y in 0..h {
+        // Each output column's two source byte offsets in a row and its weight, worked out once.
+        let cols: Vec<(usize, usize, f32)> = (0..w)
+            .map(|x| {
+                let fx = ((x as f32 + 0.5) * sx - 0.5).clamp(0.0, (self.w - 1) as f32);
+                let x0 = fx as usize;
+                (x0 * 4, (x0 + 1).min(self.w - 1) * 4, fx - x0 as f32)
+            })
+            .collect();
+        let row_len = self.w * 4;
+        for (y, out) in data.chunks_exact_mut(w * 4).enumerate() {
             let fy = ((y as f32 + 0.5) * sy - 0.5).clamp(0.0, (self.h - 1) as f32);
             let y0 = fy as usize;
             let y1 = (y0 + 1).min(self.h - 1);
             let ty = fy - y0 as f32;
-            for x in 0..w {
-                let fx = ((x as f32 + 0.5) * sx - 0.5).clamp(0.0, (self.w - 1) as f32);
-                let x0 = fx as usize;
-                let x1 = (x0 + 1).min(self.w - 1);
-                let tx = fx - x0 as f32;
+            let (top_row, bot_row) = (&self.data[y0 * row_len..][..row_len], &self.data[y1 * row_len..][..row_len]);
+            for (px, &(x0, x1, tx)) in out.as_chunks_mut::<4>().0.iter_mut().zip(&cols) {
                 for c in 0..4 {
-                    let p = |xx: usize, yy: usize| self.data[(yy * self.w + xx) * 4 + c] as f32;
-                    let top = p(x0, y0) * (1.0 - tx) + p(x1, y0) * tx;
-                    let bot = p(x0, y1) * (1.0 - tx) + p(x1, y1) * tx;
-                    data[(y * w + x) * 4 + c] = (top * (1.0 - ty) + bot * ty).round() as u8;
+                    let top = top_row[x0 + c] as f32 * (1.0 - tx) + top_row[x1 + c] as f32 * tx;
+                    let bot = bot_row[x0 + c] as f32 * (1.0 - tx) + bot_row[x1 + c] as f32 * tx;
+                    px[c] = (top * (1.0 - ty) + bot * ty).round() as u8;
                 }
             }
         }

@@ -36,7 +36,7 @@ Each run gets a folder in `%APPDATA%\warden\runs` (the newest 10 are kept) with 
 
 ## Build
 
-Needs Rust (edition 2024).
+Needs Rust (edition 2024) and the Windows SDK's `rc.exe`, which the Visual Studio Build Tools install, to build the icon into `warden.exe`.
 
 ```powershell
 cargo build --release --bin warden        # target\release\warden.exe

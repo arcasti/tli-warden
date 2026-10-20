@@ -1022,10 +1022,9 @@ impl Session {
                 // unless the player corrected it.
                 let before = self.consume.take().or_else(|| self.board.clone());
                 let mut read = reading.model.clone();
+                let unedited = |n: usize| !self.edits.contains_key(&(n as u8 + 1));
                 if let Some(m) = &before {
-                    let unsure = |w: &Warning| {
-                        w.text.starts_with(CHECK_CELL) && w.cell.is_some_and(|n| !self.edits.contains_key(&(n as u8 + 1)))
-                    };
+                    let unsure = |w: &Warning| w.text.starts_with(CHECK_CELL) && w.cell.is_some_and(unedited);
                     for n in reading.warnings.iter().filter(|w| unsure(w)).filter_map(|w| w.cell) {
                         read.cells[n] = m.cells[n].clone();
                     }
@@ -1041,8 +1040,8 @@ impl Session {
                 }
                 m.warden = reading.model.warden;
                 if let Some((scene, _, _)) = &self.scene {
-                    let unedited: Vec<usize> = jawed(scene).into_iter().filter(|&n| !self.edits.contains_key(&(n as u8 + 1))).collect();
-                    reading.warnings.extend(casket_meals(&mut m, &reading.model, &unedited));
+                    let cells: Vec<usize> = jawed(scene).into_iter().filter(|&n| unedited(n)).collect();
+                    reading.warnings.extend(casket_meals(&mut m, &reading.model, &cells));
                 }
                 // Before the first bite the day's consume is still open.
                 m.devour_used = self.chained;

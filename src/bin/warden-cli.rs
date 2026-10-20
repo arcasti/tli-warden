@@ -14,7 +14,7 @@ use std::process::ExitCode;
 use warden::board::{Model, build_state};
 use warden::engine::data::Tool;
 use warden::reader::{read_model, save_png};
-use warden::solver::bench::{LOW, Solo, bench, mean_se, spread, strategy_bench, summarize};
+use warden::solver::bench::{LOW, Solo, bench, is_low, mean_se, spread, strategy_bench, summarize};
 use warden::solver::{Params, TUNED};
 use warden::solver::solve::{FollowUp, follow_up, instant, solve};
 
@@ -234,7 +234,7 @@ fn run_strategy_bench(
         row("changed", &runs);
         let gain = mean_se(&runs.iter().zip(&tuned).map(|(c, t)| c.chromatics as f64 - t.chromatics as f64).collect::<Vec<_>>());
         out!("changed - tuned  {:+.3} +- {:.3} (paired)", gain.0, gain.1);
-        let low = |r: &Solo| if r.chromatics <= LOW { 100.0 } else { 0.0 };
+        let low = |r: &Solo| if is_low(r.chromatics) { 100.0 } else { 0.0 };
         let fewer = mean_se(&runs.iter().zip(&tuned).map(|(c, t)| low(c) - low(t)).collect::<Vec<_>>());
         out!("changed - tuned  {:+.2} +- {:.2} points of runs with <= {LOW} Chromatics (paired)", fewer.0, fewer.1);
         out!("changed weights: {p:?}");

@@ -175,8 +175,13 @@ pub fn summarize(games: &[Game]) -> Summary {
 /// Runs with at most this many Chromatics count as bad runs in `Spread`.
 pub const LOW: usize = 2;
 
+/// Whether a run with `chromatics` is a bad run: see [`LOW`].
+pub fn is_low(chromatics: usize) -> bool {
+    chromatics <= LOW
+}
+
 /// Percentiles `Spread` reports, in percent.
-pub const PERCENTILES: [usize; 5] = [10, 25, 50, 75, 90];
+const PERCENTILES: [usize; 5] = [10, 25, 50, 75, 90];
 
 /// How Chromatics per run spread: the share of runs with at most `LOW` (in %),
 /// the `PERCENTILES` by nearest rank (the smallest value with at least p% of
@@ -184,18 +189,18 @@ pub const PERCENTILES: [usize; 5] = [10, 25, 50, 75, 90];
 #[derive(Clone, Debug, PartialEq)]
 pub struct Spread {
     pub low: f64,
-    pub percentiles: [usize; 5],
+    pub percentiles: [usize; PERCENTILES.len()],
     pub max: usize,
 }
 
 pub fn spread(runs: &[usize]) -> Spread {
     if runs.is_empty() {
-        return Spread { low: 0.0, percentiles: [0; 5], max: 0 };
+        return Spread { low: 0.0, percentiles: [0; PERCENTILES.len()], max: 0 };
     }
     let mut sorted = runs.to_vec();
     sorted.sort_unstable();
     let n = sorted.len();
-    let low = 100.0 * sorted.iter().filter(|&&c| c <= LOW).count() as f64 / n as f64;
+    let low = 100.0 * sorted.iter().filter(|&&c| is_low(c)).count() as f64 / n as f64;
     let percentiles = PERCENTILES.map(|p| sorted[(p * n).div_ceil(100).max(1) - 1]);
     Spread { low, percentiles, max: sorted[n - 1] }
 }

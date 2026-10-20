@@ -247,7 +247,7 @@ impl Goal {
     /// The objective of `st`; None when there is none, it is done, or `w_goal` is 0.
     fn of(st: &State, p: &Params) -> Option<Goal> {
         let goal = st.objective.filter(|g| !g.done && p.w_goal != 0.0)?;
-        let o = data().objective(goal.id).filter(|o| o.target > goal.progress)?;
+        let o = data().objective(goal.id)?;
         Some(Goal { kind: o.kind, rating: o.rating, target: f64::from(o.target), left: f64::from(o.target - goal.progress) })
     }
 

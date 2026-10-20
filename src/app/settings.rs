@@ -39,7 +39,7 @@ pub struct Settings {
     pub share_logs: Option<bool>,
     /// When the player last turned sharing on, as a run folder name (UTC):
     /// only runs whose folder name sorts at or after it are sent.
-    pub shared_from: Option<String>,
+    pub shared_from: String,
     /// A random lowercase UUID sent with each run log; empty until the
     /// player first chooses to share.
     pub install_id: String,
@@ -61,7 +61,7 @@ impl Default for Settings {
             check_updates: true,
             offer_install: true,
             share_logs: None,
-            shared_from: None,
+            shared_from: String::new(),
             install_id: String::new(),
         }
     }
@@ -109,6 +109,6 @@ mod tests {
         let s: Settings = serde_json::from_str(r#"{"hotkey": "F7", "rollouts": 300}"#).unwrap();
         assert_eq!((s.read_hotkey.as_str(), s.auto_hotkey.as_str(), s.rollouts, s.auto_place, s.tools_days, s.theme, s.run_log), ("F9", "F8", 300, true, None, None, true));
         assert!(s.check_updates && s.offer_install);
-        assert_eq!((s.share_logs, s.shared_from.as_deref(), s.install_id.as_str()), (None, None, ""));
+        assert_eq!((s.share_logs, s.shared_from.as_str(), s.install_id.as_str()), (None, "", ""));
     }
 }

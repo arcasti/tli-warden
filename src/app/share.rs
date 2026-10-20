@@ -7,7 +7,7 @@ use super::http;
 use super::runlog::is_run_folder;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 /// Where run logs go.
 pub const ENDPOINT: &str = "https://warden.arcasti.dev/api/runs";
@@ -94,16 +94,16 @@ fn upload_with(root: &Path, current: &Path, shared_from: &str, mut post: impl Fn
         let log = std::fs::read_to_string(&log_path).map_err(|e| format!("{}: {e}", log_path.display()))?;
         let (status, text) = post(&run, gzip(sanitize(&log).as_bytes())?)?;
         let marker = match status {
-            200..=299 => status.to_string(),
+            200..=299 => {
+                sent += 1;
+                status.to_string()
+            }
             429 => return Err(format!("{run}: HTTP 429, too many uploads")),
             400..=499 => format!("{status} {text}"),
             _ => return Err(format!("{run}: HTTP {status}")),
         };
         let marker_path = dir.join(UPLOADED);
         std::fs::write(&marker_path, marker).map_err(|e| format!("{}: {e}", marker_path.display()))?;
-        if (200..300).contains(&status) {
-            sent += 1;
-        }
     }
     Ok(sent)
 }
@@ -115,7 +115,7 @@ struct Request {
     shared_from: String,
     install_id: String,
     /// Done once the run log has written all it was sent.
-    flushed: Option<Receiver<()>>,
+    flushed: Receiver<()>,
 }
 
 /// One thread that sends the pending runs on each request, one sync at a
@@ -136,13 +136,9 @@ impl Uploader {
                 while let Ok(newer) = requests.try_recv() {
                     request = newer;
                 }
-                if let Some(flushed) = request.flushed.take() {
-                    let _ = flushed.recv();
-                }
+                let _ = request.flushed.recv();
                 let result = upload_pending(ENDPOINT, &root, &request.current, &request.shared_from, &request.install_id);
-                if results.send(result).is_err() {
-                    return;
-                }
+                let _ = results.send(result);
                 done();
             }
         });
@@ -151,19 +147,13 @@ impl Uploader {
 
     /// Asks for a sync of the runs before `current`, once `flushed` (the run
     /// log's) is done.
-    pub fn sync(&self, current: PathBuf, shared_from: String, install_id: String, flushed: Option<Receiver<()>>) {
+    pub fn sync(&self, current: PathBuf, shared_from: String, install_id: String, flushed: Receiver<()>) {
         let _ = self.tx.send(Request { current, shared_from, install_id, flushed });
     }
 
     /// The last sync's outcome, once it comes: the count sent, or why it stopped.
     pub fn poll(&self) -> Option<Result<usize, String>> {
-        let mut last = None;
-        loop {
-            match self.rx.try_recv() {
-                Ok(result) => last = Some(result),
-                Err(TryRecvError::Empty | TryRecvError::Disconnected) => return last,
-            }
-        }
+        self.rx.try_iter().last()
     }
 }
 

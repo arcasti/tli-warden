@@ -396,7 +396,7 @@ impl WardenApp {
         }
         self.settings.share_logs = Some(on);
         if on {
-            self.settings.shared_from = Some(folder_name(std::time::SystemTime::now()));
+            self.settings.shared_from = folder_name(std::time::SystemTime::now());
         }
         self.save();
         self.sync_logs();
@@ -405,8 +405,7 @@ impl WardenApp {
     /// Asks the uploader to send the finished runs, while sharing and the run log are on.
     fn sync_logs(&self) {
         let (Some(uploader), Some(log), Some(true)) = (&self.uploader, &self.session.log, self.settings.share_logs) else { return };
-        let from = self.settings.shared_from.clone().unwrap_or_default();
-        uploader.sync(log.dir().to_path_buf(), from, self.settings.install_id.clone(), Some(log.flushed()));
+        uploader.sync(log.dir().to_path_buf(), self.settings.shared_from.clone(), self.settings.install_id.clone(), log.flushed());
     }
 
     /// Syncs the run logs when the run log's folder changes, and takes the

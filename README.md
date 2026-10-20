@@ -7,7 +7,8 @@ Unofficial. Not affiliated with or endorsed by the developers or publishers of *
 ## Requirements
 
 - Windows 10 or 11.
-- The game at a 16:9 size (1920 x 1080 or any other 16:9 size): fullscreen, borderless, or a window that is not maximized (a maximized window loses the title bar and taskbar height and is no longer 16:9). Other shapes lay the board out differently and are not read: the Board tab says why above the last reading and marks it "last reading".
+- The game at 16:9 or wider (1920 x 1080, 2560 x 1080 and so on): fullscreen, borderless or windowed, maximized or not. Windows narrower than 16:9 are not read: the Board tab says why above the last reading and marks it "last reading".
+- Any interface scale. Warden measures it from the gate icon and the back arrow, and keeps the last measured scale for screens that show neither, such as the Riot. Scales above the default have not been tested yet.
 - The English Windows OCR language. Warden reads the days counter, the destination cards and the panels with it. If the Board tab says English OCR is missing, open PowerShell as administrator and run:
 
   ```powershell
@@ -22,7 +23,7 @@ Start `warden.exe` and play. The window stays on top of the game.
 
 - Auto read (on by default) captures the game window whenever the screen changes and reads it. F8 turns it on or off and F9 reads once, but both only work while the game is not focused, because the game swallows key presses.
 - The Board tab shows the ring of cells as read, the recommended move in the middle and the move after it, and under the day the run's objective with its progress ("Undercurrents 1/2"), which the advice plays toward. Click a cell to correct a misread one.
-- The Moves tab ranks every option by the mean number of Chromatic Inmates vaulted over the playouts, and lists the reader's warnings.
+- The Moves tab ranks every option by the mean Riot loot over the playouts, and lists the reader's warnings. Each Inmate left at the Riot and each vaulted Chromatic yields a Warden's Cache of its rarity, weighted Chromatic 1, Ultimate 0.2 and Legendary 0.05.
 - The Run tab lists the Torture Instruments you hold and the run's theme. Warden follows both from the game; set them there if a read missed one.
 
 Settings are in `%APPDATA%\warden\settings.json`.

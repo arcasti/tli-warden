@@ -5,9 +5,13 @@ pub mod runlog;
 pub mod session;
 pub mod settings;
 #[cfg(windows)]
+pub mod share;
+#[cfg(windows)]
 pub mod capture;
 #[cfg(windows)]
 pub mod hotkey;
+#[cfg(windows)]
+pub mod http;
 #[cfg(windows)]
 pub mod install;
 #[cfg(windows)]

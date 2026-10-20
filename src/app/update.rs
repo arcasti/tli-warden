@@ -2,6 +2,7 @@
 //! asset, warden.exe, downloaded and checked against the release's SHA-256,
 //! and swapped in for the running exe, which takes effect on the next start.
 
+use super::http;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
@@ -91,41 +92,17 @@ pub fn check() -> Result<Option<Release>, String> {
 
 /// The latest-release API's JSON.
 fn latest_json() -> Result<String, String> {
-    String::from_utf8(get(LATEST, "application/vnd.github+json")?).map_err(|e| format!("{LATEST}: {e}"))
+    String::from_utf8(http::get(LATEST, "application/vnd.github+json")?).map_err(|e| format!("{LATEST}: {e}"))
 }
 
 /// Downloads the release's warden.exe into `dir` as warden.new.exe, once it
 /// checks out against the release's size and SHA-256.
 pub fn download(release: &Release, dir: &Path) -> Result<PathBuf, String> {
-    let bytes = get(&release.url, "application/octet-stream")?;
+    let bytes = http::get(&release.url, "application/octet-stream")?;
     verified(&bytes, release)?;
     let path = dir.join(NEW);
     std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(path)
-}
-
-/// The body of a GET of `url`. HttpClient follows redirects, such as the
-/// release asset's to objects.githubusercontent.com.
-fn get(url: &str, accept: &str) -> Result<Vec<u8>, String> {
-    use windows::Foundation::Uri;
-    use windows::Storage::Streams::DataReader;
-    use windows::Web::Http::HttpClient;
-    use windows::core::{HSTRING, h};
-    let fetch = || -> windows::core::Result<Result<Vec<u8>, String>> {
-        let client = HttpClient::new()?;
-        let headers = client.DefaultRequestHeaders()?;
-        headers.TryAppendWithoutValidation(h!("User-Agent"), &HSTRING::from(concat!("warden/", env!("CARGO_PKG_VERSION"))))?;
-        headers.TryAppendWithoutValidation(h!("Accept"), &HSTRING::from(accept))?;
-        let response = client.GetAsync(&Uri::CreateUri(&HSTRING::from(url))?)?.join()?;
-        if !response.IsSuccessStatusCode()? {
-            return Ok(Err(format!("HTTP {}", response.StatusCode()?.0)));
-        }
-        let buffer = response.Content()?.ReadAsBufferAsync()?.join()?;
-        let mut bytes = vec![0; buffer.Length()? as usize];
-        DataReader::FromBuffer(&buffer)?.ReadBytes(&mut bytes)?;
-        Ok(Ok(bytes))
-    };
-    fetch().map_err(|e| e.message()).and_then(|r| r).map_err(|e| format!("{url}: {e}"))
 }
 
 /// Puts `new` in place of `current`. Windows renames a running exe but does

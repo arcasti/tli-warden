@@ -8,15 +8,17 @@
 //! Settings the keys and options. The window moves itself to the empty area
 //! under the game's instrument panel once, when the game is first found.
 //! Under the tab row it offers to install itself when it runs from elsewhere,
-//! and to update once installed, when GitHub has a newer release.
+//! asks once whether to share run logs, and offers to update once installed,
+//! when GitHub has a newer release.
 
 use super::capture::{Event, Watcher, capture, game_rect};
 use super::hotkey::{Hotkey, parse};
 use super::session::{CellEdit, Session};
 use crate::solver::advise::also_good;
 use crate::solver::solve::FollowUp;
-use super::runlog::RunLog;
-use super::settings::Settings;
+use super::runlog::{RunLog, folder_name};
+use super::settings::{self, Settings};
+use super::share::{self, Uploader};
 use super::update::{self, Release};
 use super::install;
 use crate::board::{CellModel, EventMark, Model};
@@ -136,6 +138,13 @@ pub struct WardenApp {
     check_error: Option<String>,
     /// The update's thread (download, swap, restart), while it runs.
     updating: Option<Receiver<Result<(), String>>>,
+    /// Sends the finished runs' logs while sharing is on; None when APPDATA is not set.
+    uploader: Option<Uploader>,
+    /// Why the last run log upload stopped, shown quietly in the Settings tab.
+    upload_error: Option<String>,
+    /// The run log's folder last seen: a change means the run before it is
+    /// finished, so it is sent.
+    log_dir: Option<PathBuf>,
 }
 
 impl WardenApp {
@@ -171,6 +180,12 @@ impl WardenApp {
             release: None,
             check_error: None,
             updating: None,
+            uploader: settings::app_dir().map(|d| {
+                let ctx = cc.egui_ctx.clone();
+                Uploader::start(d.join("runs"), move || ctx.request_repaint())
+            }),
+            upload_error: None,
+            log_dir: None,
         };
         if app.current.is_some() && app.settings.check_updates {
             app.checking = Some(in_background(&app.ctx, update::check));
@@ -367,12 +382,49 @@ impl WardenApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 
-    /// The install offer or, once installed, the update line, under the tab row.
-    fn install_update_line(&mut self, ui: &mut egui::Ui) {
-        if self.current.is_none() {
-            return;
+    /// Turns run log sharing on or off. Turning it on sends the runs from now
+    /// on, and makes the install id the first time.
+    fn set_sharing(&mut self, on: bool) {
+        if on && self.settings.install_id.is_empty() {
+            match share::new_install_id() {
+                Ok(id) => self.settings.install_id = id,
+                Err(e) => {
+                    self.upload_error = Some(e);
+                    return;
+                }
+            }
         }
-        if !self.installed && self.settings.offer_install {
+        self.settings.share_logs = Some(on);
+        if on {
+            self.settings.shared_from = Some(folder_name(std::time::SystemTime::now()));
+        }
+        self.save();
+        self.sync_logs();
+    }
+
+    /// Asks the uploader to send the finished runs, while sharing and the run log are on.
+    fn sync_logs(&self) {
+        let (Some(uploader), Some(log), Some(true)) = (&self.uploader, &self.session.log, self.settings.share_logs) else { return };
+        let from = self.settings.shared_from.clone().unwrap_or_default();
+        uploader.sync(log.dir().to_path_buf(), from, self.settings.install_id.clone(), Some(log.flushed()));
+    }
+
+    /// Syncs the run logs when the run log's folder changes, and takes the
+    /// uploads' outcome.
+    fn poll_upload(&mut self) {
+        if self.session.log.as_ref().map(|l| l.dir()) != self.log_dir.as_deref() {
+            self.log_dir = self.session.log.as_ref().map(|l| l.dir().to_path_buf());
+            self.sync_logs();
+        }
+        if let Some(result) = self.uploader.as_ref().and_then(Uploader::poll) {
+            self.upload_error = result.err();
+        }
+    }
+
+    /// Under the tab row, one at a time: the install offer, the question
+    /// whether to share run logs, or, once installed, the update line.
+    fn notice_line(&mut self, ui: &mut egui::Ui) {
+        if self.current.is_some() && !self.installed && self.settings.offer_install {
             ui.horizontal_wrapped(|ui| {
                 ui.label("Install Warden: a Start menu entry and updates");
                 if ui.button("Install").clicked() {
@@ -381,6 +433,16 @@ impl WardenApp {
                 if ui.button("Not now").clicked() {
                     self.settings.offer_install = false;
                     self.save();
+                }
+            });
+        } else if self.settings.share_logs.is_none() && self.settings.run_log && self.uploader.is_some() {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Share anonymous run logs (no screenshots) to improve Warden?");
+                if ui.button("Share").clicked() {
+                    self.set_sharing(true);
+                }
+                if ui.button("Don't share").clicked() {
+                    self.set_sharing(false);
                 }
             });
         } else if let Some(([major, minor, patch], page)) = self.release.as_ref().map(|r| (r.version, r.page.clone())) {
@@ -454,6 +516,7 @@ impl eframe::App for WardenApp {
             }
         }
         self.session.poll();
+        self.poll_upload();
         let warned = self.session.reading.as_ref().map_or(0, |r| r.warnings.iter().filter(|w| w.cell.is_some()).count() + r.kept_lines().len());
         if self.warned == 0 && warned > 0 {
             self.tab = Tab::Board;
@@ -474,7 +537,7 @@ impl eframe::App for WardenApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ui, |ui| {
             self.tab_row(ui);
-            self.install_update_line(ui);
+            self.notice_line(ui);
             if self.settings.auto_read
                 && let Some(s) = &self.auto_status
             {
@@ -777,6 +840,15 @@ impl WardenApp {
                 open = ui.button("Open screenshot...").clicked();
             });
         });
+        let mut share = self.settings.share_logs == Some(true);
+        let hover = "Sends each finished run's log to warden.arcasti.dev to improve Warden: no screenshots, no window titles";
+        let r = ui.add_enabled(self.settings.run_log, egui::Checkbox::new(&mut share, "Share run logs")).on_hover_text(hover).on_disabled_hover_text(hover);
+        if r.changed() {
+            self.set_sharing(share);
+        }
+        if let Some(e) = &self.upload_error {
+            ui.small(RichText::new(format!("Run log upload failed: {e}")).weak());
+        }
         ui.horizontal(|ui| {
             let mut check = self.settings.check_updates;
             let hover = "Asks api.github.com for the latest release when Warden starts; nothing else is sent";

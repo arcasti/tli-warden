@@ -34,6 +34,8 @@ Settings are in `%APPDATA%\warden\settings.json`.
 
 Each run gets a folder in `%APPDATA%\warden\runs` (the newest 10 are kept) with `log.jsonl`, one JSON line per read, advice and correction, and `frame-NNNN.jpg`, the game frames behind the reads. To report a wrong read or a bad recommendation, zip that run's folder and send it.
 
+Warden asks once whether to share run logs. With sharing on, each finished run's log goes to warden.arcasti.dev: the board reads, the advice, the corrections, the game window's size and the OCR language, with the app version and a random install id. It never sends the screenshots or frames, window titles, or anything outside the run log. A run is sent when it ends, and at start Warden sends the runs not sent yet; only runs started after sharing was turned on go. To stop sharing, clear "Share run logs" in Settings.
+
 ## Build
 
 Needs Rust (edition 2024) and the Windows SDK's `rc.exe`, which the Visual Studio Build Tools install, to build the icon into `warden.exe`.

@@ -8,7 +8,7 @@ use crate::reader::Rgba;
 use crate::reader::panels::Screen;
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Sender, channel};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -133,9 +133,15 @@ impl RunLog {
 
     /// Blocks until everything sent so far is written.
     pub fn wait(&self) {
+        let _ = self.flushed().recv();
+    }
+
+    /// A receiver that gets a message, or is dropped, once everything sent
+    /// so far is written.
+    pub fn flushed(&self) -> Receiver<()> {
         let (done, rx) = channel();
         self.send(Job::Flush(done));
-        let _ = rx.recv();
+        rx
     }
 
     fn send(&self, job: Job) {
@@ -191,7 +197,7 @@ fn civil(t: SystemTime) -> (i64, u32, u32, u32, u32, u32, u32) {
 }
 
 /// A run folder's name, UTC, so names sort by time: "2026-10-18_01-23-45".
-fn folder_name(t: SystemTime) -> String {
+pub(super) fn folder_name(t: SystemTime) -> String {
     let (y, mo, d, h, mi, s, _) = civil(t);
     format!("{y:04}-{mo:02}-{d:02}_{h:02}-{mi:02}-{s:02}")
 }
@@ -203,7 +209,7 @@ pub fn timestamp(t: SystemTime) -> String {
 }
 
 /// True for a name [`folder_name`] gives, with or without a suffix.
-fn is_run_folder(name: &str) -> bool {
+pub(super) fn is_run_folder(name: &str) -> bool {
     let b = name.as_bytes();
     b.len() >= 19
         && b[..19].iter().enumerate().all(|(k, c)| match k {

@@ -2145,6 +2145,7 @@ version = "0.3.2"
 dependencies = [
  "eframe",
  "embed-resource",
+ "flate2",
  "jpeg-encoder",
  "png",
  "rfd",

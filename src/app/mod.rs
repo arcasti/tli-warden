@@ -4,10 +4,13 @@
 pub mod runlog;
 pub mod session;
 pub mod settings;
+pub mod update;
 #[cfg(windows)]
 pub mod capture;
 #[cfg(windows)]
 pub mod hotkey;
+#[cfg(windows)]
+pub mod install;
 #[cfg(windows)]
 pub mod ui;
 
@@ -15,6 +18,14 @@ pub mod ui;
 #[cfg(windows)]
 pub fn run(preload: Option<&std::path::Path>) -> Result<(), String> {
     use eframe::egui;
+    update::wait_for_previous();
+    if let Ok(current) = std::env::current_exe() {
+        update::clean_old(&current);
+        if install::installed_here(&current) {
+            // Refreshes the version Windows shows, after an update.
+            let _ = install::register(&current);
+        }
+    }
     let settings = settings::Settings::load();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

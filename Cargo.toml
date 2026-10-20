@@ -11,6 +11,7 @@ jpeg-encoder = "0.7.1"
 png = "0.18"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 
 # warden: the window (windows subsystem); warden-cli: the console command line.
 [[bin]]
@@ -44,4 +45,4 @@ strip = true
 eframe = { version = "0.37.0", default-features = false, features = ["wgpu_no_default_features", "default_fonts"] }
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "dx12", "wgsl"] }
 rfd = { version = "0.17.2", default-features = false }
-windows = { version = "0.62", features = ["Media_Ocr", "Graphics_Imaging", "Storage_Streams", "Foundation", "Foundation_Collections", "Globalization", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading","Graphics", "Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Dwm", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics_Capture", "Win32_UI_HiDpi"] }
+windows = { version = "0.62", features = ["Media_Ocr", "Graphics_Imaging", "Storage_Streams", "Foundation", "Foundation_Collections", "Globalization", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading","Graphics", "Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Dwm", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics_Capture", "Win32_UI_HiDpi", "Web_Http", "Web_Http_Headers", "Win32_System_Com", "Win32_System_Registry", "Win32_Security", "Win32_UI_Shell"] }

@@ -19,7 +19,9 @@ Unofficial. Not affiliated with or endorsed by the developers or publishers of *
 
 ## Use
 
-Start `warden.exe` and play. The window stays on top of the game.
+Download `warden.exe` from the [latest release](https://github.com/arcasti/tli-warden/releases/latest) and run it. It offers to install itself for the current Windows user, with a Start menu entry and an entry in Apps & features and no admin rights; say Not now and it runs from wherever it is, with an Install button left in the settings. At start it asks GitHub for a newer release and, when there is one, shows an Update button, which downloads the new `warden.exe`, checks it against the SHA-256 GitHub lists for it, and restarts Warden on it. The check can be turned off in the settings. Uninstall in Apps & features removes the program and keeps `%APPDATA%\warden`.
+
+Then play. The window stays on top of the game.
 
 - Auto read (on by default) captures the game window whenever the screen changes and reads it. F8 turns it on or off and F9 reads once, but both only work while the game is not focused, because the game swallows key presses.
 - The Board tab shows the ring of cells as read, the recommended move in the middle and the move after it, and under the day the run's objective with its progress ("Undercurrents 1/2"), which the advice plays toward. Click a cell to correct a misread one.

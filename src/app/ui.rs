@@ -7,6 +7,8 @@
 //! playouts rated. Run holds the held instruments and the run theme, and
 //! Settings the keys and options. The window moves itself to the empty area
 //! under the game's instrument panel once, when the game is first found.
+//! Under the tab row it offers to install itself when it runs from elsewhere,
+//! and to update once installed, when GitHub has a newer release.
 
 use super::capture::{Event, Watcher, capture, game_rect};
 use super::hotkey::{Hotkey, parse};
@@ -15,6 +17,8 @@ use crate::solver::advise::also_good;
 use crate::solver::solve::FollowUp;
 use super::runlog::RunLog;
 use super::settings::Settings;
+use super::update::{self, Release};
+use super::install;
 use crate::board::{CellModel, EventMark, Model};
 use crate::engine::data::{Beast, RAINBOW, Tool, data};
 use crate::engine::text::{cell_label, tier_name};
@@ -24,8 +28,9 @@ use crate::reader::model::WarningKind;
 use crate::reader::ocr;
 use crate::reader::panels::Screen;
 use eframe::egui::{self, Align, Align2, Color32, FontId, Layout, Pos2, Rect, RichText, Sense, Shape, Stroke, StrokeKind, Vec2};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -119,6 +124,18 @@ pub struct WardenApp {
     /// The cell warnings of the last reading, so the Board tab opens when
     /// a reading brings the first.
     warned: usize,
+    /// This exe; None when Windows can't tell, which hides install and update.
+    current: Option<PathBuf>,
+    /// This exe runs from the install folder.
+    installed: bool,
+    /// The update check's thread, until it answers.
+    checking: Option<Receiver<Result<Option<Release>, String>>>,
+    /// A newer release, once the check finds one.
+    release: Option<Release>,
+    /// Why the update check failed, shown quietly in the Settings tab.
+    check_error: Option<String>,
+    /// The update's thread (download, swap, restart), while it runs.
+    updating: Option<Receiver<Result<(), String>>>,
 }
 
 impl WardenApp {
@@ -147,7 +164,20 @@ impl WardenApp {
             placed: false,
             tab: Tab::Board,
             warned: 0,
+            current: None,
+            installed: false,
+            checking: None,
+            release: None,
+            check_error: None,
+            updating: None,
         };
+        if let Ok(current) = std::env::current_exe() {
+            app.installed = install::installed_here(&current);
+            app.current = Some(current);
+            if app.settings.check_updates {
+                app.checking = Some(in_background(&app.ctx, update::check));
+            }
+        }
         app.watch();
         for which in [Which::Read, Which::Auto] {
             let text = which.setting(&mut app.settings).clone();
@@ -288,6 +318,112 @@ impl WardenApp {
         self.session.set_theme(theme);
         self.save();
     }
+
+    /// Takes the update check's answer and the update's outcome when they
+    /// come; a finished update closes the window for the new exe.
+    fn poll_update(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = &self.checking {
+            match rx.try_recv() {
+                Ok(Ok(release)) => (self.release, self.checking) = (release, None),
+                Ok(Err(e)) => (self.check_error, self.checking) = (Some(e), None),
+                Err(TryRecvError::Disconnected) => self.checking = None,
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+        if let Some(rx) = &self.updating {
+            let done = match rx.try_recv() {
+                Ok(done) => done,
+                Err(TryRecvError::Disconnected) => Err("The update stopped unexpectedly.".to_string()),
+                Err(TryRecvError::Empty) => return,
+            };
+            self.updating = None;
+            match done {
+                Ok(()) => self.close(ctx),
+                Err(e) => self.error = Some(format!("Update failed: {e}")),
+            }
+        }
+    }
+
+    /// Downloads the release beside this exe, swaps it in and starts it, on a thread.
+    fn start_update(&mut self) {
+        let (Some(release), Some(current)) = (self.release.clone(), self.current.clone()) else { return };
+        self.updating = Some(in_background(&self.ctx, move || {
+            let dir = current.parent().ok_or_else(|| format!("{}: no folder", current.display()))?;
+            let new = update::download(&release, dir)?;
+            update::swap(&current, &new)?;
+            update::restart(&current)
+        }));
+    }
+
+    /// Installs this exe and starts the installed copy in its place.
+    fn install(&mut self, ctx: &egui::Context) {
+        let Some(current) = &self.current else { return };
+        match install::install(current).and_then(|exe| update::restart(&exe)) {
+            Ok(()) => self.close(ctx),
+            Err(e) => self.error = Some(format!("Install failed: {e}")),
+        }
+    }
+
+    /// Saves the settings and closes the window, for the exe just started.
+    fn close(&mut self, ctx: &egui::Context) {
+        self.save();
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
+    /// The install offer or, once installed, the update line, under the tab row.
+    fn install_update_line(&mut self, ui: &mut egui::Ui) {
+        if self.current.is_none() {
+            return;
+        }
+        if !self.installed && self.settings.offer_install {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Install Warden: a Start menu entry and updates");
+                if ui.button("Install").clicked() {
+                    self.install(ui.ctx());
+                }
+                if ui.button("Not now").clicked() {
+                    self.settings.offer_install = false;
+                    self.save();
+                }
+            });
+        } else if let Some(([major, minor, patch], page)) = self.release.as_ref().map(|r| (r.version, r.page.clone())) {
+            let updating = self.updating.is_some();
+            ui.horizontal_wrapped(|ui| {
+                if updating {
+                    ui.spinner();
+                    ui.label("Updating...");
+                } else {
+                    ui.label(format!("Warden {major}.{minor}.{patch} is available"));
+                }
+                if ui.add_enabled(!updating, egui::Button::new("Update")).clicked() {
+                    self.start_update();
+                }
+                if ui.add_enabled(!updating, egui::Button::new("What's new")).clicked() {
+                    open_url(&page);
+                }
+            });
+        }
+    }
+}
+
+/// Runs `job` on a thread; its result comes over the returned channel, with a repaint.
+fn in_background<T: Send + 'static>(ctx: &egui::Context, job: impl FnOnce() -> T + Send + 'static) -> Receiver<T> {
+    let (tx, rx) = mpsc::channel();
+    let ctx = ctx.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(job());
+        ctx.request_repaint();
+    });
+    rx
+}
+
+/// Opens `url` in the default browser.
+fn open_url(url: &str) {
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::core::{HSTRING, w};
+    // SAFETY: the strings outlive the call and no owner window is given.
+    unsafe { ShellExecuteW(None, w!("open"), &HSTRING::from(url), None, None, SW_SHOWNORMAL) };
 }
 
 impl eframe::App for WardenApp {
@@ -295,6 +431,7 @@ impl eframe::App for WardenApp {
     /// the game covers the window but still calls this on a repaint request.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.place(ctx);
+        self.poll_update(ctx);
         if self.keys[Which::Read as usize].pressed.swap(false, Ordering::SeqCst) {
             self.read_now();
         }
@@ -340,6 +477,7 @@ impl eframe::App for WardenApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ui, |ui| {
             self.tab_row(ui);
+            self.install_update_line(ui);
             if self.settings.auto_read
                 && let Some(s) = &self.auto_status
             {
@@ -650,6 +788,24 @@ impl WardenApp {
                 open = ui.button("Open screenshot...").clicked();
             });
         });
+        ui.horizontal(|ui| {
+            let mut check = self.settings.check_updates;
+            let hover = "Asks api.github.com for the latest release when Warden starts; nothing else is sent";
+            if ui.checkbox(&mut check, "Check for updates at start").on_hover_text(hover).changed() {
+                self.settings.check_updates = check;
+                self.save();
+            }
+            if !self.installed && self.current.is_some() {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button("Install").on_hover_text("A Start menu entry and updates, for this Windows user").clicked() {
+                        self.install(ui.ctx());
+                    }
+                });
+            }
+        });
+        if let Some(e) = &self.check_error {
+            ui.small(RichText::new(format!("Update check failed: {e}")).weak());
+        }
         if open {
             self.open();
         }

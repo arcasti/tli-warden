@@ -30,6 +30,10 @@ pub struct Settings {
     /// frames read, in %APPDATA%\warden\runs (the newest 10 runs), see
     /// [`super::runlog`].
     pub run_log: bool,
+    /// Ask GitHub for a newer release at start.
+    pub check_updates: bool,
+    /// Offer to install when running from outside the install folder.
+    pub offer_install: bool,
 }
 
 impl Default for Settings {
@@ -45,6 +49,8 @@ impl Default for Settings {
             auto_read: true,
             auto_place: true,
             run_log: true,
+            check_updates: true,
+            offer_install: true,
         }
     }
 }
@@ -90,5 +96,6 @@ mod tests {
     fn old_hotkey_field() {
         let s: Settings = serde_json::from_str(r#"{"hotkey": "F7", "rollouts": 300}"#).unwrap();
         assert_eq!((s.read_hotkey.as_str(), s.auto_hotkey.as_str(), s.rollouts, s.auto_place, s.tools_days, s.theme, s.run_log), ("F9", "F8", 300, true, None, None, true));
+        assert!(s.check_updates && s.offer_install);
     }
 }

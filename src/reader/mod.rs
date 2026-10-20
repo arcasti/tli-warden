@@ -4,6 +4,7 @@
 //! model.
 
 pub mod instruments;
+pub mod layout;
 pub mod model;
 pub mod ocr;
 pub mod panels;
@@ -99,7 +100,7 @@ impl Rgba {
     }
 }
 
-/// Decodes a PNG into RGBA at the reference size (16:9 frames assumed).
+/// Decodes a PNG into RGBA at the reference size; see [`layout::normalise`].
 fn decode_png(bytes: &[u8]) -> Result<Rgba, String> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::normalize_to_color8());
@@ -116,7 +117,7 @@ fn decode_png(bytes: &[u8]) -> Result<Rgba, String> {
         png::ColorType::Grayscale => src.iter().flat_map(|&g| [g, g, g, 255]).collect(),
         png::ColorType::Indexed => return Err("indexed PNG left unexpanded".into()),
     };
-    Ok(Rgba { w, h, data }.resize(REF_W, REF_H))
+    Ok(layout::normalise(&Rgba { w, h, data }))
 }
 
 /// Loads a PNG file; see [`decode_png`].

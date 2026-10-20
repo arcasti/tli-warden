@@ -158,7 +158,7 @@ fn session_follows_the_advised_move() {
 }
 
 /// A live frame of another 16:9 size reads as the reference size does; a
-/// window of another shape is not read and says why, then keeps the
+/// window narrower than 16:9 is not read and says why, then keeps the
 /// reading on show with the same line.
 #[test]
 fn frame_size_is_scaled_or_refused() {
@@ -169,8 +169,8 @@ fn frame_size_is_scaled_or_refused() {
         s.read_in_background(frame.resize(w, h));
         s.wait();
     };
-    read(&mut s, 1902, 989);
-    let line = "The game window is 1902 x 989, not 16:9";
+    read(&mut s, 1440, 1080);
+    let line = "The game window is 1440 x 1080, narrower than 16:9";
     assert!(s.reading.is_none());
     assert!(s.missed.as_deref().is_some_and(|m| m.starts_with(line)), "{:?}", s.missed);
 
@@ -180,7 +180,7 @@ fn frame_size_is_scaled_or_refused() {
     assert!(wide.warnings.iter().all(|w| !w.text.contains("16:9")), "{:?}", wide.warnings);
     assert!(wide.kept_lines().is_empty());
 
-    read(&mut s, 1902, 989);
+    read(&mut s, 1440, 1080);
     let kept = s.reading.clone().unwrap();
     assert_eq!(kept.model.cells, wide.model.cells);
     assert!(kept.warnings[0].text.starts_with(line), "{:?}", kept.warnings);

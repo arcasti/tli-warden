@@ -9,6 +9,7 @@ use crate::engine::text::{cell_label, tool_name};
 use crate::reader::model::{Warning, WarningKind, to_model};
 use crate::reader::panels::{Panels, Screen, read_panels};
 use crate::reader::scene::{CELLS, Scene, read_scene};
+use crate::reader::layout::{is_16_9, normalise};
 use crate::reader::{REF_H, REF_W, Rgba};
 use crate::solver::TUNED;
 use super::runlog::{RunLog, timestamp};
@@ -51,7 +52,7 @@ pub struct Reading {
 
 impl Reading {
     /// The lines saying why the frames after this reading were not read
-    /// (a popup, a screen without the board, a window that is not 16:9, the
+    /// (a popup, a screen without the board, a window narrower than 16:9, the
     /// theme scroll): empty unless the reading on show is a kept one. The
     /// next reading installed starts without them.
     pub fn kept_lines(&self) -> Vec<&str> {
@@ -261,25 +262,26 @@ enum Taken {
 }
 
 /// Reads the frame at the reference size the reader's regions are measured
-/// on, as `load_png` does; see [`shape_line`] for other shapes. `keep`
+/// on, as `load_png` does; see [`shape_line`] for the shapes refused. `keep`
 /// gives the frame back at its own size.
 fn scan(frame: Rgba, keep: bool) -> Scanned {
     let size = (frame.w, frame.h);
-    let small = (size != (REF_W, REF_H)).then(|| frame.resize(REF_W, REF_H));
+    let small = (size != (REF_W, REF_H)).then(|| normalise(&frame));
     let f = small.as_ref().unwrap_or(&frame);
     let (scene, panels) = (read_scene(f), read_panels(f));
     (scene, panels, size, keep.then_some(frame))
 }
 
-/// How the line for a game window that is not 16:9 starts.
+/// How the line for a game window narrower than 16:9 starts.
 const SHAPE: &str = "The game window is ";
 
-/// A game window that is not 16:9 (within 1%) lays the board out at another
-/// scale and place, so every region of the reader misses: such a frame is
+/// A window as wide as 16:9 or wider is read: [`normalise`] lays it out as
+/// the reference frame. A window narrower than 16:9 (by more than 1%) has
+/// never been seen, so how the game lays it out is untested: such a frame is
 /// not read.
 fn shape_line((w, h): (usize, usize)) -> Option<String> {
-    let off = (w * 9).abs_diff(h * 16) * 100 > h * 16;
-    off.then(|| format!("{SHAPE}{w} x {h}, not 16:9: the board is laid out differently and can't be read. Set the game to a 16:9 size: fullscreen or borderless, or a window such as 1920 x 1080 that is not maximized."))
+    let narrow = w * 9 < h * 16 && !is_16_9(w, h);
+    narrow.then(|| format!("{SHAPE}{w} x {h}, narrower than 16:9: that layout is untested and isn't read. Set the game to a 16:9 or wider size: fullscreen or borderless, or a window such as 1920 x 1080 that is not maximized."))
 }
 
 /// The fingerprint grid: 64 x 36 blocks, 30 x 30 pixels each on a 1920 x 1080 frame.
@@ -568,7 +570,7 @@ impl Session {
     /// time and warnings change: the corrections and the running solve stay.
     /// Otherwise the corrections go and a solve starts. A game dialog, a
     /// frame without the board (see [`Panels::off_board`]) or a frame of a
-    /// window that is not 16:9 (see [`shape_line`]) keeps the last
+    /// window narrower than 16:9 (see [`shape_line`]) keeps the last
     /// reading and its solve on show, with a line that says so. The riot
     /// screen ends the run, see [`Session::end_run`].
     ///

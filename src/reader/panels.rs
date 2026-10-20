@@ -214,9 +214,13 @@ fn number(token: &str) -> Option<u32> {
 
 /// "N day(s) until Riot": the number is what comes before "day", or before
 /// the first space when "day" misreads. OCR can drop the space ("0day(s)")
-/// and reads the red 0 as "()".
+/// and reads the red 0 as "()". On a frame scaled up from a short window the
+/// number can come as its own line after the text, so the lines go left to
+/// right.
 fn days(lines: &[Line]) -> Option<u32> {
-    let text = joined(lines);
+    let mut sorted: Vec<&Line> = lines.iter().collect();
+    sorted.sort_by_key(|l| l.rect.x);
+    let text = joined(sorted);
     let text = text.trim();
     let lower = text.to_ascii_lowercase();
     let (head, rest) = text.split_at(lower.find("day").or_else(|| lower.find(' '))?);

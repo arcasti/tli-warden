@@ -137,9 +137,14 @@ fn beast_feature(img: &Rgba, cell: u8) -> Vec<f32> {
 /// a path line through it the face has been seen 4-8 px higher.
 fn beast_features(img: &Rgba, cell: u8) -> Vec<Vec<f32>> {
     let (x, y) = portrait(cell);
-    let mut out = Vec::with_capacity(25);
-    for dy in (-4..=4).step_by(2) {
-        for dx in (-4..=4).step_by(2) {
+    faces_around(img, x, y, 4)
+}
+
+/// The faces at the spots within +-`r` px of `(x, y)`, 2 px apart.
+fn faces_around(img: &Rgba, x: i32, y: i32, r: i32) -> Vec<Vec<f32>> {
+    let mut out = Vec::new();
+    for dy in (-r..=r).step_by(2) {
+        for dx in (-r..=r).step_by(2) {
             out.push(face(img, x + dx, y + dy));
         }
     }
@@ -730,11 +735,18 @@ fn beast_class(fs: &[Vec<f32>], t: &Templates) -> (usize, f32) {
     (k, ((top - next) / 0.2).min(1.0))
 }
 
+/// How far from its spot a vault portrait's face is searched. The slots sit
+/// at the frame's right edge, where a frame scaled from another size moves
+/// them most: at 2560x1440 a lion's face sat 8 px above the spot, and in a
+/// 1895x1058 screenshot 12 px right of it. At the spot itself the vault's
+/// flame then scores the lion under the mammoth.
+const VAULT_SEARCH: i32 = 12;
+
 /// The beast of a portrait centred at `(x, y)` outside the board (a
 /// Chromatic Prisoner slot), with the embedded templates; None when the
 /// nearest class is an empty or closed cell.
 pub fn beast_at(img: &Rgba, (x, y): (i32, i32)) -> (Option<Beast>, f32) {
-    let (k, conf) = beast_class(&[face(img, x, y)], Templates::embedded());
+    let (k, conf) = beast_class(&faces_around(img, x, y, VAULT_SEARCH), Templates::embedded());
     (CLASSES[k], conf)
 }
 

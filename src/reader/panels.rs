@@ -256,12 +256,14 @@ fn objective(lines: &[Line]) -> Option<(u32, u32)> {
     Some((goal.id, lines.iter().find_map(|l| progress(&l.text, goal.target)).unwrap_or(0)))
 }
 
-/// A progress line: "N/M" gives N, "Completed" gives `target`. OCR glues the
-/// count to the task ("times0/2"), so the digits next to the slash count
-/// first, then the whole word read as a number. The count after the slash is
-/// the known target, so only a count above it is refused.
+/// A progress line: "N/M" gives N, "Completed" gives `target`. "Completed"
+/// ends the task's line ("Move 18 tiles Completed"), and OCR can glue it to
+/// the word before ("UltimateCompleted"), so the last word or its tail counts.
+/// OCR glues the count to the task too ("times0/2"), so the digits next to the
+/// slash count first, then the whole word read as a number. The count after
+/// the slash is the known target, so only a count above it is refused.
 fn progress(text: &str, target: u32) -> Option<u32> {
-    if similarity(text, "Completed") >= 0.75 {
+    if similarity(text, "Completed") >= 0.75 || completed_tail(text) {
         return Some(target);
     }
     let (head, _) = text.trim().rsplit_once('/')?;
@@ -269,6 +271,17 @@ fn progress(text: &str, target: u32) -> Option<u32> {
     let digits = head.len() - head.trim_end_matches(|c: char| c.is_ascii_digit()).len();
     let done = if digits > 0 { head[head.len() - digits..].parse().ok()? } else { number(head)? };
     (done <= target).then_some(done)
+}
+
+/// Whether the line's last word, or its last 8 to 10 letters, reads as
+/// "Completed".
+fn completed_tail(text: &str) -> bool {
+    let Some(word) = text.split_whitespace().last() else { return false };
+    let chars: Vec<char> = squash(word).chars().collect();
+    (8..=10).filter(|&n| n <= chars.len()).any(|n| {
+        let tail: String = chars[chars.len() - n..].iter().collect();
+        similarity(&tail, "Completed") >= 0.75
+    })
 }
 
 /// One destination card's text: "Go to Cell N" or "Go to Interrogation Room".
@@ -503,6 +516,10 @@ mod tests {
         assert_eq!(progress("O/18", 18), Some(0));
         assert_eq!(progress("Trigger ! Prison Incident 2 times 1/2", 2), Some(1));
         assert_eq!(progress("Completed", 4), Some(4));
+        assert_eq!(progress("Move 18 tiles Completed", 18), Some(18));
+        assert_eq!(progress("UltimateCompleted", 1), Some(1));
+        assert_eq!(progress("Move 18 tiles 7/18", 18), Some(7));
+        assert_eq!(progress("Complete 2 objectives 1/2", 2), Some(1));
         assert_eq!(progress("Consume 4 times", 4), None);
         assert_eq!(progress("3/2", 2), None);
     }

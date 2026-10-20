@@ -4,7 +4,7 @@
 use super::chain::{best_meal, coin_of_fate, devour_delta, replace_odds};
 use super::values::{activation, execution_value, fresh_value, stair_delta, swap_value};
 use super::{Comp, Ctx, Dist, Params, Rng32, TOP, beasts, composition, dist_worth, door_dist, seen_door, tier_values, worth};
-use crate::engine::data::{Beast, Card, RAINBOW, Tool, data};
+use crate::engine::data::{Beast, Card, ObjectiveKind, RAINBOW, Tool, data};
 use crate::engine::devour::{Bite, eater_mask, hunt_targets, sure_gain};
 use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATWAY};
 use crate::engine::rules::{clockwise_path, land, steps_between};
@@ -147,6 +147,17 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
         let c = &st.cells[n];
         let steps = steps_between(st.position, n);
         let mut score = p.w_step * steps as f64;
+        // Objective progress: the steps walked, the doors opened, an incident set off.
+        if let Some(goal) = &ctx.goal {
+            let gain = match goal.kind {
+                ObjectiveKind::MoveDistance => steps,
+                ObjectiveKind::OpenCellCount if st.chain => clockwise_path(st, n).iter().filter(|&&k| st.cells[k].sealed).count(),
+                ObjectiveKind::OpenCellCount => usize::from(c.sealed && n != data().room),
+                ObjectiveKind::EventTriggerCount => usize::from(c.event.is_some() && n != data().room),
+                _ => 0,
+            };
+            score += goal.term(p, gain as f64);
+        }
         // Landing on a marker fires its incident, which can't be declined.
         score += incident_score(ctx, c, &board);
         // Any other known marker, and the Interrogation Room, are played on a copy.
@@ -463,7 +474,20 @@ pub fn devour_scores(ctx: &mut Ctx, options: Vec<Bite>) -> Vec<(usize, f64)> {
             }
             let stair_loss = if o.scratch { 0.0 } else { stair_delta(ctx, &mut comp, meal.tier as usize, meal.beast.index(), -1) };
             let delta = devour_delta(ctx, tier, beast, (meal.tier as usize, meal.beast.index()), o.scratch, &mut comp, crowd);
-            (o.cell, delta - loss + stair_loss)
+            let mut score = delta - loss + stair_loss;
+            // Objective progress: a Consume, or the eater's sure landing reaching the rarity.
+            if let Some(goal) = &ctx.goal {
+                let gain = match goal.kind {
+                    ObjectiveKind::DevourCount => 1.0,
+                    ObjectiveKind::ReachRating => {
+                        let landing = eater.tier + sure_gain(st, &eater, &meal, o.scratch, st.board_cells().len());
+                        if landing.min(st.top_tier()) >= goal.rating { 1.0 } else { 0.0 }
+                    }
+                    _ => 0.0,
+                };
+                score += goal.term(ctx.p, gain);
+            }
+            (o.cell, score)
         })
         .collect();
     best_first(&mut out);
@@ -561,4 +585,52 @@ pub fn best_by_board<'k>(ctx: &Ctx, options: &[&'k str], gift: bool, roll: &mut 
         }
     }
     best.map_or(options[0], |(id, _)| id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::new_game;
+    use crate::engine::state::ObjectiveState;
+    use crate::solver::{TUNED, context};
+
+    /// A block with every cell open and empty, the warden in cell 0, and the
+    /// objective `id` (data/warden-data.json) not started.
+    fn bare(id: u32) -> State {
+        let mut st = new_game("goal");
+        for c in &mut st.cells {
+            (c.sealed, c.inmate, c.hidden, c.event, c.nest, c.known) = (false, None, None, None, None, 0);
+        }
+        st.tools.clear();
+        (st.position, st.chain) = (0, false);
+        st.objective = Some(ObjectiveState { id, progress: 0, done: false });
+        st
+    }
+
+    #[test]
+    fn a_move_distance_objective_favours_the_longer_walk() {
+        let st = bare(5);
+        let walks: Vec<usize> = (1..st.cells.len()).filter(|&n| n != data().room).collect();
+        let (near, far) = (walks[0], walks[4]);
+        let mut p = TUNED.clone();
+        p.w_step = -0.5;
+        assert_eq!(patrol_scores(&mut context(&st, &p), &[near, far])[0].0, near);
+        p.w_goal = 64.0;
+        assert_eq!(patrol_scores(&mut context(&st, &p), &[near, far])[0].0, far);
+    }
+
+    #[test]
+    fn a_devour_count_objective_adds_its_share_to_every_bite() {
+        let mut st = bare(2);
+        st.cells[0].inmate = Some(Inmate { id: 900, beast: Beast::Lion, tier: 1 });
+        st.cells[3].inmate = Some(Inmate { id: 901, beast: Beast::Rat, tier: 1 });
+        let bite = || vec![Bite { cell: 3, scratch: false }];
+        let mut p = TUNED.clone();
+        let plain = devour_scores(&mut context(&st, &p), bite())[0].1;
+        p.w_goal = 8.0;
+        // Target 4 Consumes: one is a quarter of w_goal.
+        assert_eq!(devour_scores(&mut context(&st, &p), bite())[0].1, plain + 2.0);
+        st.objective = Some(ObjectiveState { id: 2, progress: 4, done: true });
+        assert_eq!(devour_scores(&mut context(&st, &p), bite())[0].1, plain);
+    }
 }

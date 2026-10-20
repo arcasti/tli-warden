@@ -9,7 +9,7 @@ pub mod scores;
 pub mod solve;
 pub mod values;
 
-use crate::engine::data::{Beast, CAGE_FIGHT, LOOT, RAINBOW, Tool, data};
+use crate::engine::data::{Beast, CAGE_FIGHT, LOOT, ObjectiveKind, RAINBOW, Tool, data};
 use crate::engine::devour::{can_devour_now, devour_options, start_options};
 use crate::engine::rng::rand;
 use crate::engine::rules::door_weights;
@@ -48,6 +48,10 @@ pub struct Params {
     pub w_stair: f64,
     pub min_devour: f64,
     pub swap_max_tier: f64,
+    /// Progress toward the run's objective, whose completion gives a second
+    /// Torture Instrument pick: a move that completes it earns `w_goal`, a
+    /// part of it the same share of `w_goal`.
+    pub w_goal: f64,
 }
 
 impl Params {
@@ -66,6 +70,7 @@ impl Params {
             "w_stair" => &mut self.w_stair,
             "min_devour" => &mut self.min_devour,
             "swap_max_tier" => &mut self.swap_max_tier,
+            "w_goal" => &mut self.w_goal,
             _ => return None,
         })
     }
@@ -84,6 +89,7 @@ pub static TUNED: Params = Params {
     w_stair: 1.0,
     min_devour: -2.0,
     swap_max_tier: 2.0,
+    w_goal: 0.0,
 };
 
 /// mulberry32 (rng32), for the solver's own dice (never the game's).
@@ -221,7 +227,34 @@ pub struct Ctx<'a> {
     /// Chromatic is worth only its cache (`LOOT`) and a Replace of any tier
     /// may pay.
     pub last_day: bool,
+    /// The run's objective while it is open and `w_goal` is not 0.
+    pub goal: Option<Goal>,
     pub memo: HashMap<(u32, u128), f64, BuildHasherDefault<MemoHasher>>,
+}
+
+/// The run's open objective, as the strategy prices progress toward it.
+#[derive(Clone, Copy, Debug)]
+pub struct Goal {
+    pub kind: ObjectiveKind,
+    /// The rarity a ReachRating objective names.
+    pub rating: i32,
+    pub target: f64,
+    /// The progress still to make.
+    pub left: f64,
+}
+
+impl Goal {
+    /// The objective of `st`; None when there is none, it is done, or `w_goal` is 0.
+    fn of(st: &State, p: &Params) -> Option<Goal> {
+        let goal = st.objective.filter(|g| !g.done && p.w_goal != 0.0)?;
+        let o = data().objective(goal.id).filter(|o| o.target > goal.progress)?;
+        Some(Goal { kind: o.kind, rating: o.rating, target: f64::from(o.target), left: f64::from(o.target - goal.progress) })
+    }
+
+    /// `w_goal * gain / target`, with `gain` capped at the progress left.
+    pub fn term(&self, p: &Params, gain: f64) -> f64 {
+        p.w_goal * gain.min(self.left) / self.target
+    }
 }
 
 /// The strategy's tier values `v` and vaulted Rainbow worth `r` on `st`, and
@@ -280,6 +313,7 @@ pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
         open_value,
         side_value,
         last_day,
+        goal: Goal::of(st, p),
         memo: HashMap::default(),
     }
 }

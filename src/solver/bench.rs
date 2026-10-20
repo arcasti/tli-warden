@@ -93,13 +93,15 @@ pub struct Solo {
     /// Riot loot, in Chromatics (`State::loot`).
     pub loot: f64,
     pub stats: Stats,
+    /// Whether the run completed its objective.
+    pub objective: bool,
 }
 
 /// Plays game `k` of `seed` with the strategy alone on weights `p`, holding `held`.
 pub fn play_strategy(seed: u32, k: u32, held: &[Tool], p: &Params) -> Solo {
     let (mut st, mut rng) = start(seed, k, held);
     playout(&mut st, p, &mut rng);
-    Solo { chromatics: st.vault.len(), loot: st.loot(), stats: st.stats }
+    Solo { chromatics: st.vault.len(), loot: st.loot(), stats: st.stats, objective: st.objective.is_some_and(|o| o.done) }
 }
 
 /// Games 0..`games` of `seed` played by the strategy alone on weights `p`,
@@ -170,6 +172,34 @@ pub fn summarize(games: &[Game]) -> Summary {
     }
 }
 
+/// Runs with at most this many Chromatics count as bad runs in `Spread`.
+pub const LOW: usize = 2;
+
+/// Percentiles `Spread` reports, in percent.
+pub const PERCENTILES: [usize; 5] = [10, 25, 50, 75, 90];
+
+/// How Chromatics per run spread: the share of runs with at most `LOW` (in %),
+/// the `PERCENTILES` by nearest rank (the smallest value with at least p% of
+/// the runs at or below it), and the most.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Spread {
+    pub low: f64,
+    pub percentiles: [usize; 5],
+    pub max: usize,
+}
+
+pub fn spread(runs: &[usize]) -> Spread {
+    if runs.is_empty() {
+        return Spread { low: 0.0, percentiles: [0; 5], max: 0 };
+    }
+    let mut sorted = runs.to_vec();
+    sorted.sort_unstable();
+    let n = sorted.len();
+    let low = 100.0 * sorted.iter().filter(|&&c| c <= LOW).count() as f64 / n as f64;
+    let percentiles = PERCENTILES.map(|p| sorted[(p * n).div_ceil(100).max(1) - 1]);
+    Spread { low, percentiles, max: sorted[n - 1] }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,7 +219,7 @@ mod tests {
             assert_eq!(st.phase, Phase::Ended);
             assert_eq!(g.strategy, st.vault.len(), "game {k}");
             assert!(g.decisions > 0 && g.overruled <= g.decisions);
-            assert_eq!(play_strategy(1, k as u32, &[], &TUNED), Solo { chromatics: g.strategy, loot: st.loot(), stats: st.stats }, "game {k}");
+            assert_eq!(play_strategy(1, k as u32, &[], &TUNED), Solo { chromatics: g.strategy, loot: st.loot(), stats: st.stats, objective: st.objective.is_some_and(|o| o.done) }, "game {k}");
         }
         let s = summarize(&games);
         for x in [s.strategy.0, s.strategy.1, s.advice.0, s.advice.1, s.gain.0, s.gain.1] {
@@ -215,5 +245,15 @@ mod tests {
         assert!(held.has(Tool::Whip) && !plain.has(Tool::Whip));
         // The Whip's "-1 destination" drops a die as on a pick.
         assert_eq!(held.dice.len(), (plain.dice.len() - 1).max(1));
+    }
+
+    #[test]
+    fn spread_takes_nearest_rank_percentiles() {
+        // Ten runs with ties: p10 is the 1st, p25 the 3rd, p50 the 5th, p75 the 8th, p90 the 9th.
+        let s = spread(&[5, 0, 2, 2, 3, 3, 3, 7, 9, 4]);
+        assert_eq!(s, Spread { low: 30.0, percentiles: [0, 2, 3, 5, 7], max: 9 });
+        // An even count of four: ranks 1, 1, 2, 3, 4.
+        assert_eq!(spread(&[4, 1, 3, 2]), Spread { low: 50.0, percentiles: [1, 1, 2, 3, 4], max: 4 });
+        assert_eq!(spread(&[]), Spread { low: 0.0, percentiles: [0; 5], max: 0 });
     }
 }

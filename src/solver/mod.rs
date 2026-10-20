@@ -233,8 +233,7 @@ fn tier_values(st: &State, p: &Params) -> ([f64; 6], f64, bool) {
     let r = if st.top_tier() < RAINBOW { v[RAINBOW as usize - 1] } else { v[RAINBOW as usize] * p.rainbow_mult };
     let last_day = st.day >= st.max_days;
     if last_day {
-        // Only the Riot loot counts now: each tier below Chromatic is worth
-        // its cache in Chromatics, full vault or not.
+        // Full vault or not.
         let chromatic = v[RAINBOW as usize] * p.rainbow_mult;
         for (t, x) in v[..TOP].iter_mut().enumerate() {
             *x = LOOT[t] * chromatic;

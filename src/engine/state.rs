@@ -271,7 +271,7 @@ impl State {
     /// The Riot loot of this board in Chromatics: each vaulted Chromatic plus
     /// the cache of each inmate on an open cell, weighted by `LOOT`.
     pub fn loot(&self) -> f64 {
-        let board: f64 = self.cells.iter().filter(|c| !c.sealed).filter_map(|c| c.inmate).map(|i| LOOT[i.tier as usize]).sum();
+        let board: f64 = self.cells.iter().filter(|c| c.on_board()).filter_map(|c| c.inmate).map(|i| LOOT[i.tier as usize]).sum();
         self.vault.len() as f64 * LOOT[RAINBOW as usize] + board
     }
 

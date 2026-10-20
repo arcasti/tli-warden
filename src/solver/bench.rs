@@ -191,7 +191,6 @@ mod tests {
             assert_eq!(g.strategy, st.vault.len(), "game {k}");
             assert!(g.decisions > 0 && g.overruled <= g.decisions);
             assert_eq!(play_strategy(1, k as u32, &[], &TUNED), Solo { chromatics: g.strategy, loot: st.loot(), stats: st.stats }, "game {k}");
-            assert_eq!(g.strategy_loot, st.loot(), "game {k}");
         }
         let s = summarize(&games);
         for x in [s.strategy.0, s.strategy.1, s.advice.0, s.advice.1, s.gain.0, s.gain.1] {

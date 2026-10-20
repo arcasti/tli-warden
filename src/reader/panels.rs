@@ -388,7 +388,8 @@ pub fn icon_score(img: &Rgba) -> f32 {
     luma_stats(img, ICON, 22).1
 }
 
-/// The panels of a frame whose two layouts are the same; see [`read_panels_titled`].
+/// The panels of a frame whose two layouts are the same, as at interface
+/// scale 1 (the tests' saved frames); see [`read_panels_titled`].
 pub fn read_panels(img: &Rgba) -> Panels {
     read_panels_titled(img, img)
 }

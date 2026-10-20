@@ -100,15 +100,6 @@ impl Rgba {
     }
 }
 
-/// Decodes a PNG into RGBA at the reference size, in the board layout and,
-/// when it differs, the title layout; see [`layout::lay_out_scaled`].
-fn decode_png(bytes: &[u8]) -> Result<(Rgba, Option<Rgba>), String> {
-    decode_png_raw(bytes).map(|img| {
-        let (board, title, _) = layout::lay_out_scaled(&img, None);
-        (board, title)
-    })
-}
-
 /// Decodes a PNG into RGBA at its own size.
 fn decode_png_raw(bytes: &[u8]) -> Result<Rgba, String> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
@@ -129,15 +120,18 @@ fn decode_png_raw(bytes: &[u8]) -> Result<Rgba, String> {
     Ok(Rgba { w, h, data })
 }
 
-/// Loads a PNG file in the board layout; see [`decode_png`].
+/// Loads a PNG file in the board layout; see [`load_layouts`].
 pub fn load_png(path: &Path) -> Result<Rgba, String> {
     load_layouts(path).map(|(board, _)| board)
 }
 
-/// Loads a PNG file in both layouts; see [`decode_png`].
+/// Loads a PNG file at the reference size, in the board layout and, when it
+/// differs, the title layout; see [`layout::lay_out_scaled`].
 fn load_layouts(path: &Path) -> Result<(Rgba, Option<Rgba>), String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    decode_png(&bytes).map_err(|e| format!("{}: {e}", path.display()))
+    let img = decode_png_raw(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    let (board, title, _) = layout::lay_out_scaled(&img, None);
+    Ok((board, title))
 }
 
 /// Writes an image as an 8-bit RGBA PNG file.

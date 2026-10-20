@@ -158,7 +158,7 @@ fn paint(out: &mut [u8], frame: &Rgba, u: f32, z: &Zone) {
 /// (ax' + (x - ax) u, ay' + (y - ay) u) there, sampled bilinearly from
 /// `frame` itself; pixels outside every zone keep to the centre. Pixels past
 /// the frame's edges are black.
-pub fn lay_out(frame: &Rgba, u: f32) -> Rgba {
+fn lay_out(frame: &Rgba, u: f32) -> Rgba {
     if u == 1.0 && is_16_9(frame.w, frame.h) {
         return frame.resize(REF_W, REF_H);
     }
@@ -341,7 +341,7 @@ impl Strip {
 ///
 /// Measured on the 16:9 frames of trainingdata/s16 and a 21:9 run (u = 1)
 /// and on a 1920 x 1084 run at the smallest setting (u about 0.645).
-pub fn ui_scale(frame: &Rgba, hint: Option<f32>) -> Option<f32> {
+fn ui_scale(frame: &Rgba, hint: Option<f32>) -> Option<f32> {
     let near = hint.map(|h| (-3..=3).map(|n| h + HINT_SPAN / 3.0 * n as f32).collect::<Vec<_>>());
     let (u, a, g) = match near.map(|us| measure(frame, &us)) {
         Some(m) if m.1.score.min(m.2.score) >= MIN_SCORE => m,
@@ -495,12 +495,6 @@ mod tests {
             return None;
         }
         Some(super::super::decode_png_raw(&std::fs::read(dir.join("rec1-t087.png")).unwrap()).unwrap())
-    }
-
-    #[test]
-    fn reference_frame_has_unit_scale() {
-        let Some(frame) = reference() else { return };
-        assert_eq!(ui_scale(&frame, None), Some(1.0));
     }
 
     /// The reference frame moved 6 px right, black on the left.

@@ -39,14 +39,14 @@ pub struct Line {
 /// (small game text reads better at 2-3x). Empty when the region is empty
 /// or OCR is not available.
 pub fn ocr(img: &Rgba, rect: Rect, scale: f32) -> Vec<Line> {
-    let [lines] = ocr_all(img, &[(rect, scale)]);
+    let [lines] = ocr_all([img], &[(rect, scale)]);
     lines
 }
 
-/// The lines of each `(rect, scale)` region as `ocr` reads them, in order,
-/// with the regions read at the same time.
-pub fn ocr_all<const N: usize>(img: &Rgba, regions: &[(Rect, f32); N]) -> [Vec<Line>; N] {
-    let inputs: Vec<Option<Rgba>> = regions.iter().map(|&(rect, scale)| prepare(img, rect, scale)).collect();
+/// The lines of each `(rect, scale)` region as `ocr` reads them in the image
+/// of the same index, in order, with the regions read at the same time.
+pub fn ocr_all<const N: usize>(imgs: [&Rgba; N], regions: &[(Rect, f32); N]) -> [Vec<Line>; N] {
+    let inputs: Vec<Option<Rgba>> = imgs.iter().zip(regions).map(|(img, &(rect, scale))| prepare(img, rect, scale)).collect();
     let mut read = imp::recognize_all(inputs).into_iter();
     regions.map(|(rect, scale)| {
         read.next()

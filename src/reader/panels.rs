@@ -388,12 +388,24 @@ pub fn icon_score(img: &Rgba) -> f32 {
     luma_stats(img, ICON, 22).1
 }
 
+/// The panels of a frame whose two layouts are the same; see [`read_panels_titled`].
 pub fn read_panels(img: &Rgba) -> Panels {
+    read_panels_titled(img, img)
+}
+
+/// The panels of `img`, a frame in the board layout, with [`TITLE`],
+/// [`INCIDENT`] and [`RIOT`] read from `title`, the same frame in the title layout (see
+/// [`super::layout::lay_out_scaled`]).
+pub fn read_panels_titled(img: &Rgba, title: &Rgba) -> Panels {
     let d = data();
     // Every fixed region is read at once, whether the screen needs it or not.
     const REGIONS: [(Rect, f32); 14] = [DAYS, TITLE, HEADING, CARDS, TARGET, CANCEL, BANNER, DIALOG, INCIDENT, THEME, OBJECTIVE, STATUS, RIOT, NAMES];
+    let mut imgs = [img; 14];
+    for i in [1, 8, 12] {
+        imgs[i] = title;
+    }
     let [days_lines, title, heading, cards, target, cancel, banner, dialog, incident, theme_lines, objective_lines, status, riot, name_lines] =
-        ocr_all(img, &REGIONS);
+        ocr_all(imgs, &REGIONS);
     let mut p = Panels {
         screen: Screen::Unknown,
         days: days(&days_lines),

@@ -100,8 +100,17 @@ impl Rgba {
     }
 }
 
-/// Decodes a PNG into RGBA at the reference size; see [`layout::normalise`].
-fn decode_png(bytes: &[u8]) -> Result<Rgba, String> {
+/// Decodes a PNG into RGBA at the reference size, in the board layout and,
+/// when it differs, the title layout; see [`layout::lay_out_scaled`].
+fn decode_png(bytes: &[u8]) -> Result<(Rgba, Option<Rgba>), String> {
+    decode_png_raw(bytes).map(|img| {
+        let (board, title, _) = layout::lay_out_scaled(&img, None);
+        (board, title)
+    })
+}
+
+/// Decodes a PNG into RGBA at its own size.
+fn decode_png_raw(bytes: &[u8]) -> Result<Rgba, String> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
@@ -117,11 +126,16 @@ fn decode_png(bytes: &[u8]) -> Result<Rgba, String> {
         png::ColorType::Grayscale => src.iter().flat_map(|&g| [g, g, g, 255]).collect(),
         png::ColorType::Indexed => return Err("indexed PNG left unexpanded".into()),
     };
-    Ok(layout::normalise(&Rgba { w, h, data }))
+    Ok(Rgba { w, h, data })
 }
 
-/// Loads a PNG file; see [`decode_png`].
+/// Loads a PNG file in the board layout; see [`decode_png`].
 pub fn load_png(path: &Path) -> Result<Rgba, String> {
+    load_layouts(path).map(|(board, _)| board)
+}
+
+/// Loads a PNG file in both layouts; see [`decode_png`].
+fn load_layouts(path: &Path) -> Result<(Rgba, Option<Rgba>), String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     decode_png(&bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
@@ -142,8 +156,8 @@ pub fn save_png(path: &Path, img: &Rgba) -> Result<(), String> {
 /// `held_tools` are the instruments the player holds, or when empty those the
 /// instrument panel's icons name.
 pub fn read_model(path: &Path, held_tools: &[crate::engine::data::Tool]) -> Result<(crate::board::Model, Vec<model::Warning>), String> {
-    let img = load_png(path)?;
-    let panels = panels::read_panels(&img);
+    let (img, title) = load_layouts(path)?;
+    let panels = panels::read_panels_titled(&img, title.as_ref().unwrap_or(&img));
     let held = if held_tools.is_empty() { panels.held.clone().unwrap_or_default() } else { held_tools.to_vec() };
     Ok(model::to_model(&scene::read_scene(&img), &panels, &held, None))
 }

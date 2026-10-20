@@ -7,9 +7,9 @@ use crate::engine::data::{Beast, Gift, RAINBOW, Tool, VAULT_CAP, data};
 use crate::engine::rules::treasure_picks;
 use crate::engine::text::{cell_label, tool_name};
 use crate::reader::model::{Warning, WarningKind, to_model};
-use crate::reader::panels::{Panels, Screen, read_panels};
+use crate::reader::panels::{Panels, Screen, read_panels_titled};
 use crate::reader::scene::{CELLS, Scene, read_scene};
-use crate::reader::layout::{is_16_9, normalise};
+use crate::reader::layout::{is_16_9, lay_out_scaled};
 use crate::reader::{REF_H, REF_W, Rgba};
 use crate::solver::TUNED;
 use super::runlog::{RunLog, timestamp};
@@ -246,9 +246,9 @@ fn tool_keys(tools: &[Tool]) -> Vec<&'static str> {
     tools.iter().map(|t| t.key()).collect()
 }
 
-/// What the reader saw in a frame, the frame's size, and the frame itself
-/// when the run log keeps it.
-type Scanned = (Scene, Panels, (usize, usize), Option<Rgba>);
+/// What the reader saw in a frame, the frame's size, the frame itself
+/// when the run log keeps it, and the interface scale it was read at.
+type Scanned = (Scene, Panels, (usize, usize), Option<Rgba>, f32);
 
 /// What [`Session::take_read`] did with a read.
 enum Taken {
@@ -262,20 +262,20 @@ enum Taken {
 }
 
 /// Reads the frame at the reference size the reader's regions are measured
-/// on, as `load_png` does; see [`shape_line`] for the shapes refused. `keep`
-/// gives the frame back at its own size.
-fn scan(frame: Rgba, keep: bool) -> Scanned {
+/// on, as `load_png` does, at the interface scale measured near `hint`; see
+/// [`shape_line`] for the shapes refused. `keep` gives the frame back at its
+/// own size.
+fn scan(frame: Rgba, keep: bool, hint: Option<f32>) -> Scanned {
     let size = (frame.w, frame.h);
-    let small = (size != (REF_W, REF_H)).then(|| normalise(&frame));
-    let f = small.as_ref().unwrap_or(&frame);
-    let (scene, panels) = (read_scene(f), read_panels(f));
-    (scene, panels, size, keep.then_some(frame))
+    let (f, title, u) = lay_out_scaled(&frame, hint);
+    let (scene, panels) = (read_scene(&f), read_panels_titled(&f, title.as_ref().unwrap_or(&f)));
+    (scene, panels, size, keep.then_some(frame), u)
 }
 
 /// How the line for a game window narrower than 16:9 starts.
 const SHAPE: &str = "The game window is ";
 
-/// A window as wide as 16:9 or wider is read: [`normalise`] lays it out as
+/// A window as wide as 16:9 or wider is read: [`lay_out_scaled`] lays it out as
 /// the reference frame. A window narrower than 16:9 (by more than 1%) has
 /// never been seen, so how the game lays it out is untested: such a frame is
 /// not read.
@@ -426,6 +426,10 @@ pub struct Session {
     scene: Option<(Scene, Panels, SystemTime)>,
     /// The size of the last frame read, before it was scaled.
     size: (usize, usize),
+    /// The interface scale the last frame was read at (see
+    /// [`crate::reader::layout::ui_scale`]): the next read searches near it.
+    /// A game setting, so a new run keeps it.
+    ui_scale: Option<f32>,
     /// The days counter as the stored read gave it.
     days_read: Option<u32>,
     days: DaysClock,
@@ -505,6 +509,7 @@ impl Session {
             next: None,
             scene: None,
             size: (REF_W, REF_H),
+            ui_scale: None,
             days_read: None,
             days: DaysClock { left: days, higher: None },
             held_before_higher: 0,
@@ -555,9 +560,9 @@ impl Session {
     fn start_scan(&mut self, frame: Rgba) {
         let (tx, rx) = channel();
         self.scan = Some(rx);
-        let (notify, keep) = (self.notify.clone(), self.log.is_some());
+        let (notify, keep, hint) = (self.notify.clone(), self.log.is_some(), self.ui_scale);
         std::thread::spawn(move || {
-            if tx.send(scan(frame, keep)).is_ok()
+            if tx.send(scan(frame, keep, hint)).is_ok()
                 && let Some(notify) = &notify
             {
                 notify();
@@ -598,7 +603,8 @@ impl Session {
     /// reading (or, with none on show, sets [`Session::missed`]) is logged as
     /// a miss with its frame, saved once per screen in a row and once a
     /// minute while that screen lasts.
-    fn install(&mut self, (scene, panels, size, frame): Scanned) {
+    fn install(&mut self, (scene, panels, size, frame, u): Scanned) {
+        self.ui_scale = Some(u);
         let screen = panels.screen;
         match self.take_read(scene, panels, size) {
             Taken::Installed => {

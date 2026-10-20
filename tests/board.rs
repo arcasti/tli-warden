@@ -8,8 +8,8 @@ use std::path::Path;
 use std::process::Command;
 use warden::board::{CellModel, ChoiceKind, EventMark, Model, ObjectiveModel, build_state};
 use warden::engine::actions::{Action, ChoiceId};
-use warden::engine::data::{Beast, Gift, Tool, data};
-use warden::engine::devour::devour_options;
+use warden::engine::data::{Beast, CAGE_FIGHT, Gift, Tool, data};
+use warden::engine::devour::{bites, devour_options, eater_mask};
 use warden::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATWAY};
 use warden::engine::rules::steps_between;
 use warden::engine::state::{ObjectiveState, Pending, Phase, ToolReason, Used};
@@ -18,6 +18,7 @@ use warden::solver::chain::{Meal, bite, chain_odds, devour_delta, replace_odds, 
 use warden::solver::scores::{patrol_scores, swap_gain_here};
 use warden::solver::values::swap_value;
 use warden::solver::solve::reason;
+use warden::solver::bench::start;
 use warden::solver::{Rng32, TUNED, decide};
 
 mod common;
@@ -717,4 +718,31 @@ fn an_extra_portion_marker_beats_a_plain_door() {
     st.cells[marker].event = Some(212);
     st.cells[marker].event_known = Some(true);
     assert_eq!(decide(&st, &TUNED, &mut Rng32::new(1)), Some(Action::Patrol { cell: marker }));
+}
+
+/// `eater_mask` agrees with `bites` on every cell of every board a few hundred
+/// strategy games pass through, with the species instruments and Cage Fight.
+#[test]
+fn eater_mask_matches_bites() {
+    let species = [Tool::Crown, Tool::Skewer, Tool::Guillotine, Tool::Maul];
+    for k in 0..300 {
+        let held: &[Tool] = if k % 3 == 0 { &[] } else { &species };
+        let (mut st, mut roll) = start(11, k, held);
+        if k % 5 == 0 {
+            st.theme = Some(CAGE_FIGHT);
+        }
+        for _ in 0..2000 {
+            let mask = eater_mask(&st);
+            for n in 0..st.cells.len() {
+                assert_eq!(mask & (1 << n) != 0, bites(&st, n).next().is_some(), "game {k} cell {n}");
+            }
+            if st.phase == Phase::Ended {
+                break;
+            }
+            let Some(action) = decide(&st, &TUNED, &mut roll) else { break };
+            if !apply(&mut st, &action).is_ok() && !(action != Action::End && apply(&mut st, &Action::End).is_ok()) {
+                break;
+            }
+        }
+    }
 }

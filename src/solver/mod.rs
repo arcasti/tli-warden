@@ -223,7 +223,9 @@ pub struct Ctx<'a> {
     pub memo: HashMap<(u32, u128), f64, BuildHasherDefault<MemoHasher>>,
 }
 
-pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
+/// The strategy's tier values `v` and vaulted Rainbow worth `r` on `st`, and
+/// whether it is the run's last day, where every tier below the top is worth 0.
+fn tier_values(st: &State, p: &Params) -> ([f64; 6], f64, bool) {
     let mut v = [0, 1, 2, 3, 4, 5].map(|t| p.tier_base.powi(t));
     // A full vault stops inmates at Ultimate: the top tier is worth no more.
     let r = if st.top_tier() < RAINBOW { v[RAINBOW as usize - 1] } else { v[RAINBOW as usize] * p.rainbow_mult };
@@ -231,6 +233,11 @@ pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
     if last_day {
         v[..TOP].fill(0.0);
     }
+    (v, r, last_day)
+}
+
+pub fn context<'a>(st: &'a State, p: &'a Params) -> Ctx<'a> {
+    let (v, r, last_day) = tier_values(st, p);
     let open_value = dist_worth(&v, r, &door_dist(st, None, true).0);
     let side_value = dist_worth(&v, r, &door_dist(st, None, false).0);
     let chain = food_chain();

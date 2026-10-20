@@ -244,12 +244,14 @@ fn feed_key(ctx: &Ctx, t: usize, b: usize, comp: &Comp, crowd: i64) -> (u32, u12
     if ctx.muzzle {
         head |= 1 << 5 | ((crowd + 1024) as u32) << 6;
     }
+    // The slots below Rainbow it reads: from tier t up, and below it only the
+    // beasts the chain can eat down (their bits repeated once per tier).
+    let mut slots = 0xF_FFFF & ((u32::from(ctx.down[b] & 15) * 0x1_1111) | !((1 << (4 * t)) - 1));
     let mut counts = 0u128;
-    for (i, &k) in comp.iter().enumerate().take(20) {
-        // Below tier t only the beasts the chain can eat down.
-        if i >= t * 4 || ctx.down[b] >> (i % 4) & 1 == 1 {
-            counts |= ((k + 2) as u128 & 63) << (6 * i);
-        }
+    while slots != 0 {
+        let i = slots.trailing_zeros() as usize;
+        slots &= slots - 1;
+        counts |= ((comp[i] + 2) as u128 & 63) << (6 * i);
     }
     (head, counts)
 }
@@ -257,24 +259,26 @@ fn feed_key(ctx: &Ctx, t: usize, b: usize, comp: &Comp, crowd: i64) -> (u32, u12
 /// feed: an eater of beast b at tier t takes a random valid meal; with none,
 /// the chain ends and it keeps its tier.
 pub fn feed(ctx: &mut Ctx, t: usize, b: usize, comp: &mut Comp, crowd: i64) -> f64 {
+    if !fed(ctx, t, b, comp) {
+        return ctx.v[t];
+    }
     let key = feed_key(ctx, t, b, comp, crowd);
     if let Some(&hit) = ctx.memo.get(&key) {
         return hit;
     }
     let (options, n) = meals(ctx, t, b, comp);
+    // `fed` reads the slots `meals` takes from, so there is at least one.
+    debug_assert!(n > 0);
     let total: i32 = options[..n].iter().map(|m| comp[m.tier * 4 + m.beast]).sum();
-    let mut out = ctx.v[t];
-    if total != 0 {
-        let mut sum = 0.0;
-        for &m in &options[..n] {
-            let i = m.tier * 4 + m.beast;
-            let k = comp[i];
-            comp[i] -= 1;
-            sum += f64::from(k) * bite(ctx, t, b, m, true, comp, crowd);
-            comp[i] += 1;
-        }
-        out = sum / f64::from(total);
+    let mut sum = 0.0;
+    for &m in &options[..n] {
+        let i = m.tier * 4 + m.beast;
+        let k = comp[i];
+        comp[i] -= 1;
+        sum += f64::from(k) * bite(ctx, t, b, m, true, comp, crowd);
+        comp[i] += 1;
     }
+    let out = sum / f64::from(total);
     ctx.memo.insert(key, out);
     out
 }

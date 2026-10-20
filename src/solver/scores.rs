@@ -3,9 +3,9 @@
 
 use super::chain::{best_meal, coin_of_fate, devour_delta, replace_odds};
 use super::values::{activation, execution_value, fresh_value, stair_delta, swap_value};
-use super::{Comp, Ctx, Dist, Rng32, TOP, beasts, composition, context, dist_worth, door_dist, seen_door, worth};
+use super::{Comp, Ctx, Dist, Params, Rng32, TOP, beasts, composition, dist_worth, door_dist, seen_door, tier_values, worth};
 use crate::engine::data::{Beast, Card, RAINBOW, Tool, data};
-use crate::engine::devour::{Bite, bites, hunt_targets, sure_gain};
+use crate::engine::devour::{Bite, eater_mask, hunt_targets, sure_gain};
 use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATWAY};
 use crate::engine::rules::{clockwise_path, land, steps_between};
 use crate::engine::state::{Cell, Inmate, State};
@@ -141,7 +141,7 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
         activation(ctx, i.tier as usize, i.beast.index(), &mut comp, crowd, swap_left)
     };
     let held = HELD_TERMS.iter().any(|&t| st.has(t)).then(|| Held::of(ctx, &loss));
-    let tiers = gift_tiers(ctx);
+    let tiers = gift_tiers(ctx.st, ctx.p);
     let mut out = Vec::with_capacity(cells.len());
     for &n in cells {
         let c = &st.cells[n];
@@ -510,9 +510,10 @@ pub fn swap_gain_here(ctx: &Ctx) -> f64 {
 /// bonus for inmates that have something to eat.
 fn board_value(st: &State, v: &[f64; 6], r: f64) -> f64 {
     let mut value = st.vault.len() as f64 * r;
+    let eaters = eater_mask(st);
     for c in &st.cells {
         let Some(i) = c.inmate.filter(|_| !c.sealed) else { continue };
-        value += v[i.tier as usize] * if bites(st, c.n).next().is_none() { 1.0 } else { 1.25 };
+        value += v[i.tier as usize] * if eaters & (1 << c.n) == 0 { 1.0 } else { 1.25 };
     }
     value
 }
@@ -522,15 +523,15 @@ fn board_value(st: &State, v: &[f64; 6], r: f64) -> f64 {
 /// inmates it took to make: 2^t. With fewer than 4 days left the tiers still
 /// to climb weigh more than the inmates spent, 3^t. The last day keeps the
 /// strategy's own values, where only a Chromatic counts.
-fn gift_tiers(ctx: &Ctx) -> ([f64; 6], f64) {
-    let st = ctx.st;
-    if ctx.last_day {
-        return (ctx.v, ctx.r);
+fn gift_tiers(st: &State, p: &Params) -> ([f64; 6], f64) {
+    let (v, r, last_day) = tier_values(st, p);
+    if last_day {
+        return (v, r);
     }
     let base: f64 = if st.max_days - st.day < 4 { 3.0 } else { 2.0 };
     let v = [0, 1, 2, 3, 4, 5].map(|t| base.powi(t));
-    // A full vault stops inmates at Ultimate, as in `context`.
-    (v, if st.top_tier() < RAINBOW { v[TOP - 1] } else { v[TOP] * ctx.p.rainbow_mult })
+    // A full vault stops inmates at Ultimate, as in `tier_values`.
+    (v, if st.top_tier() < RAINBOW { v[TOP - 1] } else { v[TOP] * p.rainbow_mult })
 }
 
 /// bestByBoard: the option whose result has the highest board value; random
@@ -547,8 +548,12 @@ pub fn best_by_board<'k>(ctx: &Ctx, options: &[&'k str], gift: bool, roll: &mut 
             if !apply(&mut trial, &Action::Choose { id: ChoiceId::Name(id.to_string()) }).is_ok() {
                 continue;
             }
-            let after = context(&trial, ctx.p);
-            let (v, r) = if gift { gift_tiers(&after) } else { (after.v, after.r) };
+            let (v, r) = if gift {
+                gift_tiers(&trial, ctx.p)
+            } else {
+                let (v, r, _) = tier_values(&trial, ctx.p);
+                (v, r)
+            };
             value += board_value(&trial, &v, r);
         }
         value /= f64::from(samples);

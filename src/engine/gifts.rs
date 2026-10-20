@@ -2,7 +2,7 @@
 //! (js/engine.js interrogationRoomStop and interrogate 1094-1131, applyGift 1729-1765).
 
 use super::data::{Beast, Card, Gift, RAINBOW, TYRANNY, data};
-use super::devour::{bites, can_eat, do_devour};
+use super::devour::{bites, can_eat, do_devour, eater_mask};
 use super::rng::{pick_one, shuffle};
 use super::rules::{How, add_marker, check_prey, open_cell};
 use super::state::{Inmate, Pending, State};
@@ -34,8 +34,9 @@ pub fn interrogate(s: &mut State, card: Card) {
     promote(s, lucky, 1, false);
 }
 
-fn hungry(s: &State, id: u32) -> bool {
-    s.cell_of(id).is_none_or(|n| bites(s, n).next().is_none())
+/// No target for inmate `id`, read from an `eater_mask` of the board.
+fn hungry(s: &State, eaters: u32, id: u32) -> bool {
+    s.cell_of(id).is_none_or(|n| eaters & (1 << n) == 0)
 }
 
 pub fn apply_gift(s: &mut State, gift: Gift) {
@@ -51,7 +52,8 @@ pub fn apply_gift(s: &mut State, gift: Gift) {
         }
         // Every inmate with a target consumes a random open one.
         Gift::Horn => {
-            let eaters: Vec<u32> = board_inmates(s).into_iter().filter(|i| !hungry(s, i.id)).map(|i| i.id).collect();
+            let mask = eater_mask(s);
+            let eaters: Vec<u32> = board_inmates(s).into_iter().filter(|i| !hungry(s, mask, i.id)).map(|i| i.id).collect();
             for id in eaters {
                 let Some(n) = s.board_cell_of(id) else { continue };
                 let options: Vec<_> = bites(s, n).filter(|o| !o.scratch).collect();
@@ -73,7 +75,8 @@ pub fn apply_gift(s: &mut State, gift: Gift) {
         }
         // Up to four inmates without a target become a beast that has one.
         Gift::Brand => {
-            let mut picks: Vec<u32> = board_inmates(s).into_iter().filter(|i| hungry(s, i.id)).map(|i| i.id).collect();
+            let mask = eater_mask(s);
+            let mut picks: Vec<u32> = board_inmates(s).into_iter().filter(|i| hungry(s, mask, i.id)).map(|i| i.id).collect();
             shuffle(&mut s.rng, &mut picks);
             picks.truncate(4);
             for id in picks {

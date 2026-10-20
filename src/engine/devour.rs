@@ -7,6 +7,7 @@ use super::rng::{pick_one, rand};
 use super::rules::{How, advance_objective, check_prey, empty_cell, fires, open_cell};
 use super::state::{Inmate, Pending, Phase, PreyLink, State};
 use super::tools::promote;
+use std::sync::OnceLock;
 
 /// A target of a consume: an open cell, or a scratched door a Wolf eats through.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,24 +20,85 @@ pub fn eats(beast: Beast) -> &'static [Beast] {
     &data().food_chain[beast.index()]
 }
 
-/// The species instruments widen the chain: the Fanged Guillotine lets a Wolf
-/// eat lower rarities, the Elephant-Foot Maul a Mammoth higher ones, the Iron
-/// Crown a Lion any same-rarity inmate, the Skewered Rat Heads a Rat a Rat.
+/// What of the state the eating rules read: the species instruments held and
+/// the Cage Fight theme.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Diet {
+    pub guillotine: bool,
+    pub maul: bool,
+    pub crown: bool,
+    pub skewer: bool,
+    pub cage_fight: bool,
+}
+
+impl Diet {
+    pub fn of(s: &State) -> Diet {
+        Diet {
+            guillotine: s.has(Tool::Guillotine),
+            maul: s.has(Tool::Maul),
+            crown: s.has(Tool::Crown),
+            skewer: s.has(Tool::Skewer),
+            cage_fight: s.theme == Some(CAGE_FIGHT),
+        }
+    }
+
+    /// Its index in the diet table, one bit per field.
+    fn index(self) -> usize {
+        usize::from(self.guillotine)
+            | usize::from(self.maul) << 1
+            | usize::from(self.crown) << 2
+            | usize::from(self.skewer) << 3
+            | usize::from(self.cage_fight) << 4
+    }
+
+    /// The species instruments widen the chain: the Fanged Guillotine lets a Wolf
+    /// eat lower rarities, the Elephant-Foot Maul a Mammoth higher ones, the Iron
+    /// Crown a Lion any same-rarity inmate, the Skewered Rat Heads a Rat a Rat.
+    pub fn can_eat(self, eater: &Inmate, meal: Option<&Inmate>) -> bool {
+        let Some(meal) = meal else { return false };
+        if eater.id == meal.id || eater.tier >= RAINBOW {
+            return false;
+        }
+        let counters = eats(eater.beast).contains(&meal.beast);
+        if eater.tier > meal.tier {
+            return counters && ((eater.beast == Beast::Wolf && self.guillotine) || self.cage_fight);
+        }
+        if eater.tier < meal.tier {
+            return counters && eater.beast == Beast::Mammoth && self.maul;
+        }
+        counters
+            || (eater.beast == Beast::Lion && self.crown)
+            || (eater.beast == Beast::Rat && meal.beast == Beast::Rat && self.skewer)
+    }
+}
+
+/// `Diet::can_eat` under the state's diet.
 pub fn can_eat(s: &State, eater: &Inmate, meal: Option<&Inmate>) -> bool {
-    let Some(meal) = meal else { return false };
-    if eater.id == meal.id || eater.tier >= RAINBOW {
-        return false;
-    }
-    let counters = eats(eater.beast).contains(&meal.beast);
-    if eater.tier > meal.tier {
-        return counters && ((eater.beast == Beast::Wolf && s.has(Tool::Guillotine)) || s.theme == Some(CAGE_FIGHT));
-    }
-    if eater.tier < meal.tier {
-        return counters && eater.beast == Beast::Mammoth && s.has(Tool::Maul);
-    }
-    counters
-        || (eater.beast == Beast::Lion && s.has(Tool::Crown))
-        || (eater.beast == Beast::Rat && meal.beast == Beast::Rat && s.has(Tool::Skewer))
+    Diet::of(s).can_eat(eater, meal)
+}
+
+/// Inmate classes: (rarity, beast) as `tier * 4 + beast`, Normal to Rainbow.
+const CLASSES: usize = (RAINBOW as usize + 1) * 4;
+
+fn class(i: &Inmate) -> usize {
+    debug_assert!((0..=RAINBOW).contains(&i.tier));
+    i.tier as usize * 4 + i.beast.index()
+}
+
+/// By diet and eater class, a bit per meal class it eats, from `Diet::can_eat`
+/// with stand-ins of different ids.
+fn diet_table() -> &'static [[u32; CLASSES]; 32] {
+    static TABLE: OnceLock<[[u32; CLASSES]; 32]> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let class = |k: usize, id: u32| Inmate { id, beast: Beast::ALL[k % 4], tier: (k / 4) as i32 };
+        std::array::from_fn(|d| {
+            let diet = Diet { guillotine: d & 1 != 0, maul: d & 2 != 0, crown: d & 4 != 0, skewer: d & 8 != 0, cage_fight: d & 16 != 0 };
+            debug_assert_eq!(diet.index(), d);
+            std::array::from_fn(|e| {
+                (0..CLASSES).filter(|&m| diet.can_eat(&class(e, 0), Some(&class(m, 1)))).fold(0, |mask, m| mask | 1 << m)
+            })
+        })
+    })
 }
 
 pub fn devour_options(s: &State, n: usize) -> Vec<Bite> {
@@ -62,6 +124,37 @@ pub fn bites(s: &State, n: usize) -> impl Iterator<Item = Bite> {
             }
         })
     })
+}
+
+/// A bit per cell whose inmate has a consume open (`bites(s, n).next().is_some()`),
+/// read from the diet table against the classes on the block.
+pub fn eater_mask(s: &State) -> u32 {
+    debug_assert!(s.cells.len() <= 32);
+    let (mut present, mut twice, mut scratched) = (0u32, 0u32, 0u32);
+    for c in &s.cells {
+        if c.sealed {
+            if c.scratch && let Some(h) = c.hidden {
+                scratched |= 1u32.checked_shl(h.tier as u32).unwrap_or(0);
+            }
+        } else if let Some(i) = c.inmate {
+            let bit = 1 << class(&i);
+            twice |= present & bit;
+            present |= bit;
+        }
+    }
+    let table = &diet_table()[Diet::of(s).index()];
+    let mut mask = 0;
+    for c in s.cells.iter().filter(|c| !c.sealed) {
+        let Some(i) = c.inmate else { continue };
+        let e = class(&i);
+        // An eater's own class counts only with a second inmate in it.
+        let meals = (present & !(1 << e)) | (twice & 1 << e);
+        let scratch = i.beast == Beast::Wolf && i.tier < RAINBOW && scratched >> i.tier & 1 != 0;
+        if table[e] & meals != 0 || scratch {
+            mask |= 1 << c.n;
+        }
+    }
+    mask
 }
 
 /// One consume a day (canDevourNow); a chain's later bites don't count.

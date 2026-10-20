@@ -36,6 +36,10 @@ pub fn advise(pick: Option<&Pick>, ranking: &[SolveOption], live: bool) -> Optio
     let best = &ranking[0];
     let why = match pick {
         Some(p) if mine == Some(0) => p.why.clone(),
+        // Within the margin of error of the first row, the pick is as good.
+        Some(p) if mine.is_some_and(|k| (best.mean - ranking[k].mean).abs() <= 1.96 * ranking[k].gap_se) => {
+            format!("The playouts rate it as good as the strategy's pick ({}).", p.label)
+        }
         Some(p) => format!("The playouts found a better move than the strategy's pick ({}).", p.label),
         None => "The playouts rate it best.".to_string(),
     };
@@ -70,17 +74,27 @@ mod tests {
     #[test]
     fn advice_takes_the_playouts_best() {
         let pick = Pick { action: Action::Patrol { cell: 8 }, label: "Go to cell 8".to_string(), why: "A new Inmate.".to_string() };
-        // The strategy's pick ranks second, 0.040 behind the leader.
-        let tie = [option(7, 4.07, 0.0, false), option(8, 4.03, 0.06, true)];
+        // The strategy's pick ranks second, 0.040 behind the leader, outside its 1.96 * 0.01 margin.
+        let tie = [option(7, 4.07, 0.0, false), option(8, 4.03, 0.01, true)];
         let a = advise(Some(&pick), &tie, true).unwrap();
         assert_eq!((a.label.as_str(), a.option), ("Go to cell 7", Some(0)));
         assert_eq!(a.action, Action::Patrol { cell: 7 });
-        assert!(a.why.ends_with("strategy's pick (Go to cell 8)."));
+        assert_eq!(a.why, "The playouts found a better move than the strategy's pick (Go to cell 8).");
 
         let led = [option(8, 4.07, 0.0, true), option(7, 4.03, 0.06, false)];
         let a = advise(Some(&pick), &led, true).unwrap();
         assert_eq!((a.label.as_str(), a.why.as_str()), ("Go to cell 8", "A new Inmate."));
         // Before enough playouts, the strategy's pick stands.
         assert_eq!(advise(Some(&pick), &tie, false).unwrap().option, Some(1));
+    }
+
+    #[test]
+    fn advice_in_a_tie_rates_the_pick_as_good() {
+        let pick = Pick { action: Action::Patrol { cell: 8 }, label: "Go to cell 8".to_string(), why: "A new Inmate.".to_string() };
+        let tie = [option(7, 0.0, 0.0, false), option(8, 0.0, 0.0, true), option(9, 0.0, 0.0, false)];
+        let a = advise(Some(&pick), &tie, true).unwrap();
+        // The move stays the first row; only the why changes.
+        assert_eq!((a.action, a.option), (Action::Patrol { cell: 7 }, Some(0)));
+        assert_eq!(a.why, "The playouts rate it as good as the strategy's pick (Go to cell 8).");
     }
 }

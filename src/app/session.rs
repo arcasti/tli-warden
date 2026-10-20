@@ -5,7 +5,7 @@
 use crate::board::{CellModel, EventMark, Model, build_state};
 use crate::engine::data::{Beast, Gift, RAINBOW, Tool, VAULT_CAP, data};
 use crate::engine::rules::treasure_picks;
-use crate::engine::text::{cell_label, tool_name};
+use crate::engine::text::{cell_label, tier_name, tool_name};
 use crate::reader::model::{RUN_DAYS, Warning, WarningKind, to_model};
 use crate::reader::panels::{Panels, Screen, read_panels_titled};
 use crate::reader::scene::{CELLS, Scene, read_scene};
@@ -18,7 +18,7 @@ use serde_json::json;
 use crate::engine::{Action, ChoiceId};
 use crate::engine::state::{Pending, State};
 use crate::solver::solve::{FollowUp, Rollouts, SolveOption, follow_up, instant, instant_bite};
-use crate::engine::devour::{offer_chain, start_options};
+use crate::engine::devour::{eats, offer_chain, start_options};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
@@ -238,6 +238,48 @@ pub fn consume_targets(options: &[usize], jawed: &[usize], eater: usize) -> (Vec
     let both: Vec<usize> = options.iter().copied().filter(|n| jawed.contains(n)).collect();
     let targets = if both.is_empty() { options.to_vec() } else { both };
     (targets, Some(Warning { cell: Some(eater), kind: WarningKind::Read, text }))
+}
+
+/// The cells a Consume target screen marks with big jaws, as model indices.
+fn jawed(scene: &Scene) -> Vec<usize> {
+    CELLS.filter(|&c| scene.cell(c).target).map(|c| c as usize - 1).collect()
+}
+
+/// Avenger's Casket opens a locked door after a bite with a meal for the
+/// eater, at its rarity, and the target screen puts the big jaws on it, which
+/// spoil its read. A jawed cell (`jawed`, model indices) that `m` holds
+/// without an inmate becomes that meal: the eater's rarity and the beast
+/// `read` shows when the eater eats it, else what the eater eats, with a
+/// warning on the cell when that is more than one beast.
+pub fn casket_meals(m: &mut Model, read: &Model, jawed: &[usize]) -> Vec<Warning> {
+    let eater = usize::try_from(m.warden).ok().and_then(|w| m.cells.get(w));
+    let Some(&CellModel::Inmate { beast: eater, tier, .. }) = eater else {
+        return Vec::new();
+    };
+    let food = eats(eater);
+    let mut warnings = Vec::new();
+    for &n in jawed {
+        if matches!(m.cells[n], CellModel::Inmate { .. }) {
+            continue;
+        }
+        let seen = match read.cells[n] {
+            CellModel::Inmate { beast, .. } => Some(beast).filter(|b| food.contains(b)),
+            _ => None,
+        };
+        let beast = seen.unwrap_or(food[0]);
+        if seen.is_none() && food.len() > 1 {
+            let text = format!(
+                "{CHECK_CELL}{}: a new Inmate from {}, taken as {} {}: click the cell to correct it.",
+                cell_label(n),
+                tool_name(Tool::Revenge.key()),
+                tier_name(tier as i32),
+                data().beast_names[beast.index()],
+            );
+            warnings.push(Warning { cell: Some(n), kind: WarningKind::Read, text });
+        }
+        m.cells[n] = CellModel::Inmate { beast, tier, ivory: false, prey: None, event: m.cells[n].event() };
+    }
+    warnings
 }
 
 /// The line shown over the last reading while a game dialog covers the board.
@@ -998,6 +1040,10 @@ impl Session {
                     };
                 }
                 m.warden = reading.model.warden;
+                if let Some((scene, _, _)) = &self.scene {
+                    let unedited: Vec<usize> = jawed(scene).into_iter().filter(|&n| !self.edits.contains_key(&(n as u8 + 1))).collect();
+                    reading.warnings.extend(casket_meals(&mut m, &reading.model, &unedited));
+                }
                 // Before the first bite the day's consume is still open.
                 m.devour_used = self.chained;
                 m.tools = reading.model.tools.clone();
@@ -1147,9 +1193,7 @@ impl Session {
         let mut warning = None;
         let mut bites = Vec::new();
         if target {
-            let jawed: Vec<usize> = self.scene.as_ref().map_or(Vec::new(), |(scene, _, _)| {
-                CELLS.filter(|&c| scene.cell(c).target).map(|c| c as usize - 1).collect()
-            });
+            let jawed = self.scene.as_ref().map_or(Vec::new(), |(scene, _, _)| jawed(scene));
             let (eater, chain) = (st.position, st.pending.iter_mut().find_map(|p| match p {
                 Pending::Chain { options, .. } => Some(options),
                 _ => None,

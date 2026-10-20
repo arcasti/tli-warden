@@ -159,6 +159,23 @@ fn consume_targets_read() {
     assert_eq!(targets, [4, 5, 12, 13]);
 }
 
+/// trainingdata/reports/consume-target-cell2.png (outside s16): a player's
+/// Consume target pick on day 7 with the big jaws on the Ultimate Mammoth
+/// Avenger's Casket let into cell 2: the cell reads open and a target.
+/// Skips when the frame is missing.
+#[test]
+fn consume_target_reads_open() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("trainingdata/reports/consume-target-cell2.png");
+    if !path.is_file() {
+        println!("skipped: {} is missing", path.display());
+        return;
+    }
+    let scene = read_scene(&load_png(&path).unwrap());
+    let cell = scene.cell(2);
+    assert!(cell.target, "cell 2 is not read as a target");
+    assert!(!cell.locked, "cell 2 read as locked");
+}
+
 /// The big jaws read only on a Consume target pick: every other screen of
 /// trainingdata/s16 has none. Skips when the frames are missing.
 #[test]

@@ -6,8 +6,8 @@
 use std::path::Path;
 mod common;
 use warden::app::runlog::RunLog;
-use warden::app::session::{CellEdit, consume_targets, DaysClock, HELD_BLOCKS, MAX_WAIT, RECHECK, ROUND, Reading, SETTLE, Session, Watch, differs, fingerprint};
-use warden::board::{CellModel, ChoiceKind, EventMark, Step, build_state};
+use warden::app::session::{CellEdit, casket_meals, consume_targets, DaysClock, HELD_BLOCKS, MAX_WAIT, RECHECK, ROUND, Reading, SETTLE, Session, Watch, differs, fingerprint};
+use warden::board::{CellModel, ChoiceKind, EventMark, Model, Step, build_state};
 use warden::engine::data::{Beast, OPULENCE, Tool};
 use warden::engine::devour::{devour_options, start_options};
 use warden::engine::{Action, ChoiceId};
@@ -497,8 +497,10 @@ fn consume_target_picks_a_bite() {
 }
 
 /// The red jaws over the targets of the Consume target screen rec4-t110
-/// spoil the read of cell 03: read alone it warns; after the board rec4-t070
-/// the cell is kept from the board without a warning, and the hidden days
+/// spoil the read of cell 03: read alone it warns. After the board rec4-t070
+/// of the day before, where 03 is locked, it gives no warning: a jawed cell
+/// the board holds locked is the meal Avenger's Casket let in, here a Magic
+/// Rat for the Magic Lion on 10, as the screen shows. The hidden days
 /// counter, which this screen always hides, gives no line either.
 #[test]
 fn consume_target_keeps_unsure_cells() {
@@ -508,11 +510,10 @@ fn consume_target_keeps_unsure_cells() {
     assert!(r.warnings.iter().any(|w| w.text.starts_with("Check cell 03")), "{:?}", r.warnings);
 
     let Some(s) = read_all(Vec::new(), &["rec4-t070.png", "rec4-t110.png"]) else { return };
-    let board = read_all(Vec::new(), &["rec4-t070.png"]).unwrap().reading.unwrap();
     let r = s.reading.clone().unwrap();
     assert_eq!(r.screen, Screen::ChainTarget);
     assert!(r.warnings.iter().all(|w| !w.text.starts_with("Check cell ") && !w.text.contains("days counter")), "{:?}", r.warnings);
-    assert_eq!(r.model.cells[2], board.model.cells[2]);
+    assert_eq!(r.model.cells[2], CellModel::Inmate { beast: Beast::Rat, tier: 1, ivory: false, prey: None, event: None });
 }
 
 /// The player's Consume target pick trainingdata/reports/chain-target.png
@@ -548,6 +549,43 @@ fn consume_target_follows_the_jaws() {
         let w = r.warnings.iter().find(|w| w.text.starts_with("The Consume targets on screen are cells 04, 05, 12 and 13"));
         assert_eq!(w.and_then(|w| w.cell), Some(2), "{:?}", r.warnings);
     }
+}
+
+/// Avenger's Casket's meal on a Consume target screen: a jawed cell the board
+/// holds as locked takes the eater's rarity and a beast it eats. The player's
+/// report trainingdata/reports/consume-target-cell2.png: an Ultimate Rat in
+/// 07 bit, the Casket opened 02, and the meal (an Ultimate Mammoth, what a
+/// Rat eats) stayed locked. A Mammoth eats Lions and Wolves: the read beast
+/// when it is one of them, else a Lion with a warning on the cell.
+#[test]
+fn casket_meal_on_a_locked_cell() {
+    let inmate = |beast, tier| CellModel::Inmate { beast, tier, ivory: false, prey: None, event: None };
+    let mut board = Model::blank();
+    board.warden = 6;
+    board.cells[6] = inmate(Beast::Rat, 4);
+    board.cells[2] = inmate(Beast::Mammoth, 1);
+    let mut read = board.clone();
+    read.cells[1] = inmate(Beast::Wolf, 0);
+    read.cells[2] = inmate(Beast::Lion, 0);
+
+    let mut m = board.clone();
+    assert!(casket_meals(&mut m, &read, &[1, 2]).is_empty());
+    assert_eq!(m.cells[1], inmate(Beast::Mammoth, 4));
+    assert_eq!(m.cells[2], board.cells[2], "a jawed inmate stays as the board has it");
+
+    board.cells[6] = inmate(Beast::Mammoth, 3);
+    read.cells[1] = inmate(Beast::Wolf, 0);
+    let mut m = board.clone();
+    assert!(casket_meals(&mut m, &read, &[1]).is_empty());
+    assert_eq!(m.cells[1], inmate(Beast::Wolf, 3));
+
+    read.cells[1] = inmate(Beast::Rat, 0);
+    let mut m = board.clone();
+    let warnings = casket_meals(&mut m, &read, &[1]);
+    assert_eq!(m.cells[1], inmate(Beast::Lion, 3));
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].cell, Some(1));
+    assert!(warnings[0].text.starts_with("Check cell 02: a new Inmate from "), "{}", warnings[0].text);
 }
 
 /// The targets of a Consume target pick: the jawed cells among the board

@@ -22,9 +22,10 @@ pub struct Advice {
     pub option: Option<usize>,
 }
 
-/// The strategy's pick (row `mine` of the ranking) until the playouts count
-/// (`live`), then the ranking's first row.
-pub fn advise(pick: Option<&Pick>, mine: Option<usize>, ranking: &[SolveOption], live: bool) -> Option<Advice> {
+/// The strategy's pick until the playouts count (`live`), then the ranking's
+/// first row.
+pub fn advise(pick: Option<&Pick>, ranking: &[SolveOption], live: bool) -> Option<Advice> {
+    let mine = pick.and_then(|p| ranking.iter().position(|o| o.action == p.action));
     if !live || ranking.len() < 2 {
         return match (pick, ranking) {
             (Some(p), _) => Some(Advice { action: p.action.clone(), label: p.label.clone(), why: p.why.clone(), option: mine }),
@@ -69,17 +70,17 @@ mod tests {
     #[test]
     fn advice_takes_the_playouts_best() {
         let pick = Pick { action: Action::Patrol { cell: 8 }, label: "Go to cell 8".to_string(), why: "A new Inmate.".to_string() };
-        // A live screenshot: the leader is 0.040 ahead with a paired standard error of 0.060.
+        // The strategy's pick ranks second, 0.040 behind the leader.
         let tie = [option(7, 4.07, 0.0, false), option(8, 4.03, 0.06, true)];
-        let a = advise(Some(&pick), Some(1), &tie, true).unwrap();
+        let a = advise(Some(&pick), &tie, true).unwrap();
         assert_eq!((a.label.as_str(), a.option), ("Go to cell 7", Some(0)));
         assert_eq!(a.action, Action::Patrol { cell: 7 });
         assert!(a.why.ends_with("strategy's pick (Go to cell 8)."));
 
         let led = [option(8, 4.07, 0.0, true), option(7, 4.03, 0.06, false)];
-        let a = advise(Some(&pick), Some(0), &led, true).unwrap();
+        let a = advise(Some(&pick), &led, true).unwrap();
         assert_eq!((a.label.as_str(), a.why.as_str()), ("Go to cell 8", "A new Inmate."));
         // Before enough playouts, the strategy's pick stands.
-        assert_eq!(advise(Some(&pick), Some(1), &tie, false).unwrap().option, Some(1));
+        assert_eq!(advise(Some(&pick), &tie, false).unwrap().option, Some(1));
     }
 }

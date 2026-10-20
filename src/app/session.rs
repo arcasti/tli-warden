@@ -378,9 +378,10 @@ impl Watch {
             return false;
         }
         self.since += 1;
-        if let Some(r) = self.read.as_ref().filter(|r| !differs(r, &print)) {
+        let n = self.read.as_ref().filter(|r| r.len() == print.len()).map(|r| changed(r, &print));
+        if let Some(n) = n.filter(|&n| n < CHANGED_BLOCKS) {
             self.waited = 0;
-            if changed(r, &print) > 0 && self.since >= RECHECK {
+            if n > 0 && self.since >= RECHECK {
                 self.mark_read(print);
                 return true;
             }
@@ -1063,8 +1064,7 @@ impl Session {
 
     /// What the window recommends now; see [`advise`].
     pub fn advice(&self) -> Option<Advice> {
-        let mine = self.ranking.iter().position(|o| o.policy);
-        advise(self.pick.as_ref(), mine, &self.ranking, !self.solving || self.rounds >= LIVE_MIN)
+        advise(self.pick.as_ref(), &self.ranking, !self.solving || self.rounds >= LIVE_MIN)
     }
 
     /// The strategy's move after the advised one; None when there is none

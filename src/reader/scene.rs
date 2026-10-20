@@ -133,13 +133,6 @@ fn beast_feature(img: &Rgba, cell: u8) -> Vec<f32> {
     face(img, x, y)
 }
 
-/// The face at the spots within +-4 px of the usual one: on a lit cell with
-/// a path line through it the face has been seen 4-8 px higher.
-fn beast_features(img: &Rgba, cell: u8) -> Vec<Vec<f32>> {
-    let (x, y) = portrait(cell);
-    faces_around(img, x, y, 4)
-}
-
 /// The faces at the spots within +-`r` px of `(x, y)`, 2 px apart.
 fn faces_around(img: &Rgba, x: i32, y: i32, r: i32) -> Vec<Vec<f32>> {
     let mut out = Vec::new();
@@ -817,7 +810,10 @@ pub fn read_scene_with(img: &Rgba, t: &Templates) -> Scene {
             let s = search(img, event_spot(c), &t.event, event_feature);
             (r.event, r.event_conf) = t.event_split.decide(s);
 
-            let (k, conf) = beast_class(&beast_features(img, c), t);
+            // The face at the spots within +-4 px of the usual one: on a lit
+            // cell with a path line through it the face has been seen 4-8 px higher.
+            let (x, y) = portrait(c);
+            let (k, conf) = beast_class(&faces_around(img, x, y, 4), t);
             r.beast_conf = conf;
             if let (Some(beast), false) = (CLASSES[k], r.locked) {
                 let (tier, conf, _) = glow_tier(img, c, warden == Some(c), t);

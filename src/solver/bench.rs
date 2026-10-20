@@ -64,9 +64,8 @@ pub fn play(seed: u32, k: u32, rollouts: usize) -> Game {
         } else {
             decisions += 1;
             let ranking = r.ranking();
-            let row = ranking.iter().position(|o| o.action == mine);
             let pick = Pick { action: mine.clone(), label: String::new(), why: String::new() };
-            match advise(Some(&pick), row, &ranking, true).and_then(|a| a.option) {
+            match advise(Some(&pick), &ranking, true).and_then(|a| a.option) {
                 Some(i) if ranking[i].action != mine => {
                     overruled += 1;
                     ranking[i].action.clone()

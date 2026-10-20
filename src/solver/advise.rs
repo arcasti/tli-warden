@@ -1,5 +1,5 @@
-//! The move to recommend from a ranking: the strategy's pick unless the
-//! playouts found a clearly better one. The app shows it, and `bench`
+//! The move to recommend from a ranking: the strategy's pick until the
+//! playouts count, then the playouts' best. The app shows it, and `bench`
 //! plays it to measure what following the advice is worth.
 
 use super::solve::SolveOption;
@@ -22,9 +22,8 @@ pub struct Advice {
     pub option: Option<usize>,
 }
 
-/// The strategy's pick (row `mine` of the ranking), unless the playouts
-/// (`live` once they count) found a move better by more than its paired
-/// margin, so the advice doesn't flicker.
+/// The strategy's pick (row `mine` of the ranking) until the playouts count
+/// (`live`), then the ranking's first row.
 pub fn advise(pick: Option<&Pick>, mine: Option<usize>, ranking: &[SolveOption], live: bool) -> Option<Advice> {
     if !live || ranking.len() < 2 {
         return match (pick, ranking) {
@@ -34,14 +33,8 @@ pub fn advise(pick: Option<&Pick>, mine: Option<usize>, ranking: &[SolveOption],
         };
     }
     let best = &ranking[0];
-    if let (Some(p), Some(k)) = (pick, mine) {
-        let o = &ranking[k];
-        if k == 0 || best.mean - o.mean <= 1.96 * o.gap_se {
-            let why = if k == 0 { p.why.clone() } else { format!("{} The playouts rate it about equal to the best.", p.why) };
-            return Some(Advice { action: o.action.clone(), label: o.label.clone(), why, option: Some(k) });
-        }
-    }
     let why = match pick {
+        Some(p) if mine == Some(0) => p.why.clone(),
         Some(p) => format!("The playouts found a better move than the strategy's pick ({}).", p.label),
         None => "The playouts rate it best.".to_string(),
     };
@@ -74,20 +67,19 @@ mod tests {
     }
 
     #[test]
-    fn advice_keeps_the_pick_within_the_margin() {
+    fn advice_takes_the_playouts_best() {
         let pick = Pick { action: Action::Patrol { cell: 8 }, label: "Go to cell 8".to_string(), why: "A new Inmate.".to_string() };
-        // The live screenshot: the leader is 0.040 ahead with a paired standard error of 0.060.
+        // A live screenshot: the leader is 0.040 ahead with a paired standard error of 0.060.
         let tie = [option(7, 4.07, 0.0, false), option(8, 4.03, 0.06, true)];
         let a = advise(Some(&pick), Some(1), &tie, true).unwrap();
-        assert_eq!((a.label.as_str(), a.option), ("Go to cell 8", Some(1)));
-        assert_eq!(a.action, Action::Patrol { cell: 8 });
-        assert!(a.why.ends_with("about equal to the best."));
-
-        let clear = [option(7, 4.5, 0.0, false), option(8, 4.03, 0.06, true)];
-        let a = advise(Some(&pick), Some(1), &clear, true).unwrap();
         assert_eq!((a.label.as_str(), a.option), ("Go to cell 7", Some(0)));
         assert_eq!(a.action, Action::Patrol { cell: 7 });
+        assert!(a.why.ends_with("strategy's pick (Go to cell 8)."));
+
+        let led = [option(8, 4.07, 0.0, true), option(7, 4.03, 0.06, false)];
+        let a = advise(Some(&pick), Some(0), &led, true).unwrap();
+        assert_eq!((a.label.as_str(), a.why.as_str()), ("Go to cell 8", "A new Inmate."));
         // Before enough playouts, the strategy's pick stands.
-        assert_eq!(advise(Some(&pick), Some(1), &clear, false).unwrap().option, Some(1));
+        assert_eq!(advise(Some(&pick), Some(1), &tie, false).unwrap().option, Some(1));
     }
 }

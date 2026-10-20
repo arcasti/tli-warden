@@ -259,17 +259,19 @@ fn objective(lines: &[Line]) -> Option<(u32, u32)> {
 /// A progress line: "N/M" gives N, "Completed" gives `target`. "Completed"
 /// ends the task's line ("Move 18 tiles Completed"), and OCR can glue it to
 /// the word before ("UltimateCompleted"), so the last word or its tail counts.
-/// OCR glues the count to the task too ("times0/2"), so the digits next to the
-/// slash count first, then the whole word read as a number. The count after
-/// the slash is the known target, so only a count above it is refused.
+/// OCR glues the count to the task too ("times0/2") and can read its 1 as an
+/// l ("timesl/2"), so the digits and digit-like letters next to the slash
+/// count first, then the whole word read as a number. No task's last word
+/// ends in one of those letters. The count after the slash is the known
+/// target, so only a count above it is refused.
 fn progress(text: &str, target: u32) -> Option<u32> {
     if similarity(text, "Completed") >= 0.75 || completed_tail(text) {
         return Some(target);
     }
     let (head, _) = text.trim().rsplit_once('/')?;
     let head = head.split_whitespace().last()?;
-    let digits = head.len() - head.trim_end_matches(|c: char| c.is_ascii_digit()).len();
-    let done = if digits > 0 { head[head.len() - digits..].parse().ok()? } else { number(head)? };
+    let count = head.trim_end_matches(|c: char| c.is_ascii_digit() || matches!(c, 'O' | 'o' | 'I' | 'l' | '|' | 'i'));
+    let done = number(if count.len() < head.len() { &head[count.len()..] } else { head })?;
     (done <= target).then_some(done)
 }
 
@@ -519,6 +521,9 @@ mod tests {
         assert_eq!(progress("Move 18 tiles Completed", 18), Some(18));
         assert_eq!(progress("UltimateCompleted", 1), Some(1));
         assert_eq!(progress("Move 18 tiles 7/18", 18), Some(7));
+        assert_eq!(progress("timesl/2", 2), Some(1));
+        assert_eq!(progress("tilesl0/18", 18), Some(10));
+        assert_eq!(progress("times0/2", 2), Some(0));
         assert_eq!(progress("Complete 2 objectives 1/2", 2), Some(1));
         assert_eq!(progress("Consume 4 times", 4), None);
         assert_eq!(progress("3/2", 2), None);

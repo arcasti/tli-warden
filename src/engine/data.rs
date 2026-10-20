@@ -11,6 +11,12 @@ const RAW: &str = include_str!("../../data/warden-data.json");
 pub const RAINBOW: i32 = 5;
 /// The vault holds at most this many Chromatics (confirmed in-game).
 pub const VAULT_CAP: u32 = 10;
+/// What one inmate left at the Riot pays, in Chromatics, by tier (Normal,
+/// Magic, Rare, Legendary, Ultimate, Chromatic). The game pays a Warden's
+/// Cache per inmate left in Tartarus by rarity and one per vaulted
+/// Chromatic; the worth of each cache against a Chromatic is set by the
+/// player.
+pub const LOOT: [f64; 6] = [0.0, 0.0, 0.0, 0.05, 0.2, 1.0];
 /// Relative worth of one inmate per tier; the advisor ranks moves with it.
 pub const WORTH: [f64; 6] = [1.0, 3.0, 9.0, 27.0, 81.0, 400.0];
 

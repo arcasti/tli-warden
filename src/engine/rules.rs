@@ -543,6 +543,23 @@ mod tests {
         roll_many(&mut s, 2000, 2);
     }
 
+    #[test]
+    fn loot_counts_the_vault_and_the_open_board() {
+        let mut s = new_game("LOOT");
+        for c in &mut s.cells {
+            c.inmate = None;
+        }
+        s.vault = (0..2).map(|id| VaultEntry { id: 1000 + id, beast: Beast::ALL[0], day: 1 }).collect();
+        let room = data().room;
+        let cells: Vec<usize> = (0..s.cells.len()).filter(|&n| n != room).take(3).collect();
+        for (&n, (tier, sealed)) in cells.iter().zip([(RAINBOW - 1, false), (RAINBOW - 2, false), (RAINBOW - 1, true)]) {
+            let inmate = make_inmate(&mut s, Beast::ALL[0], tier);
+            s.cells[n].sealed = sealed;
+            s.cells[n].inmate = Some(inmate);
+        }
+        assert!((s.loot() - 2.25).abs() < 1e-9, "loot {}", s.loot());
+    }
+
     /// Promotes an Ultimate on a board whose vault already holds `vaulted` Chromatics.
     fn promote_ultimate(vaulted: usize) -> State {
         let mut s = new_game("VAULT-CAP");

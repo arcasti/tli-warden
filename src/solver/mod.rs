@@ -9,7 +9,7 @@ pub mod scores;
 pub mod solve;
 pub mod values;
 
-use crate::engine::data::{Beast, CAGE_FIGHT, RAINBOW, Tool, data};
+use crate::engine::data::{Beast, CAGE_FIGHT, LOOT, RAINBOW, Tool, data};
 use crate::engine::devour::{can_devour_now, devour_options, start_options};
 use crate::engine::rng::rand;
 use crate::engine::rules::door_weights;
@@ -217,21 +217,28 @@ pub struct Ctx<'a> {
     /// The worth of an unseen door opened from the side (Chain Reaction walk,
     /// Crowded Beastcage), which sets off no "after opening" instrument.
     pub side_value: f64,
-    /// The run's last day: only a Chromatic made today counts, so every tier
-    /// below the top is worth 0 and a Replace of any tier may pay.
+    /// The run's last day: what counts is the Riot loot, so every tier below
+    /// Chromatic is worth only its cache (`LOOT`) and a Replace of any tier
+    /// may pay.
     pub last_day: bool,
     pub memo: HashMap<(u32, u128), f64, BuildHasherDefault<MemoHasher>>,
 }
 
 /// The strategy's tier values `v` and vaulted Rainbow worth `r` on `st`, and
-/// whether it is the run's last day, where every tier below the top is worth 0.
+/// whether it is the run's last day, where every tier below Chromatic is worth
+/// only its Riot loot (`LOOT`) in vaulted Chromatics.
 fn tier_values(st: &State, p: &Params) -> ([f64; 6], f64, bool) {
     let mut v = [0, 1, 2, 3, 4, 5].map(|t| p.tier_base.powi(t));
     // A full vault stops inmates at Ultimate: the top tier is worth no more.
     let r = if st.top_tier() < RAINBOW { v[RAINBOW as usize - 1] } else { v[RAINBOW as usize] * p.rainbow_mult };
     let last_day = st.day >= st.max_days;
     if last_day {
-        v[..TOP].fill(0.0);
+        // Only the Riot loot counts now: each tier below Chromatic is worth
+        // its cache in Chromatics, full vault or not.
+        let chromatic = v[RAINBOW as usize] * p.rainbow_mult;
+        for (t, x) in v[..TOP].iter_mut().enumerate() {
+            *x = LOOT[t] * chromatic;
+        }
     }
     (v, r, last_day)
 }

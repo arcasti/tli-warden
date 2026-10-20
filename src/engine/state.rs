@@ -1,7 +1,7 @@
 //! The game state, shaped like the JS state (js/engine.js newGame) so that
 //! `serde_json::to_value` diffs cleanly against a JS state without its log.
 
-use super::data::{Beast, Card, Gift, RAINBOW, Tool, VAULT_CAP, data};
+use super::data::{Beast, Card, Gift, LOOT, RAINBOW, Tool, VAULT_CAP, data};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -266,6 +266,13 @@ impl State {
     /// room, Ultimate once it is full.
     pub fn top_tier(&self) -> i32 {
         if self.params.vault_cap.is_none_or(|cap| self.vault.len() < cap as usize) { RAINBOW } else { RAINBOW - 1 }
+    }
+
+    /// The Riot loot of this board in Chromatics: each vaulted Chromatic plus
+    /// the cache of each inmate on an open cell, weighted by `LOOT`.
+    pub fn loot(&self) -> f64 {
+        let board: f64 = self.cells.iter().filter(|c| !c.sealed).filter_map(|c| c.inmate).map(|i| LOOT[i.tier as usize]).sum();
+        self.vault.len() as f64 * LOOT[RAINBOW as usize] + board
     }
 
     /// Index of the cell holding inmate `id`, sealed or open (cellOf).

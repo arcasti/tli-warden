@@ -522,7 +522,7 @@ fn board_value(st: &State, v: &[f64; 6], r: f64) -> f64 {
 /// inmates of a tier make one of the next, so early on an inmate counts as the
 /// inmates it took to make: 2^t. With fewer than 4 days left the tiers still
 /// to climb weigh more than the inmates spent, 3^t. The last day keeps the
-/// strategy's own values, where only a Chromatic counts.
+/// strategy's own values, where each tier is worth its Riot loot.
 fn gift_tiers(st: &State, p: &Params, (v, r, last_day): ([f64; 6], f64, bool)) -> ([f64; 6], f64) {
     if last_day {
         return (v, r);

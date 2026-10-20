@@ -107,7 +107,7 @@ fn run_capture(args: &[String]) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// `bench`: Chromatics per run for the strategy alone and following the
+/// `bench`: Chromatics and loot per run for the strategy alone and following the
 /// advice, on the same seeds; see `warden::solver::bench`. With
 /// `--strategy-only`, the strategy alone; see `run_strategy_bench`.
 fn run_bench(args: &[String]) -> Result<ExitCode, String> {
@@ -143,9 +143,15 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
     let clock = std::time::Instant::now();
     let s = summarize(&bench(games, rollouts, seed, threads));
     let secs = clock.elapsed().as_secs_f64();
-    out!("strategy  {:.3} +- {:.3} Chromatics per run", s.strategy.0, s.strategy.1);
-    out!("advice    {:.3} +- {:.3}", s.advice.0, s.advice.1);
-    out!("advice - strategy  {:+.3} +- {:.3} (paired)", s.gain.0, s.gain.1);
+    out!(
+        "strategy  {:.3} +- {:.3} Chromatics, {:.3} +- {:.3} loot per run",
+        s.strategy.0,
+        s.strategy.1,
+        s.strategy_loot.0,
+        s.strategy_loot.1
+    );
+    out!("advice    {:.3} +- {:.3}, {:.3} +- {:.3}", s.advice.0, s.advice.1, s.advice_loot.0, s.advice_loot.1);
+    out!("advice - strategy  {:+.3} +- {:.3} loot (paired)", s.gain.0, s.gain.1);
     out!("advice overruled the strategy at {} of {} decisions with 2+ options", s.overruled, s.decisions);
     out!("{games} games, {rollouts} playouts per option, seed {seed}, {threads} threads, {secs:.1} s");
     Ok(ExitCode::SUCCESS)
@@ -162,7 +168,7 @@ fn set_weights(p: &mut Params, value: Option<&String>) -> Result<(), String> {
     Ok(())
 }
 
-/// `bench --strategy-only`: Chromatics and moves per run for the strategy on
+/// `bench --strategy-only`: Chromatics, loot and moves per run for the strategy on
 /// the tuned weights and, given `changed`, on those too, with the paired
 /// difference by game. Every game starts holding `held`. `save` writes the
 /// tuned Chromatics per game, one per line, and `against` reads such a file
@@ -195,9 +201,10 @@ fn run_strategy_bench(
     let tuned = strategy_bench(games, seed, threads, held, &TUNED);
     let row = |name: &str, runs: &[Solo]| {
         let (mean, se) = mean_se(&runs.iter().map(|r| r.chromatics as f64).collect::<Vec<_>>());
+        let (loot, loot_se) = mean_se(&runs.iter().map(|r| r.loot).collect::<Vec<_>>());
         let per_run = |f: fn(&Solo) -> u32| runs.iter().map(|r| f64::from(f(r))).sum::<f64>() / runs.len() as f64;
         out!(
-            "{name:<8}  {mean:.3} +- {se:.3} Chromatics per run; per run {:.2} Consumes, {:.2} chain bites, {:.2} Replaces, {:.2} doors opened",
+            "{name:<8}  {mean:.3} +- {se:.3} Chromatics, {loot:.3} +- {loot_se:.3} loot per run; per run {:.2} Consumes, {:.2} chain bites, {:.2} Replaces, {:.2} doors opened",
             per_run(|r| r.stats.devours),
             per_run(|r| r.stats.chains),
             per_run(|r| r.stats.swaps),

@@ -287,10 +287,12 @@ fn board_without_objective_has_none() {
 }
 
 #[test]
-fn guillotine_on_the_last_day_keeps_the_block() {
-    // Replace with Scapegoat's Guillotine removes 2 of the 3 others, and no
-    // Chromatic can be made on the last day; with Avenger's Casket it pays.
-    for (tools, want) in [(serde_json::json!(["scapegoat", "rope"]), Action::End), (serde_json::json!(["revenge", "rope"]), Action::Swap)] {
+fn guillotine_on_the_last_day_still_replaces() {
+    // Replace with Scapegoat's Guillotine removes 2 of the 3 others, but on
+    // the last day they are worth only their Riot loot, so the Replace pays
+    // as with Avenger's Casket (loot playouts: 2.063 against 2.050 for
+    // finishing, paired error 0.001).
+    for (tools, want) in [(serde_json::json!(["scapegoat", "rope"]), Action::Swap), (serde_json::json!(["revenge", "rope"]), Action::Swap)] {
         let st = with_tools("guillotine-last-day.json", tools.clone());
         assert_eq!(decide(&st, &TUNED, &mut Rng32::new(1)), Some(want), "{tools}");
     }
@@ -652,10 +654,11 @@ fn a_rat_nest_due_in_the_run_scores_below_a_plain_door() {
 }
 
 #[test]
-fn the_last_day_replaces_an_inmate_that_cannot_make_a_chromatic() {
-    // The warden's Epic Wolf has no meal, and a Legendary Lion sits in 08: a
-    // new inmate may bite it into a Chromatic today. Before the last day the
-    // Epic is worth keeping; on the last day only that Chromatic counts.
+fn the_last_day_keeps_a_legendary_over_a_long_shot_chromatic() {
+    // The warden's Legendary Wolf has no meal, and an Ultimate Lion sits in
+    // 08: a new inmate may bite it into a Chromatic today. The Legendary's
+    // Riot loot outweighs that chance on both days (loot playouts on day 20:
+    // 2.250 for finishing against 2.214 for the Replace, paired error 0.001).
     let pick = |day: u32| {
         let mut st = replace_board(serde_json::json!([]), 3, &[(8, 4)]);
         st.day = day;
@@ -663,7 +666,7 @@ fn the_last_day_replaces_an_inmate_that_cannot_make_a_chromatic() {
         decide(&st, &TUNED, &mut Rng32::new(1))
     };
     assert_eq!(pick(19), Some(Action::End));
-    assert_eq!(pick(20), Some(Action::Swap));
+    assert_eq!(pick(20), Some(Action::End));
 }
 
 #[test]

@@ -171,7 +171,7 @@ fn paired_se(a: &[f64], b: &[f64]) -> f64 {
 pub struct SolveOption {
     pub label: String,
     pub action: Action,
-    /// Rainbows vaulted per playout.
+    /// Riot loot per playout, in Chromatics (`State::loot`).
     pub mean: f64,
     pub se: f64,
     /// The paired standard error of the margin to the leader (0 for the
@@ -186,7 +186,7 @@ pub struct SolveOption {
 }
 
 /// solve: plays every candidate out `rollouts` times and ranks them by
-/// Rainbows vaulted. Each round shares its dice across candidates (common
+/// Riot loot. Each round shares its dice across candidates (common
 /// random numbers), so the differences between moves are measured, not the
 /// luck.
 pub fn solve(st: &State, rollouts: usize, seed: u32, p: &Params) -> Vec<SolveOption> {
@@ -282,7 +282,7 @@ impl<'a> Rollouts<'a> {
         rounds
     }
 
-    /// One round on `seed`: per candidate, Rainbows vaulted (NaN when the
+    /// One round on `seed`: per candidate, the Riot loot (NaN when the
     /// move does not apply) and the best rarity reached (0 then).
     fn round(&self, seed: u32) -> Vec<(f64, f64)> {
         self.list
@@ -296,7 +296,7 @@ impl<'a> Rollouts<'a> {
                 playout(&mut trial, self.p, &mut Rng32::new(seed ^ 0x9e3779b9));
                 // Second measure: the best rarity reached.
                 let top = trial.cells.iter().filter_map(|c| c.inmate.filter(|_| !c.sealed)).map(|i| i.tier).max().unwrap_or(0);
-                (trial.vault.len() as f64, f64::from(top.max(if trial.vault.is_empty() { 0 } else { RAINBOW }).max(0)))
+                (trial.loot(), f64::from(top.max(if trial.vault.is_empty() { 0 } else { RAINBOW }).max(0)))
             })
             .collect()
     }

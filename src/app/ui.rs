@@ -492,7 +492,7 @@ impl WardenApp {
                 ui.spinner();
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.small(RichText::new("Chromatics per run").weak());
+                ui.small(RichText::new("Loot per run (Chromatic = 1)").weak());
             });
         });
         for p in &s.problems {

@@ -36,6 +36,10 @@ pub struct Game {
     pub strategy: usize,
     /// Chromatics vaulted following the advice.
     pub advice: usize,
+    /// Riot loot of the strategy alone, in Chromatics (`State::loot`).
+    pub strategy_loot: f64,
+    /// Riot loot following the advice.
+    pub advice_loot: f64,
     /// Advice decisions with two or more options.
     pub decisions: usize,
     /// Those where the advice was not the strategy's move.
@@ -44,7 +48,7 @@ pub struct Game {
 
 /// Plays game `k` both ways; the advice runs `rollouts` playouts per option.
 pub fn play(seed: u32, k: u32, rollouts: usize) -> Game {
-    let strategy = play_strategy(seed, k, &[], &TUNED).chromatics;
+    let Solo { chromatics: strategy, loot: strategy_loot, .. } = play_strategy(seed, k, &[], &TUNED);
 
     let (mut st, mut rng) = start(seed, k, &[]);
     let (mut decisions, mut overruled) = (0, 0);
@@ -74,7 +78,7 @@ pub fn play(seed: u32, k: u32, rollouts: usize) -> Game {
             break;
         }
     }
-    Game { strategy, advice: st.vault.len(), decisions, overruled }
+    Game { strategy, advice: st.vault.len(), strategy_loot, advice_loot: st.loot(), decisions, overruled }
 }
 
 /// Games 0..`games` of `seed` on `threads` threads, in game order.
@@ -87,6 +91,8 @@ pub fn bench(games: u32, rollouts: usize, seed: u32, threads: usize) -> Vec<Game
 pub struct Solo {
     /// Chromatics vaulted.
     pub chromatics: usize,
+    /// Riot loot, in Chromatics (`State::loot`).
+    pub loot: f64,
     pub stats: Stats,
 }
 
@@ -94,7 +100,7 @@ pub struct Solo {
 pub fn play_strategy(seed: u32, k: u32, held: &[Tool], p: &Params) -> Solo {
     let (mut st, mut rng) = start(seed, k, held);
     playout(&mut st, p, &mut rng);
-    Solo { chromatics: st.vault.len(), stats: st.stats }
+    Solo { chromatics: st.vault.len(), loot: st.loot(), stats: st.stats }
 }
 
 /// Games 0..`games` of `seed` played by the strategy alone on weights `p`,
@@ -140,11 +146,13 @@ pub fn mean_se(xs: &[f64]) -> (f64, f64) {
     (mean, (var / n).sqrt())
 }
 
-/// Chromatics per run, each as (mean, standard error); `gain` is advice
-/// minus strategy, paired by seed.
+/// Chromatics and loot per run, each as (mean, standard error); `gain` is
+/// advice minus strategy in loot, paired by seed.
 pub struct Summary {
     pub strategy: (f64, f64),
     pub advice: (f64, f64),
+    pub strategy_loot: (f64, f64),
+    pub advice_loot: (f64, f64),
     pub gain: (f64, f64),
     pub decisions: usize,
     pub overruled: usize,
@@ -155,7 +163,9 @@ pub fn summarize(games: &[Game]) -> Summary {
     Summary {
         strategy: of(|g| g.strategy as f64),
         advice: of(|g| g.advice as f64),
-        gain: of(|g| g.advice as f64 - g.strategy as f64),
+        strategy_loot: of(|g| g.strategy_loot),
+        advice_loot: of(|g| g.advice_loot),
+        gain: of(|g| g.advice_loot - g.strategy_loot),
         decisions: games.iter().map(|g| g.decisions).sum(),
         overruled: games.iter().map(|g| g.overruled).sum(),
     }
@@ -180,7 +190,8 @@ mod tests {
             assert_eq!(st.phase, Phase::Ended);
             assert_eq!(g.strategy, st.vault.len(), "game {k}");
             assert!(g.decisions > 0 && g.overruled <= g.decisions);
-            assert_eq!(play_strategy(1, k as u32, &[], &TUNED), Solo { chromatics: g.strategy, stats: st.stats }, "game {k}");
+            assert_eq!(play_strategy(1, k as u32, &[], &TUNED), Solo { chromatics: g.strategy, loot: st.loot(), stats: st.stats }, "game {k}");
+            assert_eq!(g.strategy_loot, st.loot(), "game {k}");
         }
         let s = summarize(&games);
         for x in [s.strategy.0, s.strategy.1, s.advice.0, s.advice.1, s.gain.0, s.gain.1] {

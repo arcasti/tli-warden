@@ -6,7 +6,7 @@ use crate::board::{CellModel, EventMark, Model, build_state};
 use crate::engine::data::{Beast, Gift, RAINBOW, Tool, VAULT_CAP, data};
 use crate::engine::rules::treasure_picks;
 use crate::engine::text::{cell_label, tool_name};
-use crate::reader::model::{Warning, WarningKind, to_model};
+use crate::reader::model::{RUN_DAYS, Warning, WarningKind, to_model};
 use crate::reader::panels::{Panels, Screen, read_panels_titled};
 use crate::reader::scene::{CELLS, Scene, read_scene};
 use crate::reader::layout::{is_16_9, lay_out_scaled};
@@ -95,6 +95,15 @@ impl DaysClock {
         let left = self.update(read);
         (left, matches!((before, left), (Some(b), Some(l)) if l > b))
     }
+}
+
+/// The days left at a run's start.
+const RUN_START_DAYS: u32 = RUN_DAYS as u32;
+
+/// Whether `screen` is a pick that covers the board with no board read under
+/// it (`under`): the run start is assumed.
+fn run_start(screen: Screen, under: Option<&Model>) -> bool {
+    matches!(screen, Screen::InstrumentPick | Screen::TreasurePick) && under.is_none()
 }
 
 /// The warning for a days count kept from an earlier reading, when `read`
@@ -675,7 +684,20 @@ impl Session {
             self.meal = self.meal_picked();
         }
         self.days_read = panels.days;
-        let (days, new_run) = self.days.update_run(panels.days);
+        // A pick over no board read is taken as the run start (see `to_model`),
+        // and its hidden counter as the run start's too: a count kept from an
+        // earlier read or a past session can be stale. A lower count kept is a
+        // past run's, so the instruments and theme held with it go.
+        let (days, new_run) = if run_start(panels.screen, self.board.as_ref()) && panels.days.is_none() {
+            let new_run = self.days.left.is_some_and(|left| left < RUN_START_DAYS);
+            if new_run {
+                self.held_before_higher = self.tools.len();
+            }
+            self.days = DaysClock { left: Some(RUN_START_DAYS), higher: None };
+            (Some(RUN_START_DAYS), new_run)
+        } else {
+            self.days.update_run(panels.days)
+        };
         panels.days = days;
         if new_run && let Some(log) = &mut self.log {
             log.new_run();
@@ -995,6 +1017,7 @@ impl Session {
         let chains = self.tools.contains(&Tool::Chains);
         let vaulted = self.consume.as_ref().filter(|_| panels.screen == Screen::TreasurePick).and_then(|m| vaulted(m, self.meal, chains));
         let under = vaulted.as_ref().map(|(m, _, _)| m).or(self.board.as_ref());
+        let assumed_days = run_start(panels.screen, under) && self.days_read.is_none();
         let (mut model, mut warnings) = to_model(scene, panels, &self.tools, under);
         warnings.retain(|w| steady_key(w).and_then(|k| self.steady.get(&k)).is_none_or(|&n| n <= STEADY_READS));
         if let Some((_, n, removed)) = vaulted {
@@ -1015,8 +1038,9 @@ impl Session {
             };
             warnings.push(Warning { cell: None, kind: WarningKind::Read, text });
         }
-        // The Consume target screen always hides the counter.
-        if panels.screen != Screen::ChainTarget {
+        // The Consume target screen always hides the counter; the run start's
+        // count is assumed, not kept.
+        if panels.screen != Screen::ChainTarget && !assumed_days {
             warnings.extend(kept_days(self.days_read, panels.days));
         }
         warnings.extend(self.notes.iter().map(|text| Warning { cell: None, kind: WarningKind::Read, text: text.clone() }));

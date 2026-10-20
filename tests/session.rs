@@ -406,6 +406,36 @@ fn hidden_counter_keeps_the_day() {
     assert_eq!(pick.model.vault, [board.model.vault.clone(), vec![beast]].concat());
 }
 
+/// A pick read before any board is the run start's, its hidden counter too: a
+/// stale count saved at 0 days left gives way to day 1, and the board read
+/// after it is the same run.
+#[test]
+fn hidden_counter_on_the_run_start_pick_is_day_one() {
+    let dir = common::frames();
+    let frames = ["rec1-t031.png", "rec1-t071.png"].map(|f| dir.join(f));
+    if frames.iter().any(|f| !f.is_file()) {
+        println!("skipped: {} is missing", dir.display());
+        return;
+    }
+    let mut s = Session::new(20, vec![Tool::Chains], None, Some(0));
+    let mut read = |f: &Path| {
+        s.read_in_background(load_png(f).unwrap());
+        s.wait();
+        s.reading.clone().unwrap()
+    };
+    let pick = read(&frames[0]);
+    assert_eq!(pick.screen, Screen::InstrumentPick);
+    assert_eq!((pick.days_left, pick.model.day), (Some(20), 1));
+    assert!(pick.warnings.iter().all(|w| !w.text.contains("kept from the last read")), "{:?}", pick.warnings);
+    // The count 0 kept from the settings was the last run's: its Chains go.
+    assert!(pick.warnings.iter().any(|w| w.text == "A new run: the held instruments were cleared."), "{:?}", pick.warnings);
+    for _ in 0..2 {
+        let board = read(&frames[1]);
+        assert_eq!((board.screen, board.days_left), (Screen::Manage, Some(16)));
+        assert!(board.warnings.iter().all(|w| !w.text.starts_with("A new run")), "{:?}", board.warnings);
+    }
+}
+
 /// View Prison Status over a treasure pick (rec5-t018) shows the real board:
 /// the pick stays on show, solved on that board in place of the inferred one
 /// (rec5-t012), and the pick shown again (rec5-t028) keeps it.

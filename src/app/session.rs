@@ -1081,15 +1081,9 @@ impl Session {
             return;
         }
         st.theme = self.theme;
-        // A treasure pick offers the gifts read on it, all four when fewer
-        // than 2 read, for the picks the treasure has left.
-        if let Some(Pending::Gift { options, picks }) = st.pending.first_mut() {
-            let d = data();
-            let offers = self.scene.as_ref().map_or(&[][..], |(_, p, _)| &p.offers[..]);
-            let read: Vec<Gift> = offers.iter().filter_map(|o| d.gift_names.iter().position(|n| n == o)).map(|i| Gift::ALL[i]).collect();
-            if read.len() >= 2 {
-                *options = read;
-            }
+        // A treasure pick always offers all four gifts (build_state lists
+        // them), for the picks the treasure has left.
+        if let Some(Pending::Gift { picks, .. }) = st.pending.first_mut() {
             *picks = treasure_picks(self.theme).saturating_sub(self.treasure.unwrap_or(0)).max(1);
         }
         // A Consume target screen picks the day's first bite, or a chain's

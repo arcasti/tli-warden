@@ -119,7 +119,11 @@ const CARDS: (Rect, f32) = (Rect::new(440, 740, 1040, 200), 1.5);
 const TARGET: (Rect, f32) = (Rect::new(700, 800, 520, 50), 2.0);
 const CANCEL: (Rect, f32) = (Rect::new(1600, 740, 318, 140), 2.0);
 const BANNER: (Rect, f32) = (Rect::new(760, 400, 400, 130), 2.0);
-const PICK: (Rect, f32) = (Rect::new(0, 130, 1918, 800), 1.0);
+/// The card names on the Select a Torture Instrument screen, one row across
+/// the cards at y 480-515 (rec1-t031, a small font for "Ferocious Beast's
+/// Ravenous Chains"); the hovered card is raised, its name at about y 435-470.
+/// The descriptions start below about y 550.
+const NAMES: (Rect, f32) = (Rect::new(0, 420, 1918, 125), 1.0);
 // The game's dialogs: "Tip" over "Network request timeout", and the title
 // of a Prison Incident popup.
 const DIALOG: (Rect, f32) = (Rect::new(560, 340, 800, 260), 1.0);
@@ -384,9 +388,9 @@ pub fn icon_score(img: &Rgba) -> f32 {
 
 pub fn read_panels(img: &Rgba) -> Panels {
     let d = data();
-    // Every fixed region but the pick screens' cards is read at once, whether the screen needs it or not.
-    const REGIONS: [(Rect, f32); 13] = [DAYS, TITLE, HEADING, CARDS, TARGET, CANCEL, BANNER, DIALOG, INCIDENT, THEME, OBJECTIVE, STATUS, RIOT];
-    let [days_lines, title, heading, cards, target, cancel, banner, dialog, incident, theme_lines, objective_lines, status, riot] =
+    // Every fixed region is read at once, whether the screen needs it or not.
+    const REGIONS: [(Rect, f32); 14] = [DAYS, TITLE, HEADING, CARDS, TARGET, CANCEL, BANNER, DIALOG, INCIDENT, THEME, OBJECTIVE, STATUS, RIOT, NAMES];
+    let [days_lines, title, heading, cards, target, cancel, banner, dialog, incident, theme_lines, objective_lines, status, riot, name_lines] =
         ocr_all(img, &REGIONS);
     let mut p = Panels {
         screen: Screen::Unknown,
@@ -404,12 +408,13 @@ pub fn read_panels(img: &Rgba) -> Panels {
     if has(&title, "Select a Torture Instrument", 0.75) {
         p.screen = Screen::InstrumentPick;
         let names: Vec<String> = d.tool_ids.iter().map(|&t| d.tool_names[t as usize].clone()).collect();
-        let found = offers(&ocr(img, PICK.0, PICK.1), &names);
+        let found = offers(&name_lines, &names);
         p.instruments = found.iter().map(|&i| d.tool_ids[i]).collect();
         p.offers = found.into_iter().map(|i| names[i].clone()).collect();
     } else if has(&title, "Warden's Treasure", 0.75) || title.iter().any(|l| squash(&l.text).contains("treasure")) {
         p.screen = Screen::TreasurePick;
-        p.offers = offers(&ocr(img, PICK.0, PICK.1), &d.gift_names).into_iter().map(|i| d.gift_names[i].clone()).collect();
+        // The treasure always offers the four gifts, in Gift::ALL order left to right.
+        p.offers = d.gift_names.clone();
     } else if has(&status, "Return to Selection", 0.75) {
         p.screen = Screen::PrisonStatus;
     } else if has(&target, "Select an Inmate to Consume", 0.75) || has(&cancel, "Cancel", 0.8) {

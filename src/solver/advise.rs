@@ -37,7 +37,7 @@ pub fn advise(pick: Option<&Pick>, ranking: &[SolveOption], live: bool) -> Optio
     let why = match pick {
         Some(p) if mine == Some(0) => p.why.clone(),
         // Within the margin of error of the first row, the pick is as good.
-        Some(p) if mine.is_some_and(|k| (best.mean - ranking[k].mean).abs() <= 1.96 * ranking[k].gap_se) => {
+        Some(p) if mine.is_some_and(|k| also_good(ranking, Some(0)).contains(&k)) => {
             format!("The playouts rate it as good as the strategy's pick ({}).", p.label)
         }
         Some(p) => format!("The playouts found a better move than the strategy's pick ({}).", p.label),

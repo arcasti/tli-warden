@@ -39,31 +39,30 @@ pub struct Line {
 /// (small game text reads better at 2-3x). Empty when the region is empty
 /// or OCR is not available.
 pub fn ocr(img: &Rgba, rect: Rect, scale: f32) -> Vec<Line> {
-    ocr_all(img, &[(rect, scale)]).pop().unwrap_or_default()
+    let [lines] = ocr_all(img, &[(rect, scale)]);
+    lines
 }
 
 /// The lines of each `(rect, scale)` region as `ocr` reads them, in order,
 /// with the regions read at the same time.
-pub fn ocr_all(img: &Rgba, regions: &[(Rect, f32)]) -> Vec<Vec<Line>> {
+pub fn ocr_all<const N: usize>(img: &Rgba, regions: &[(Rect, f32); N]) -> [Vec<Line>; N] {
     let inputs: Vec<Option<Rgba>> = regions.iter().map(|&(rect, scale)| prepare(img, rect, scale)).collect();
-    regions
-        .iter()
-        .zip(imp::recognize_all(inputs))
-        .map(|(&(rect, scale), lines)| {
-            lines
-                .into_iter()
-                .map(|(text, [x, y, lw, lh])| Line {
-                    text,
-                    rect: Rect::new(
-                        rect.x + (x / scale).round() as i32,
-                        rect.y + (y / scale).round() as i32,
-                        (lw / scale).round() as i32,
-                        (lh / scale).round() as i32,
-                    ),
-                })
-                .collect()
-        })
-        .collect()
+    let mut read = imp::recognize_all(inputs).into_iter();
+    regions.map(|(rect, scale)| {
+        read.next()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(text, [x, y, lw, lh])| Line {
+                text,
+                rect: Rect::new(
+                    rect.x + (x / scale).round() as i32,
+                    rect.y + (y / scale).round() as i32,
+                    (lw / scale).round() as i32,
+                    (lh / scale).round() as i32,
+                ),
+            })
+            .collect()
+    })
 }
 
 /// The OCR input for `rect`: the crop upscaled by `scale` with its contrast

@@ -386,11 +386,8 @@ pub fn read_panels(img: &Rgba) -> Panels {
     let d = data();
     // Every fixed region but the pick screens' cards is read at once, whether the screen needs it or not.
     const REGIONS: [(Rect, f32); 13] = [DAYS, TITLE, HEADING, CARDS, TARGET, CANCEL, BANNER, DIALOG, INCIDENT, THEME, OBJECTIVE, STATUS, RIOT];
-    let Ok([days_lines, title, heading, cards, target, cancel, banner, dialog, incident, theme_lines, objective_lines, status, riot]) =
-        <[Vec<Line>; 13]>::try_from(ocr_all(img, &REGIONS))
-    else {
-        unreachable!("ocr_all returns one reading per region")
-    };
+    let [days_lines, title, heading, cards, target, cancel, banner, dialog, incident, theme_lines, objective_lines, status, riot] =
+        ocr_all(img, &REGIONS);
     let mut p = Panels {
         screen: Screen::Unknown,
         days: days(&days_lines),

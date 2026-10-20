@@ -22,17 +22,17 @@ pub fn eats(beast: Beast) -> &'static [Beast] {
 
 /// What of the state the eating rules read: the species instruments held and
 /// the Cage Fight theme.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Diet {
-    pub guillotine: bool,
-    pub maul: bool,
-    pub crown: bool,
-    pub skewer: bool,
-    pub cage_fight: bool,
+#[derive(Clone, Copy)]
+struct Diet {
+    guillotine: bool,
+    maul: bool,
+    crown: bool,
+    skewer: bool,
+    cage_fight: bool,
 }
 
 impl Diet {
-    pub fn of(s: &State) -> Diet {
+    fn of(s: &State) -> Diet {
         Diet {
             guillotine: s.has(Tool::Guillotine),
             maul: s.has(Tool::Maul),
@@ -54,7 +54,7 @@ impl Diet {
     /// The species instruments widen the chain: the Fanged Guillotine lets a Wolf
     /// eat lower rarities, the Elephant-Foot Maul a Mammoth higher ones, the Iron
     /// Crown a Lion any same-rarity inmate, the Skewered Rat Heads a Rat a Rat.
-    pub fn can_eat(self, eater: &Inmate, meal: Option<&Inmate>) -> bool {
+    fn can_eat(self, eater: &Inmate, meal: Option<&Inmate>) -> bool {
         let Some(meal) = meal else { return false };
         if eater.id == meal.id || eater.tier >= RAINBOW {
             return false;
@@ -134,7 +134,8 @@ pub fn eater_mask(s: &State) -> u32 {
     for c in &s.cells {
         if c.sealed {
             if c.scratch && let Some(h) = c.hidden {
-                scratched |= 1u32.checked_shl(h.tier as u32).unwrap_or(0);
+                debug_assert!((0..=RAINBOW).contains(&h.tier));
+                scratched |= 1 << h.tier;
             }
         } else if let Some(i) = c.inmate {
             let bit = 1 << class(&i);

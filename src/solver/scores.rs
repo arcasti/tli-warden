@@ -141,7 +141,7 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
         activation(ctx, i.tier as usize, i.beast.index(), &mut comp, crowd, swap_left)
     };
     let held = HELD_TERMS.iter().any(|&t| st.has(t)).then(|| Held::of(ctx, &loss));
-    let tiers = gift_tiers(ctx.st, ctx.p);
+    let tiers = gift_tiers(ctx.st, ctx.p, (ctx.v, ctx.r, ctx.last_day));
     let mut out = Vec::with_capacity(cells.len());
     for &n in cells {
         let c = &st.cells[n];
@@ -523,8 +523,7 @@ fn board_value(st: &State, v: &[f64; 6], r: f64) -> f64 {
 /// inmates it took to make: 2^t. With fewer than 4 days left the tiers still
 /// to climb weigh more than the inmates spent, 3^t. The last day keeps the
 /// strategy's own values, where only a Chromatic counts.
-fn gift_tiers(st: &State, p: &Params) -> ([f64; 6], f64) {
-    let (v, r, last_day) = tier_values(st, p);
+fn gift_tiers(st: &State, p: &Params, (v, r, last_day): ([f64; 6], f64, bool)) -> ([f64; 6], f64) {
     if last_day {
         return (v, r);
     }
@@ -549,7 +548,7 @@ pub fn best_by_board<'k>(ctx: &Ctx, options: &[&'k str], gift: bool, roll: &mut 
                 continue;
             }
             let (v, r) = if gift {
-                gift_tiers(&trial, ctx.p)
+                gift_tiers(&trial, ctx.p, tier_values(&trial, ctx.p))
             } else {
                 let (v, r, _) = tier_values(&trial, ctx.p);
                 (v, r)

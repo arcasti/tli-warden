@@ -535,6 +535,7 @@ impl eframe::App for WardenApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ui, |ui| {
             self.tab_row(ui);
+            ui.add_space(6.0);
             self.notice_line(ui);
             if self.settings.auto_read
                 && let Some(s) = &self.auto_status

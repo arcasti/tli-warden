@@ -17,10 +17,9 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 /// One `read` line of a run log.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Read {
     pub at: String,
-    pub screen: String,
     pub model: Model,
 }
 
@@ -38,14 +37,14 @@ pub fn parse_log(text: &str) -> Vec<Read> {
         if out.last().is_some_and(|r| r.model == model) {
             continue;
         }
-        let text = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-        out.push(Read { at: text("at"), screen: text("screen"), model });
+        let at = v.get("at").and_then(Value::as_str).unwrap_or("").to_string();
+        out.push(Read { at, model });
     }
     out
 }
 
 /// The `*.jsonl` run logs under each path (a file, or a directory searched
-/// recursively), without the drops.jsonl and mid.jsonl side files.
+/// recursively).
 pub fn log_files(paths: &[PathBuf]) -> Vec<PathBuf> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -60,8 +59,7 @@ pub fn log_files(paths: &[PathBuf]) -> Vec<PathBuf> {
         }
     }
     fn is_log(p: &Path) -> bool {
-        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        p.extension().is_some_and(|e| e.eq_ignore_ascii_case("jsonl")) && name != "drops.jsonl" && name != "mid.jsonl"
+        p.extension().is_some_and(|e| e.eq_ignore_ascii_case("jsonl"))
     }
     let mut out = Vec::new();
     for p in paths {
@@ -89,7 +87,7 @@ struct CellView {
 
 /// What the reader sees of a state.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct View {
+struct View {
     day: u32,
     position: usize,
     vault: usize,
@@ -97,7 +95,7 @@ pub struct View {
     cells: Vec<CellView>,
 }
 
-pub fn view(st: &State) -> View {
+fn view(st: &State) -> View {
     let mut tools: Vec<&'static str> = st.tools.iter().map(|t| t.key()).collect();
     tools.sort_unstable();
     let cells = st
@@ -130,6 +128,22 @@ pub enum Field {
     Marker,
 }
 
+impl Field {
+    fn name(self) -> &'static str {
+        match self {
+            Field::Sealed => "sealed",
+            Field::Inmate => "inmate",
+            Field::Beast => "beast",
+            Field::Tier => "tier",
+            Field::Known => "known",
+            Field::Hidden => "hidden tier",
+            Field::Scratch => "scratch",
+            Field::Nest => "nest",
+            Field::Marker => "marker",
+        }
+    }
+}
+
 /// Where the engine's result and the read board differ.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "what", rename_all = "lowercase")]
@@ -143,23 +157,13 @@ pub enum Mismatch {
 
 impl Mismatch {
     /// A short name to group mismatches by.
-    pub fn kind(&self) -> &'static str {
+    pub fn kind(&self) -> String {
         match self {
-            Mismatch::Cell { field, .. } => match field {
-                Field::Sealed => "cell sealed",
-                Field::Inmate => "cell inmate",
-                Field::Beast => "cell beast",
-                Field::Tier => "cell tier",
-                Field::Known => "cell known",
-                Field::Hidden => "cell hidden tier",
-                Field::Scratch => "cell scratch",
-                Field::Nest => "cell nest",
-                Field::Marker => "cell marker",
-            },
-            Mismatch::Day { .. } => "day",
-            Mismatch::Position { .. } => "position",
-            Mismatch::Vault { .. } => "vault",
-            Mismatch::Tools { .. } => "tools",
+            Mismatch::Cell { field, .. } => format!("cell {}", field.name()),
+            Mismatch::Day { .. } => "day".to_string(),
+            Mismatch::Position { .. } => "position".to_string(),
+            Mismatch::Vault { .. } => "vault".to_string(),
+            Mismatch::Tools { .. } => "tools".to_string(),
         }
     }
 }
@@ -168,7 +172,7 @@ impl Mismatch {
 /// rarities seen behind the doors the engine opened. `before` is the view of
 /// the first board: a door it had sealed that both the engine and the read
 /// show open matches whatever is inside, since door contents are random.
-pub fn diff(before: &View, engine: &View, read: &View) -> (Vec<Mismatch>, Vec<i32>) {
+fn diff(before: &View, engine: &View, read: &View) -> (Vec<Mismatch>, Vec<i32>) {
     let mut out = Vec::new();
     let mut reveals = Vec::new();
     if engine.day != read.day {
@@ -227,15 +231,16 @@ pub fn diff(before: &View, engine: &View, read: &View) -> (Vec<Mismatch>, Vec<i3
 }
 
 /// The candidate move whose result reads closest to the second board.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Explanation {
     pub label: String,
-    pub action: Action,
+    /// Whether the move, or the first move of a pair, is End.
+    pub end: bool,
     pub mismatches: Vec<Mismatch>,
     pub reveals: Vec<i32>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum Verdict {
     /// The two boards read the same: reader noise between identical boards.
     Unchanged,
@@ -254,18 +259,23 @@ pub fn explain(a: &Model, b: &Model, seeds: u32) -> Verdict {
         return Verdict::Unchanged;
     }
     let mut best: Option<Explanation> = None;
+    // Keeps `s` as the best when it reads closer to `read`; true once it matches.
+    let consider = |best: &mut Option<Explanation>, s: &State, label: &dyn Fn() -> String, end: bool| {
+        let (mismatches, reveals) = diff(&before, &view(s), &read);
+        if best.as_ref().is_some_and(|b| mismatches.len() >= b.mismatches.len()) {
+            return false;
+        }
+        let done = mismatches.is_empty();
+        *best = Some(Explanation { label: label(), end, mismatches, reveals });
+        done
+    };
     'moves: for c in candidates(&st) {
         for seed in 0..seeds {
             let mut s = st.clone();
             hide_future(&mut s, seed);
             apply(&mut s, &c.action);
-            let (mismatches, reveals) = diff(&before, &view(&s), &read);
-            if best.as_ref().is_none_or(|b| mismatches.len() < b.mismatches.len()) {
-                let done = mismatches.is_empty();
-                best = Some(Explanation { label: c.label.clone(), action: c.action.clone(), mismatches, reveals });
-                if done {
-                    break 'moves;
-                }
+            if consider(&mut best, &s, &|| c.label.clone(), c.action == Action::End) {
+                break 'moves;
             }
         }
     }
@@ -279,13 +289,8 @@ pub fn explain(a: &Model, b: &Model, seeds: u32) -> Verdict {
                 for c2 in candidates(&s) {
                     let mut s2 = s.clone();
                     apply(&mut s2, &c2.action);
-                    let (mismatches, reveals) = diff(&before, &view(&s2), &read);
-                    if best.as_ref().is_some_and(|b| mismatches.len() < b.mismatches.len()) {
-                        let done = mismatches.is_empty();
-                        best = Some(Explanation { label: format!("{}, then {}", c.label, c2.label), action: c.action.clone(), mismatches, reveals });
-                        if done {
-                            break 'pairs;
-                        }
+                    if consider(&mut best, &s2, &|| format!("{}, then {}", c.label, c2.label), c.action == Action::End) {
+                        break 'pairs;
                     }
                 }
             }
@@ -295,7 +300,7 @@ pub fn explain(a: &Model, b: &Model, seeds: u32) -> Verdict {
 }
 
 /// A transition no candidate explains.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 pub struct Unexplained {
     pub file: String,
     pub a_at: String,
@@ -306,7 +311,7 @@ pub struct Unexplained {
 }
 
 /// The tallies over every transition replayed.
-#[derive(Clone, Debug, Default)]
+#[derive(Default)]
 pub struct Report {
     pub transitions: usize,
     /// A new run started, or a board read blank.
@@ -333,7 +338,7 @@ impl Report {
                 continue;
             }
             let verdict = explain(&a.model, &b.model, seeds);
-            let end = matches!(&verdict, Verdict::Best(e) if e.action == Action::End);
+            let end = matches!(&verdict, Verdict::Best(e) if e.end);
             if verdict != Verdict::Unchanged {
                 let spawned = a.model.cells.iter().zip(&b.model.cells).filter(|(ca, cb)| ca.event().is_none() && cb.event().is_some()).count();
                 let row = self.markers.entry((format!("{:?}", a.model.step).to_lowercase(), end)).or_default();
@@ -348,8 +353,7 @@ impl Report {
                 Verdict::NoCandidates => (None, Vec::new()),
                 Verdict::Best(e) => {
                     if e.mismatches.is_empty() {
-                        // Only an explained transition's doors count: in the
-                        // others the inmate may have risen after the door opened.
+                        // An inmate may rise after its door opens.
                         for &t in &e.reveals {
                             if let Some(n) = self.doors.get_mut(t as usize) {
                                 *n += 1;
@@ -377,9 +381,9 @@ impl Report {
             self.explained,
             self.unexplained.len()
         );
-        let mut kinds: BTreeMap<&str, (usize, Vec<String>)> = BTreeMap::new();
+        let mut kinds: BTreeMap<String, (usize, Vec<String>)> = BTreeMap::new();
         for u in &self.unexplained {
-            let mut seen: Vec<&str> = if u.label.is_none() { vec!["no candidates"] } else { u.mismatches.iter().map(Mismatch::kind).collect() };
+            let mut seen: Vec<String> = if u.label.is_none() { vec!["no candidates".to_string()] } else { u.mismatches.iter().map(Mismatch::kind).collect() };
             seen.sort_unstable();
             seen.dedup();
             for k in seen {
@@ -393,7 +397,7 @@ impl Report {
         let mut kinds: Vec<_> = kinds.into_iter().collect();
         kinds.sort_by_key(|k| std::cmp::Reverse(k.1.0));
         let _ = writeln!(s, "\nunexplained by mismatch kind:");
-        for (k, (n, examples)) in kinds.iter().take(15) {
+        for (k, (n, examples)) in &kinds {
             let _ = writeln!(s, "  {k:<18} {n:>6}  {}", examples.join(" "));
         }
         let w = weights(&data().tier_weights);
@@ -407,7 +411,7 @@ impl Report {
         let _ = writeln!(s, "\nnew markers by step: transitions  markers  per transition");
         for ((step, end), (n, m)) in &self.markers {
             let how = if *end { "end" } else { "other" };
-            let _ = writeln!(s, "  {step:<8} {how:<6} {n:>8} {m:>8} {:>8.3}", f64::from(*m) / f64::from((*n).max(1)));
+            let _ = writeln!(s, "  {step:<8} {how:<6} {n:>8} {m:>8} {:>8.3}", f64::from(*m) / f64::from(*n));
         }
         s
     }

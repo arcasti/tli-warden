@@ -679,11 +679,23 @@ fn off_board_frame_then_run_end() {
     assert!(s.tools.is_empty() && s.take_tools_changed(), "{:?}", s.tools);
     assert_eq!(s.days_left(), None);
 
-    // The next board starts over.
+    // A mid-run board between runs is a screen after the run: kept.
     s.read_in_background(load_png(&dir.join("rec4-t070.png")).unwrap());
     s.wait();
+    assert_eq!(s.run_over.as_deref(), Some(line.as_str()));
+    assert!(s.reading.is_none());
+    assert_eq!(s.missed.as_deref(), Some("The run is over: waiting for the next run."));
+
+    // A board with 20 days left (rec1-t029) starts the next run.
+    let start = dir.join("rec1-t029.png");
+    if !start.is_file() {
+        println!("skipped: {} is missing", start.display());
+        return;
+    }
+    s.read_in_background(load_png(&start).unwrap());
+    s.wait();
     assert!(s.run_over.is_none());
-    assert_eq!(s.reading.as_ref().unwrap().screen, Screen::Manage);
+    assert_eq!(s.reading.as_ref().unwrap().days_left, Some(20));
 }
 
 /// The riot screen after the last day (rec4-t412, day 20) logs one run_end
@@ -724,6 +736,24 @@ fn run_end_logs_once() {
     assert_eq!(run_ends(&first), vec![serde_json::json!(last.model.vault.len())]);
     assert!(run_ends(&next).is_empty());
     std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// The riot screen missed: on the last day (rec4-t412, 0 days left), a
+/// board with the counter hidden and far from the board on show (rec1-t073,
+/// another run's Consume target screen) is a screen after the run: it ends
+/// the run and is not installed.
+#[test]
+fn far_board_on_the_last_day_ends_the_run() {
+    if !have(&["rec4-t412.png", "rec1-t073.png"]) {
+        return;
+    }
+    let mut s = Session::new(20, Vec::new(), None, None);
+    let last = read_next(&mut s, "rec4-t412.png");
+    assert_eq!(last.days_left, Some(0));
+    s.read_in_background(frame("rec1-t073.png"));
+    s.wait();
+    assert!(s.run_over.is_some());
+    assert!(s.reading.is_none());
 }
 
 /// A game dialog keeps the last reading and its solve on show.

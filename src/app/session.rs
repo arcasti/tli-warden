@@ -285,6 +285,26 @@ const POPUP: &str = "A popup covers the game: showing the last reading.";
 const OFF_BOARD: &str = "The prison board is not on screen: showing the last reading.";
 /// How the line shown over the last reading after the run theme scroll starts.
 const THEME_READ: &str = "The run's theme: ";
+/// The line for a read kept between runs, see [`Session::install`].
+const RUN_OVER_WAIT: &str = "The run is over: waiting for the next run.";
+
+/// Cells in which a board read with a hidden counter on the run's last day
+/// must differ from the board on show to be taken as a screen after the run
+/// (the riot screen missed). In the cloud run logs such reads differed from
+/// the last day's board in 6 to 14 of 16 cells; 43 of about 16,000 same-day
+/// read pairs in normal play differed in 6 or more.
+const AFTER_RUN_CELLS: usize = 6;
+
+/// What the player sees of a cell for [`AFTER_RUN_CELLS`]: locked or not,
+/// the beast and the tier.
+fn cell_sight(cell: &CellModel) -> (bool, Option<Beast>, Option<i64>) {
+    match cell {
+        CellModel::Sealed { .. } => (true, None, None),
+        CellModel::Inmate { beast, tier, .. } | CellModel::Scouted { beast, tier, .. } => (false, Some(*beast), Some(*tier)),
+        CellModel::Scratch { tier, .. } => (false, None, Some(*tier)),
+        _ => (false, None, None),
+    }
+}
 
 /// Playouts per option before the playouts can overrule the strategy's pick.
 const LIVE_MIN: usize = 150;
@@ -302,8 +322,8 @@ type Scanned = (Scene, Panels, (usize, usize), Option<Rgba>, f32);
 enum Taken {
     /// A reading was installed.
     Installed,
-    /// A theme scroll, a popup or a screen without the board: nothing was
-    /// installed; the line says so.
+    /// A theme scroll, a popup, a screen without the board or a read between
+    /// runs: nothing was installed; the line says so.
     Kept(String),
     /// Nothing changed, or the riot screen ended the run.
     Skipped,
@@ -640,7 +660,12 @@ impl Session {
     /// frame without the board (see [`Panels::off_board`]) or a frame of a
     /// window narrower than 16:9 (see [`shape_line`]) keeps the last
     /// reading and its solve on show, with a line that says so. The riot
-    /// screen ends the run, see [`Session::end_run`].
+    /// screen ends the run, see [`Session::end_run`]. Until the next run
+    /// starts (a days counter reading at least one under the run's length,
+    /// or an instrument pick with the counter hidden), a read is kept with
+    /// [`RUN_OVER_WAIT`]. On the run's last day a board read with the counter
+    /// hidden that differs from the board on show in [`AFTER_RUN_CELLS`]
+    /// cells or more is taken as the riot screen missed and ends the run.
     ///
     /// The reader can't name held instruments, so they follow the advice: a
     /// new run (see [`DaysClock`]) clears them, and the instrument advised on
@@ -714,6 +739,28 @@ impl Session {
         if panels.screen == Screen::RunEnd {
             self.end_run();
             return Taken::Skipped;
+        }
+        // Between runs only a run start is taken: the screens players stay on
+        // after the riot (chest rooms and such) read as junk boards.
+        let starts_run = panels.days.is_some_and(|left| i64::from(left) >= RUN_DAYS - 1)
+            || (panels.screen == Screen::InstrumentPick && panels.days.is_none());
+        if self.run_over.is_some() && !starts_run {
+            self.missed = Some(RUN_OVER_WAIT.to_string());
+            return Taken::Kept(RUN_OVER_WAIT.to_string());
+        }
+        // The riot screen missed: a board with a hidden counter on the last
+        // day, far from the board on show, is a screen after the run.
+        if self.days.left == Some(0)
+            && panels.days.is_none()
+            && matches!(panels.screen, Screen::Patrol | Screen::Manage | Screen::ChainTarget | Screen::Unknown)
+            && let Some(r) = &self.reading
+        {
+            let model = to_model(&scene, &panels, &self.tools, None, self.run_days()).0;
+            let differ = model.cells.iter().zip(&r.model.cells).filter(|(a, b)| cell_sight(a) != cell_sight(b)).count();
+            if differ >= AFTER_RUN_CELLS {
+                self.end_run();
+                return Taken::Skipped;
+            }
         }
         self.run_over = None;
         if self.reading.as_ref().is_some_and(|r| r.screen == Screen::ChainTarget) {

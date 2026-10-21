@@ -135,6 +135,9 @@ fn drop_rust_only(rust: &mut Value, js: &Value) {
     if js["params"].get("vaultCap").is_none() {
         rust["params"].as_object_mut().unwrap().remove("vaultCap");
     }
+    if js["params"].get("maiden").is_none() {
+        rust["params"].as_object_mut().unwrap().remove("maiden");
+    }
     for (r, j) in rust["pending"].as_array_mut().unwrap().iter_mut().zip(js["pending"].as_array().unwrap()) {
         for key in ["reason", "picks"] {
             if j.get(key).is_none() {
@@ -487,10 +490,22 @@ fn the_severed_iron_maiden_lifts_a_rare_among_rares() {
     // below, so it rises 3 tiers to Chromatic.
     let rares = [(2, 2), (8, 2), (11, 2)];
     let (plain, plain_value) = replace(&replace_board(serde_json::json!([]), 1, &rares));
-    let (maiden, maiden_value) = replace(&replace_board(serde_json::json!(["maiden"]), 1, &rares));
+    // A read board gives the Maiden no rise; price it as the engine rule has it.
+    let mut st = replace_board(serde_json::json!(["maiden"]), 1, &rares);
+    st.params.maiden = true;
+    let (maiden, maiden_value) = replace(&st);
     assert_eq!(maiden[2], 0.0);
     assert!((maiden[5] - plain[2]).abs() < 1e-12, "{maiden:?}");
     assert!(maiden_value > plain_value + 1e-6, "{maiden_value} {plain_value}");
+}
+
+#[test]
+fn a_read_board_gives_the_maiden_no_rise() {
+    let rares = [(2, 2), (8, 2), (11, 2)];
+    let (plain, plain_value) = replace(&replace_board(serde_json::json!([]), 1, &rares));
+    let (maiden, maiden_value) = replace(&replace_board(serde_json::json!(["maiden"]), 1, &rares));
+    assert_eq!(maiden, plain);
+    assert!((maiden_value - plain_value).abs() < 1e-12, "{maiden_value} {plain_value}");
 }
 
 #[test]

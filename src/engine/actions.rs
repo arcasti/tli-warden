@@ -162,7 +162,7 @@ pub fn swap(s: &mut State) -> Outcome {
     s.stats.swaps += 1;
     after_growth(s, fresh);
     // Severed Iron Maiden: as many rarer inmates as less rare ones on the block.
-    if s.has(Tool::Maiden) && s.board_cell_of(fresh.id).is_some() {
+    if s.params.maiden && s.has(Tool::Maiden) && s.board_cell_of(fresh.id).is_some() {
         let rest: Vec<i32> = board_inmates(s).iter().filter(|i| i.id != fresh.id).map(|i| i.tier).collect();
         if rest.iter().filter(|&&t| t > fresh.tier).count() == rest.iter().filter(|&&t| t < fresh.tier).count() {
             fresh = promote(s, fresh, d.tool(Tool::Maiden).tiers.unwrap_or(0), false);

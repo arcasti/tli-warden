@@ -327,7 +327,9 @@ pub fn build_state(m: &Model, seed: u32) -> (State, Vec<String>) {
     let mut problems = Vec::new();
     let mut random = Rng32::new(seed);
     let drill_days = m.max_days.clamp(5, 60) as u32;
-    let mut st = new_game_with("ANALYZER", Params { drill_days, ..Params::default() });
+    // Logged Replaces holding the Severed Iron Maiden never rose (none of the
+    // about 10 its rule predicted), so a read board gives it no rise.
+    let mut st = new_game_with("ANALYZER", Params { drill_days, maiden: false, ..Params::default() });
     st.rng = (random.roll() * 4294967296.0) as u32;
     // The objective comes from the model when the player read it; the board
     // shows no theme, so the run's own draw would add one.

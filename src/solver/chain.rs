@@ -69,7 +69,7 @@ pub fn replace_odds(ctx: &Ctx, tier: usize, comp: &Comp, others: i64) -> (Dist, 
         }
         dist[legendary] += c * below;
     }
-    if st.has(Tool::Maiden) {
+    if st.params.maiden && st.has(Tool::Maiden) {
         // Open inmates by tier; the Guillotine's removals come first, so the
         // Maiden's odds at each tier average over the removed inmates.
         let mut counts = [0i64; TOP + 1];

@@ -32,6 +32,14 @@ pub struct Params {
     /// means no cap, as in the JS engine (its traces deserialize to None).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vault_cap: Option<u32>,
+    /// Whether the Severed Iron Maiden's rise applies. The JS engine has no
+    /// such field, so a state that keeps the rise leaves it out.
+    #[serde(default = "rises", skip_serializing_if = "bool::clone")]
+    pub maiden: bool,
+}
+
+fn rises() -> bool {
+    true
 }
 
 impl Default for Params {
@@ -58,6 +66,7 @@ impl Default for Params {
             objective: 0,
             theme: 0,
             vault_cap: Some(VAULT_CAP),
+            maiden: true,
         }
     }
 }

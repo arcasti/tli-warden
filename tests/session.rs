@@ -617,6 +617,31 @@ fn unread_vault_keeps_the_board_vault() {
     assert_eq!(r.model.vault, vault);
 }
 
+/// A treasure pick (rec5-t012) over the day-16 board rec1-t143 has its 2
+/// Chromatic Prisoners and the eater gone to the vault. View Prison Status
+/// over it (rec5-t018, day 16) shows an empty vault panel, as when the panel
+/// does not read; the pick it stays on and the pick shown again (rec5-t028)
+/// keep the run's 3, and so does the riot screen's line.
+#[test]
+fn pick_over_an_unread_vault_keeps_the_run_vault() {
+    if !have(&["rec5-t018.png", "rec5-t028.png", "rec4-t422.png"]) {
+        return;
+    }
+    let Some(mut s) = read_all(Vec::new(), &["rec1-t143.png", "rec5-t012.png"]) else { return };
+    let vault = s.reading.clone().unwrap().model.vault;
+    assert_eq!(vault.len(), 3);
+    for f in ["rec5-t018.png", "rec5-t028.png"] {
+        s.read_in_background(frame(f));
+        s.wait();
+        let r = s.reading.clone().unwrap();
+        assert_eq!((r.screen, r.model.day), (Screen::TreasurePick, 16), "{f}");
+        assert_eq!(r.model.vault, vault, "{f}");
+    }
+    s.read_in_background(frame("rec4-t422.png"));
+    s.wait();
+    assert_eq!(s.run_over.as_deref(), Some("The run is over: 3 Chromatic Prisoners vaulted."));
+}
+
 /// The targets of a Consume target pick: the jawed cells among the board
 /// read's, with a warning on the eater's cell when the two differ; the
 /// board read's when no jaws read or none of them is among its own.

@@ -554,6 +554,10 @@ pub struct Session {
     /// treasure pick after a consume covers, see [`vaulted`]. None after a
     /// patrol or cell pick screen.
     consume: Option<Model>,
+    /// The longest vault read this run and the day it was read: a treasure
+    /// pick reading fewer keeps it, and the run end counts it. A reading on
+    /// an earlier day is a new run's.
+    vault_top: Option<(i64, Vec<Beast>)>,
     /// A Consume target screen read since the last manage screen showed a
     /// bite: the target screen is a chain's (see [`bitten`]).
     chained: bool,
@@ -610,6 +614,7 @@ impl Session {
             treasure: None,
             board: None,
             consume: None,
+            vault_top: None,
             chained: false,
             meal: None,
             steady: BTreeMap::new(),
@@ -1111,6 +1116,10 @@ impl Session {
             }
             _ => {}
         }
+        let (day, vault) = (reading.model.day, &reading.model.vault);
+        if self.vault_top.as_ref().is_none_or(|(d, v)| day < *d || vault.len() > v.len()) {
+            self.vault_top = Some((day, vault.clone()));
+        }
         self.reading = Some(reading);
         self.solve();
     }
@@ -1136,6 +1145,13 @@ impl Session {
         // board's. A day before the board's is a new run.
         if let Some(board) = under.filter(|b| b.day <= model.day && b.vault.len() > model.vault.len()) {
             model.vault = board.vault.clone();
+        }
+        // The board under a treasure pick can be View Prison Status's with
+        // the vault panel unread: the pick keeps the run's longest vault.
+        if panels.screen == Screen::TreasurePick
+            && let Some((_, vault)) = self.vault_top.as_ref().filter(|(day, v)| *day <= model.day && v.len() > model.vault.len())
+        {
+            model.vault = vault.clone();
         }
         warnings.retain(|w| steady_key(w).and_then(|k| self.steady.get(&k)).is_none_or(|&n| n <= STEADY_READS));
         if let Some((_, n, removed)) = vaulted {
@@ -1322,7 +1338,8 @@ impl Session {
 
     /// The riot screen: the run is over. The solve stops and the board goes
     /// with the run (nothing on it can be played or corrected any more); the
-    /// line says how many Chromatic Prisoners the last reading had vaulted.
+    /// line says how many Chromatic Prisoners the run vaulted, the most any
+    /// of its readings showed.
     /// The held instruments and the days count go too. The riot screen read
     /// again keeps the line. The run log gets a run_end and the next run's
     /// folder only when the last reading was on the run's last day: the riot
@@ -1332,15 +1349,16 @@ impl Session {
         if self.run_over.is_some() {
             return;
         }
-        self.run_over = Some(match self.reading.as_ref().map(|r| r.model.vault.len()) {
+        let vaulted = self.reading.as_ref().and(self.vault_top.as_ref()).map(|(_, v)| v.len());
+        self.run_over = Some(match vaulted {
             Some(1) => "The run is over: 1 Chromatic Prisoner vaulted.".to_string(),
             Some(n) => format!("The run is over: {n} Chromatic Prisoners vaulted."),
             None => "The run is over.".to_string(),
         });
         if let Some(log) = &mut self.log
-            && let Some(r) = self.reading.as_ref().filter(|r| r.model.day >= r.model.max_days)
+            && self.reading.as_ref().is_some_and(|r| r.model.day >= r.model.max_days)
         {
-            log.event("run_end", SystemTime::now(), json!({ "vaulted": r.model.vault.len() }));
+            log.event("run_end", SystemTime::now(), json!({ "vaulted": vaulted }));
             log.new_run();
         }
         self.stop();
@@ -1349,6 +1367,7 @@ impl Session {
         self.scene = None;
         self.board = None;
         self.consume = None;
+        self.vault_top = None;
         self.chained = false;
         self.meal = None;
         self.advised_tool = None;

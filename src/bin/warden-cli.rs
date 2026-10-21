@@ -7,13 +7,15 @@
 //!   warden-cli capture [--frames N] <title text> <out.png>
 //!   warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N]
 //!   warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T]
+//!   warden-cli replay <log.jsonl | dir>... [--seeds N] [--out file]
 //!   warden-cli --version
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use warden::board::{Model, build_state};
 use warden::engine::data::Tool;
 use warden::reader::{read_model, save_png};
+use warden::replay::{Report, log_files, parse_log};
 use warden::solver::bench::{LOW, Solo, bench, is_low, mean_se, spread, strategy_bench, summarize};
 use warden::solver::{Params, TUNED};
 use warden::solver::solve::{instant, solve};
@@ -27,7 +29,7 @@ macro_rules! out {
     }};
 }
 
-const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] | warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T] | warden-cli --version";
+const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] | warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T] | warden-cli replay <log.jsonl | dir>... [--seeds N] [--out file] | warden-cli --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -36,11 +38,12 @@ fn main() -> ExitCode {
             out!("warden {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
-        Some(cmd @ ("solve" | "read" | "capture" | "bench")) => {
+        Some(cmd @ ("solve" | "read" | "capture" | "bench" | "replay")) => {
             let run = match cmd {
                 "solve" => run_solve(&args[1..]),
                 "read" => run_read(&args[1..]),
                 "bench" => run_bench(&args[1..]),
+                "replay" => run_replay(&args[1..]),
                 _ => run_capture(&args[1..]),
             };
             run.unwrap_or_else(|message| {
@@ -248,6 +251,36 @@ fn run_strategy_bench(
         format!(", holding {}", held.iter().map(|t| t.key()).collect::<Vec<_>>().join(","))
     };
     out!("{games} games, seed {seed}, {threads} threads{holding}, {rerolls} rerolls, {:.1} s", clock.elapsed().as_secs_f64());
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `replay <log.jsonl | dir>... [--seeds N] [--out file]`: checks the engine
+/// against the board reads of run logs. `--out` writes one JSON line per
+/// transition no move explains.
+fn run_replay(args: &[String]) -> Result<ExitCode, String> {
+    let (mut paths, mut seeds, mut out_file) = (Vec::new(), 16u32, None);
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--seeds" => seeds = number("--seeds", it.next())?,
+            "--out" => out_file = Some(it.next().ok_or_else(|| format!("--out needs a file; {USAGE}"))?),
+            _ if !arg.starts_with("--") => paths.push(PathBuf::from(arg)),
+            _ => return Err(format!("unexpected argument {arg}; {USAGE}")),
+        }
+    }
+    if paths.is_empty() {
+        return Err(USAGE.to_string());
+    }
+    let mut report = Report::default();
+    for file in log_files(&paths) {
+        let Ok(text) = std::fs::read_to_string(&file) else { continue };
+        let name = file.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        report.add_log(&name, &parse_log(&text), seeds);
+    }
+    out!("{}", report.summary().trim_end());
+    if let Some(f) = out_file {
+        std::fs::write(f, report.unexplained_lines()).map_err(|e| format!("{f}: {e}"))?;
+    }
     Ok(ExitCode::SUCCESS)
 }
 

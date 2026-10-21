@@ -1064,6 +1064,12 @@ impl Session {
         let under = vaulted.as_ref().map(|(m, _, _)| m).or(self.board.as_ref());
         let assumed_days = run_start(panels.screen, under) && self.days_read.is_none();
         let (mut model, mut warnings) = to_model(scene, panels, &self.tools, under);
+        // Chromatics never leave the vault in a run: a read that shows fewer
+        // (the panel did not read, or only some of its slots) keeps the last
+        // board's. A day before the board's is a new run.
+        if let Some(board) = under.filter(|b| b.day <= model.day && b.vault.len() > model.vault.len()) {
+            model.vault = board.vault.clone();
+        }
         warnings.retain(|w| steady_key(w).and_then(|k| self.steady.get(&k)).is_none_or(|&n| n <= STEADY_READS));
         if let Some((_, n, removed)) = vaulted {
             let left = format!("The Warden's Treasure follows a Chromatic Prisoner: the inmate in cell {} left for the vault", cell_label(n));

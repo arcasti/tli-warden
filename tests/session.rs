@@ -588,6 +588,28 @@ fn casket_meal_on_a_locked_cell() {
     assert!(warnings[0].text.starts_with("Check cell 02: a new Inmate from "), "{}", warnings[0].text);
 }
 
+/// The manage board rec1-t143 (day 16) has 2 Chromatic Prisoners. The same
+/// frame with the vault panel blacked out, as when its slots do not read,
+/// keeps them: Chromatics never leave the vault in a run.
+#[test]
+fn unread_vault_keeps_the_board_vault() {
+    let Some(mut s) = read_all(Vec::new(), &["rec1-t143.png"]) else { return };
+    let vault = s.reading.clone().unwrap().model.vault;
+    assert_eq!(vault.len(), 2);
+    let mut img = frame("rec1-t143.png");
+    for y in 180..680 {
+        for x in 1660..1870 {
+            let i = (y * img.w + x) * 4;
+            img.data[i..i + 3].fill(0);
+        }
+    }
+    s.read_in_background(img);
+    s.wait();
+    let r = s.reading.clone().unwrap();
+    assert_eq!(r.screen, Screen::Manage);
+    assert_eq!(r.model.vault, vault);
+}
+
 /// The targets of a Consume target pick: the jawed cells among the board
 /// read's, with a warning on the eater's cell when the two differ; the
 /// board read's when no jaws read or none of them is among its own.

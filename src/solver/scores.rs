@@ -613,7 +613,7 @@ mod tests {
         let walks: Vec<usize> = (1..st.cells.len()).filter(|&n| n != data().room).collect();
         let (near, far) = (walks[0], walks[4]);
         let mut p = TUNED.clone();
-        (p.w_step, p.w_goal) = (-0.5, 0.0);
+        p.w_step = -0.5;
         assert_eq!(patrol_scores(&mut context(&st, &p), &[near, far])[0].0, near);
         p.w_goal = 64.0;
         assert_eq!(patrol_scores(&mut context(&st, &p), &[near, far])[0].0, far);
@@ -626,7 +626,6 @@ mod tests {
         st.cells[3].inmate = Some(Inmate { id: 901, beast: Beast::Rat, tier: 1 });
         let bite = || vec![Bite { cell: 3, scratch: false }];
         let mut p = TUNED.clone();
-        p.w_goal = 0.0;
         let plain = devour_scores(&mut context(&st, &p), bite())[0].1;
         p.w_goal = 8.0;
         // Target 4 Consumes: one is a quarter of w_goal.

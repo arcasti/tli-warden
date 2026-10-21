@@ -1,7 +1,7 @@
 //! A per-user install with no installer program and no admin rights: the
 //! downloaded warden.exe copies itself to %LOCALAPPDATA%\Programs\Warden,
-//! adds a Start menu shortcut and an entry in Windows' installed apps, whose
-//! Uninstall runs `warden.exe uninstall`.
+//! adds a Start menu shortcut, a desktop shortcut and an entry in Windows'
+//! installed apps, whose Uninstall runs `warden.exe uninstall`.
 
 use super::update;
 use std::path::{Path, PathBuf};
@@ -22,6 +22,26 @@ fn shortcut_path() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join(r"Microsoft\Windows\Start Menu\Programs\Warden.lnk"))
 }
 
+/// The desktop shortcut, in the folder Windows knows as the desktop (which
+/// OneDrive may have moved out of %USERPROFILE%).
+fn desktop_path() -> Result<PathBuf, String> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{FOLDERID_Desktop, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+    // SAFETY: the returned string is copied out, then freed with CoTaskMemFree as the API requires.
+    unsafe {
+        let path = SHGetKnownFolderPath(&FOLDERID_Desktop, KF_FLAG_DEFAULT, None).map_err(|e| format!("the desktop folder: {}", e.message()))?;
+        let dir = path.to_hstring();
+        CoTaskMemFree(Some(path.0 as *const _));
+        Ok(PathBuf::from(dir.to_os_string()).join("Warden.lnk"))
+    }
+}
+
+/// Writes the desktop shortcut to `exe`.
+pub fn desktop_shortcut(exe: &Path) -> Result<(), String> {
+    let link = desktop_path()?;
+    shortcut(exe, &link).map_err(|e| format!("{}: {e}", link.display()))
+}
+
 /// Whether `current` runs from the install folder.
 pub fn installed_here(current: &Path) -> bool {
     install_dir().zip(current.parent()).is_some_and(|(dir, parent)| same_path(&dir, parent))
@@ -37,9 +57,9 @@ fn same_path(a: &Path, b: &Path) -> bool {
 }
 
 /// Installs `current`: copies it to the install folder (swapping out a
-/// warden.exe already there, which may be running), adds the Start menu
-/// shortcut and the installed apps entry. Returns the installed exe, which
-/// the caller starts.
+/// warden.exe already there, which may be running), adds the Start menu and
+/// desktop shortcuts and the installed apps entry. Returns the installed exe,
+/// which the caller starts.
 pub fn install(current: &Path) -> Result<PathBuf, String> {
     let dir = install_dir().ok_or("LOCALAPPDATA is not set")?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -56,6 +76,8 @@ pub fn install(current: &Path) -> Result<PathBuf, String> {
     }
     let link = shortcut_path().ok_or("APPDATA is not set")?;
     shortcut(&exe, &link).map_err(|e| format!("{}: {e}", link.display()))?;
+    // The desktop is a convenience: an install goes ahead without it.
+    let _ = desktop_shortcut(&exe);
     register(&exe)?;
     Ok(exe)
 }
@@ -136,8 +158,9 @@ pub fn register(exe: &Path) -> Result<(), String> {
     result
 }
 
-/// Asks, then removes the Start menu shortcut, the installed apps entry and
-/// the install folder; the caller exits next. Settings and run logs stay.
+/// Asks, then removes the Start menu and desktop shortcuts, the installed
+/// apps entry and the install folder; the caller exits next. Settings and
+/// run logs stay.
 pub fn uninstall() -> Result<(), String> {
     use windows::Win32::UI::WindowsAndMessaging::{IDYES, MB_ICONQUESTION, MB_YESNO, MessageBoxW};
     // SAFETY: both strings outlive the call and no owner window is given.
@@ -147,7 +170,7 @@ pub fn uninstall() -> Result<(), String> {
     if answer != IDYES {
         return Ok(());
     }
-    if let Some(link) = shortcut_path() {
+    for link in [shortcut_path(), desktop_path().ok()].into_iter().flatten() {
         match std::fs::remove_file(&link) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(format!("{}: {e}", link.display())),
             _ => {}
@@ -186,6 +209,13 @@ mod tests {
         assert!(installed_here(Path::new(&dir.join(update::ASSET).to_string_lossy().to_uppercase())));
         assert!(!installed_here(&std::env::temp_dir().join(update::ASSET)));
         assert!(!installed_here(&dir.join("sub").join(update::ASSET)));
+    }
+
+    #[test]
+    fn desktop_path_is_in_an_existing_folder() {
+        let link = desktop_path().unwrap();
+        assert_eq!(link.file_name().unwrap(), "Warden.lnk");
+        assert!(link.parent().unwrap().is_dir());
     }
 
     #[test]

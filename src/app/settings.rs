@@ -43,6 +43,10 @@ pub struct Settings {
     /// A random lowercase UUID sent with each run log; empty until the
     /// player first chooses to share.
     pub install_id: String,
+    /// The desktop shortcut was made once, at install or at the first start
+    /// of an install made before it existed; a shortcut the player deletes is
+    /// not made again.
+    pub desktop_shortcut: bool,
 }
 
 impl Default for Settings {
@@ -63,6 +67,7 @@ impl Default for Settings {
             share_logs: None,
             shared_from: String::new(),
             install_id: String::new(),
+            desktop_shortcut: false,
         }
     }
 }

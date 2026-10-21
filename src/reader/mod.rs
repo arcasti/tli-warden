@@ -153,5 +153,7 @@ pub fn read_model(path: &Path, held_tools: &[crate::engine::data::Tool]) -> Resu
     let (img, title) = load_layouts(path)?;
     let panels = panels::read_panels_titled(&img, title.as_ref().unwrap_or(&img));
     let held = if held_tools.is_empty() { panels.held.clone().unwrap_or_default() } else { held_tools.to_vec() };
-    Ok(model::to_model(&scene::read_scene(&img), &panels, &held, None, model::RUN_DAYS))
+    // Only Iron Law runs past 20 days.
+    let run_days = if panels.days.is_some_and(|left| i64::from(left) > model::RUN_DAYS) { model::iron_law_days() } else { model::RUN_DAYS };
+    Ok(model::to_model(&scene::read_scene(&img), &panels, &held, None, run_days))
 }

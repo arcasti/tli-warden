@@ -313,9 +313,8 @@ fn tooltip_in_a_recorded_frame() {
     assert!(texts.contains(&"A tooltip covers cells 14, 15 and 16: they are kept from the last board read."), "{texts:?}");
 }
 
-/// The day counts down from the run's length, and a counter above a 20-day
-/// run's length is an Iron Law run of 30 days (rec1-t029's board, its
-/// counter overridden).
+/// The day counts down from the run's length, 30 days for Iron Law
+/// (rec1-t029's board, its counter overridden).
 #[test]
 fn iron_law_days() {
     let path = common::frames().join("rec1-t029.png");
@@ -326,7 +325,7 @@ fn iron_law_days() {
     let img = load_png(&path).unwrap();
     let scene = read_scene(&img);
     let mut panels = read_panels(&img);
-    for (run_days, left, day, max_days) in [(20, 29, 1, 30), (20, 25, 5, 30), (30, 12, 18, 30), (20, 12, 8, 20)] {
+    for (run_days, left, day, max_days) in [(30, 29, 1, 30), (30, 25, 5, 30), (30, 12, 18, 30), (20, 12, 8, 20)] {
         panels.days = Some(left);
         let (m, _) = to_model(&scene, &panels, &[], None, run_days);
         assert_eq!((m.day, m.max_days), (day, max_days), "run of {run_days}, {left} days left");

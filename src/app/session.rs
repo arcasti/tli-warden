@@ -6,7 +6,7 @@ use crate::board::{CellModel, EventMark, Model, Step, build_state};
 use crate::engine::data::{Beast, Gift, IRON_LAW, RAINBOW, Tool, VAULT_CAP, data};
 use crate::engine::rules::treasure_picks;
 use crate::engine::text::{cell_label, tier_name, tool_name};
-use crate::reader::model::{RUN_DAYS, Warning, WarningKind, to_model};
+use crate::reader::model::{RUN_DAYS, Warning, WarningKind, iron_law_days, to_model};
 use crate::reader::panels::{Panels, Screen, read_panels_titled};
 use crate::reader::scene::{CELLS, Scene, read_scene};
 use crate::reader::layout::{is_16_9, lay_out_scaled};
@@ -1104,7 +1104,7 @@ impl Session {
     /// The days the run lasts: Iron Law extends it.
     fn run_days(&self) -> i64 {
         match self.theme {
-            Some(IRON_LAW) => data().theme(IRON_LAW).and_then(|t| t.value).unwrap_or(RUN_DAYS),
+            Some(IRON_LAW) => iron_law_days(),
             _ => RUN_DAYS,
         }
     }

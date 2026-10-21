@@ -10,8 +10,13 @@ use crate::engine::data::{Beast, IRON_LAW, Tool, data};
 use crate::engine::text::{cell_label, tier_name};
 
 /// Length of an S16 run: the counter starts at 20 days until Riot, except
-/// under the Iron Law theme, which extends the run (see [`to_model`]).
+/// under the Iron Law theme, which extends the run (see [`iron_law_days`]).
 pub const RUN_DAYS: i64 = 20;
+
+/// Length of an Iron Law run.
+pub fn iron_law_days() -> i64 {
+    data().theme(IRON_LAW).and_then(|t| t.value).unwrap_or(RUN_DAYS)
+}
 /// Padlock, beast, incident and warden reads below this confidence are flagged.
 const CONF: f32 = 0.3;
 /// Tier reads below this confidence are flagged (tests/reader.rs measures it).
@@ -63,8 +68,7 @@ impl std::fmt::Display for Warning {
 /// `under` is the last board read before this frame: an instrument or treasure
 /// pick covers the board, so the cells, the warden and the day come from it, or
 /// from the run start (every cell locked) without one. On a board frame it
-/// gives the cells a tooltip panel covers. `run_days` is the run's length; a
-/// days counter above it can only be an Iron Law run, read at its length.
+/// gives the cells a tooltip panel covers. `run_days` is the run's length.
 pub fn to_model(scene: &Scene, panels: &Panels, held_tools: &[Tool], under: Option<&Model>, run_days: i64) -> (Model, Vec<Warning>) {
     let d = data();
     let mut warn = Vec::new();
@@ -80,11 +84,7 @@ pub fn to_model(scene: &Scene, panels: &Panels, held_tools: &[Tool], under: Opti
         }
         None => Model::blank(),
     };
-    let iron_law = d.theme(IRON_LAW).and_then(|t| t.value).unwrap_or(run_days);
-    m.max_days = match panels.days {
-        Some(left) if i64::from(left) > run_days => run_days.max(iron_law),
-        _ => run_days,
-    };
+    m.max_days = run_days;
     m.dest.clear();
     if !covered {
         read_board(scene, under, &mut m, &mut warn);

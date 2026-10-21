@@ -61,6 +61,21 @@ fn candidate(action: Action, label: String) -> Candidate {
     Candidate { action, label }
 }
 
+/// Why a Hunt on the target in cell `n`: the prey and its Lion rise each morning.
+fn hunt_reason(st: &State, n: usize) -> String {
+    format!(
+        "The {} in {} and the Berserk Lion rise a tier on each of the next {}.",
+        describe(&st.cells[n].inmate.expect("prey")),
+        cell_label(n),
+        plural(st.params.prey_rounds as usize, "morning")
+    )
+}
+
+/// The label of a Hunt on the target in cell `n`.
+fn hunt_label(st: &State, n: usize) -> String {
+    format!("{}: mark the {} in {} as prey", data().hunt_name, describe(&st.cells[n].inmate.expect("prey")), cell_label(n))
+}
+
 /// candidates: the moves worth comparing at this point of the run.
 pub fn candidates(st: &State) -> Vec<Candidate> {
     let mut out = Vec::new();
@@ -78,6 +93,11 @@ pub fn candidates(st: &State) -> Vec<Candidate> {
             Pending::Cell { options, .. } => {
                 for &n in options {
                     out.push(candidate(Action::Choose { id: ChoiceId::Cell(n) }, format!("Move to {}", cell_label(n))));
+                }
+            }
+            Pending::Prey { options } => {
+                for &n in options {
+                    out.push(candidate(Action::Choose { id: ChoiceId::Cell(n) }, hunt_label(st, n)));
                 }
             }
             Pending::Interrogation { options } => {
@@ -138,9 +158,8 @@ pub fn candidates(st: &State) -> Vec<Candidate> {
     {
         out.push(candidate(Action::Swap, format!("Replace the {} in {}", describe(&i), cell_label(c.n))));
     }
-    let prey = hunt_targets(st);
-    if !prey.is_empty() {
-        out.push(candidate(Action::Hunt, format!("{}: mark {} as prey", data().hunt_name, plural(prey.len(), "Consumable target"))));
+    for n in hunt_targets(st) {
+        out.push(candidate(Action::Hunt { cell: n }, hunt_label(st, n)));
     }
     out.push(candidate(Action::End, (if st.day >= st.max_days { "Finish the run" } else { "End the day" }).to_string()));
     out
@@ -519,14 +538,14 @@ pub fn reason(st: &State, action: &Action) -> String {
         }
         Action::Chain { .. } => "This bite is worth more than stopping here.".to_string(),
         Action::EndChain => "Every next bite would cost more than it gains.".to_string(),
-        Action::Hunt => format!(
-            "{}: the Berserk Lion and each prey rise a tier on each of the next {}.",
-            plural(hunt_targets(st).len(), "new prey mark"),
-            plural(st.params.prey_rounds as usize, "morning")
-        ),
+        Action::Hunt { cell } => hunt_reason(st, *cell),
         Action::Choose { id } => match st.pending.first() {
             Some(Pending::Gift { .. }) => "Worth the most on this board right now.".to_string(),
             Some(Pending::Cell { .. }) => "The best landing by the patrol scores.".to_string(),
+            Some(Pending::Prey { .. }) => {
+                let ChoiceId::Cell(n) = id else { return String::new() };
+                hunt_reason(st, *n)
+            }
             Some(Pending::Interrogation { .. }) => {
                 let ChoiceId::Name(key) = id else { return String::new() };
                 format!("{} leaves this board worth more than the other card, on average.", tool_name(key))

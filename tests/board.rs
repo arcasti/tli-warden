@@ -78,7 +78,7 @@ fn good_boards_build_the_model() {
         let order: Vec<Tool> = d.tool_ids.iter().copied().filter(|t| tools.contains(t)).collect();
         assert_eq!(st.tools, order, "{name}");
         if phase != Phase::Patrol {
-            let used = Used { swap: u32::from(m["swapUsed"] == true), devour: u32::from(m["devourUsed"] == true), hunt: 0 };
+            let used = Used { swap: u32::from(m["swapUsed"] == true), devour: u32::from(m["devourUsed"] == true), hunt: u32::from(m["huntUsed"] == true) };
             assert_eq!(st.used, used, "{name}");
         }
         let action = decide(&st, &TUNED, &mut Rng32::new(1)).unwrap_or_else(|| panic!("{name}: no action"));
@@ -124,6 +124,64 @@ fn open_cell_markers_round_trip() {
     assert_eq!(json["cells"][5]["event"], "execution");
     let back: Model = serde_json::from_value(json).unwrap();
     assert_eq!(back, model);
+}
+
+/// `huntUsed`: absent from older board files, where it reads false; it
+/// survives a JSON round trip and goes into the built state's day's uses.
+#[test]
+fn hunt_used_round_trips() {
+    let mut json = raw("manage.json");
+    assert!(json.get("huntUsed").is_none());
+    let model: Model = serde_json::from_value(json.clone()).expect("model");
+    assert!(!model.hunt_used);
+    assert_eq!(build_state(&model, 1).0.used.hunt, 0);
+    json["huntUsed"] = Value::Bool(true);
+    let model: Model = serde_json::from_value(json).expect("model");
+    assert!(model.hunt_used);
+    let back = serde_json::to_value(&model).unwrap();
+    assert_eq!(back["huntUsed"], true);
+    assert_eq!(serde_json::from_value::<Model>(back).unwrap(), model);
+    let (st, _) = build_state(&model, 1);
+    assert_eq!((st.phase, st.used.hunt), (Phase::Manage, 1));
+}
+
+/// hunt-pick: the Hunt's "Select an Objective" with the Lion in cell 3 and
+/// two Rare targets, the Rat in cell 2 and the Wolf in cell 6. The pick
+/// marks only the chosen one.
+#[test]
+fn hunt_pick_board_offers_the_lion_targets() {
+    let (st, problems) = build("hunt-pick.json");
+    assert!(problems.is_empty(), "{problems:?}");
+    assert_eq!(st.pending, vec![Pending::Prey { options: vec![1, 5] }]);
+    let pick = warden::solver::solve::instant(&st).expect("pick");
+    assert!(pick.label.starts_with(&format!("{}: mark the ", data().hunt_name)), "{}", pick.label);
+    let mut picked = st.clone();
+    assert!(apply(&mut picked, &Action::Choose { id: ChoiceId::Cell(5) }).is_ok());
+    assert!(picked.pending.is_empty());
+    let marked: Vec<u32> = picked.prey.iter().map(|l| l.prey).collect();
+    assert_eq!(marked, vec![st.cells[5].inmate.unwrap().id]);
+    let mut json = raw("hunt-pick.json");
+    json["huntUsed"] = Value::Bool(true);
+    let (_, problems) = build_state(&serde_json::from_value(json).expect("model"), 1);
+    assert_eq!(problems.len(), 1, "{problems:?}");
+}
+
+/// A Hunt marks the one target it names, once a day, and only a target.
+#[test]
+fn hunt_marks_one_prey() {
+    let (mut st, _) = build("hunt-pick.json");
+    st.pending.clear();
+    let fresh = st.clone();
+    assert!(!apply(&mut st, &Action::Hunt { cell: 9 }).is_ok());
+    assert!(!apply(&mut st, &Action::Hunt { cell: 6 }).is_ok());
+    assert_eq!(st.prey, fresh.prey);
+    assert!(apply(&mut st, &Action::Hunt { cell: 1 }).is_ok());
+    let rat = st.cells[1].inmate.unwrap();
+    let lion = st.cells[2].inmate.unwrap();
+    assert_eq!(st.prey.len(), 1);
+    assert_eq!((st.prey[0].lion, st.prey[0].prey, st.used.hunt), (lion.id, rat.id, 1));
+    assert!(!apply(&mut st, &Action::Hunt { cell: 5 }).is_ok());
+    assert_eq!(st.prey.len(), 1);
 }
 
 /// The JS pending choice has no `reason` or `picks` and its `used` no

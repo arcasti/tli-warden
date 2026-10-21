@@ -2,7 +2,7 @@
 //! player's corrections and held instruments, and the ranking, which a
 //! worker thread fills in rounds so the window shows it as it firms up.
 
-use crate::board::{CellModel, EventMark, Model, Step, build_state};
+use crate::board::{CellModel, ChoiceKind, EventMark, Model, Step, build_state};
 use crate::engine::data::{Beast, Gift, IRON_LAW, RAINBOW, Tool, VAULT_CAP, data};
 use crate::engine::rules::treasure_picks;
 use crate::engine::text::{cell_label, tier_name, tool_name};
@@ -177,6 +177,14 @@ fn chains_vaulted(board: &Model) -> Option<(Model, usize, Vec<usize>)> {
 struct Meal {
     cell: usize,
     certain: bool,
+}
+
+/// The cells, as model indices, of the prey the board's Lions have marked.
+fn prey_cells(m: &Model) -> impl Iterator<Item = usize> + '_ {
+    m.cells.iter().filter_map(|c| match c {
+        CellModel::Inmate { prey: Some(mark), .. } => mark.cell.and_then(|x| usize::try_from(x).ok()),
+        _ => None,
+    })
 }
 
 /// True when a Consume target screen read shows a bite since `before`: the
@@ -558,6 +566,10 @@ pub struct Session {
     /// pick reading fewer keeps it, and the run end counts it. A reading on
     /// an earlier day is a new run's.
     vault_top: Option<(i64, Vec<Beast>)>,
+    /// The day each Prey mark on the board was first read, by the prey's
+    /// cell: the reader reads every mark at its full rounds, and a mark loses
+    /// one each day after. A reading on an earlier day is a new run's.
+    prey_seen: Vec<(usize, i64)>,
     /// A Consume target screen read since the last manage screen showed a
     /// bite: the target screen is a chain's (see [`bitten`]).
     chained: bool,
@@ -615,6 +627,7 @@ impl Session {
             board: None,
             consume: None,
             vault_top: None,
+            prey_seen: Vec::new(),
             chained: false,
             meal: None,
             steady: BTreeMap::new(),
@@ -1067,12 +1080,21 @@ impl Session {
     /// The model again from the stored read, the tools and the edits; then a solve.
     fn rebuild(&mut self) {
         let Some(mut reading) = self.build() else { return };
+        // The Hunt's target pick shows no cards, and its white glow on a
+        // lone target spoils that cell's read: the cells and the day's used
+        // Consume and Replace are the same day's manage screen's.
+        let prey = reading.screen == Screen::CellPick && reading.model.choice.kind == ChoiceKind::Prey;
+        if prey && let Some(m) = self.consume.as_ref().filter(|m| m.day == reading.model.day) {
+            reading.model.cells = m.cells.clone();
+            (reading.model.devour_used, reading.model.swap_used) = (m.devour_used, m.swap_used);
+        }
         if matches!(reading.screen, Screen::Patrol | Screen::Manage | Screen::CellPick | Screen::PrisonStatus) {
             self.board = Some(reading.model.clone());
             self.chained = false;
             self.meal = None;
         }
         match reading.screen {
+            Screen::CellPick if prey => {}
             Screen::Patrol | Screen::CellPick | Screen::PrisonStatus => self.consume = None,
             Screen::Manage => self.consume = Some(reading.model.clone()),
             Screen::ChainTarget => {
@@ -1120,6 +1142,12 @@ impl Session {
         if self.vault_top.as_ref().is_none_or(|(d, v)| day < *d || vault.len() > v.len()) {
             self.vault_top = Some((day, vault.clone()));
         }
+        if matches!(reading.screen, Screen::Patrol | Screen::Manage | Screen::CellPick | Screen::PrisonStatus) {
+            let seen = &self.prey_seen;
+            self.prey_seen = prey_cells(&reading.model)
+                .map(|x| seen.iter().copied().find(|&(c, d)| c == x && d <= day).unwrap_or((x, day)))
+                .collect();
+        }
         self.reading = Some(reading);
         self.solve();
     }
@@ -1152,6 +1180,13 @@ impl Session {
             && let Some((_, vault)) = self.vault_top.as_ref().filter(|(day, v)| *day <= model.day && v.len() > model.vault.len())
         {
             model.vault = vault.clone();
+        }
+        for cell in &mut model.cells {
+            if let CellModel::Inmate { prey: Some(mark), .. } = cell
+                && let Some(&(_, first)) = self.prey_seen.iter().find(|&&(c, d)| Some(c as i64) == mark.cell && d <= model.day)
+            {
+                mark.rounds = (mark.rounds - (model.day - first)).max(1);
+            }
         }
         warnings.retain(|w| steady_key(w).and_then(|k| self.steady.get(&k)).is_none_or(|&n| n <= STEADY_READS));
         if let Some((_, n, removed)) = vaulted {
@@ -1368,6 +1403,7 @@ impl Session {
         self.board = None;
         self.consume = None;
         self.vault_top = None;
+        self.prey_seen.clear();
         self.chained = false;
         self.meal = None;
         self.advised_tool = None;

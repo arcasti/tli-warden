@@ -33,7 +33,8 @@ pub enum Action {
     Chain { to: usize },
     EndChain,
     Swap,
-    Hunt,
+    /// The Hunt marks the inmate in `cell` as the Lion's prey.
+    Hunt { cell: usize },
     End,
 }
 
@@ -60,7 +61,7 @@ pub fn apply(s: &mut State, action: &Action) -> Outcome {
         Action::Chain { to } => devour_next(s, *to),
         Action::EndChain => end_chain(s),
         Action::Swap => swap(s),
-        Action::Hunt => hunt(s),
+        Action::Hunt { cell } => hunt(s, *cell),
         Action::End => end_day(s),
     };
     sync_markers(s);
@@ -220,6 +221,17 @@ pub fn choose(s: &mut State, id: &ChoiceId) -> Outcome {
         return match id {
             ChoiceId::Cell(n) => ratway_move(s, *n),
             ChoiceId::Name(_) => Outcome::Fail("The Sewer Ratway cannot lead there."),
+        };
+    }
+    // The Hunt's target pick marks the picked cell's inmate as prey.
+    if let Pending::Prey { .. } = choice {
+        return match id {
+            ChoiceId::Cell(n) => {
+                let n = *n;
+                s.pending.remove(0);
+                hunt(s, n)
+            }
+            ChoiceId::Name(_) => Outcome::Fail("The Hunt cannot mark that target."),
         };
     }
     let picked = match (choice, id) {

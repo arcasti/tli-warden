@@ -158,6 +158,9 @@ pub enum Pending {
     },
     /// A cell to move to, for the incident `id` (Sewer Ratway).
     Cell { id: u32, options: Vec<usize> },
+    /// The Hunt's "Select an Objective": the Lion's Consumable targets, one
+    /// to mark as prey. Only a board read on that screen sets it.
+    Prey { options: Vec<usize> },
 }
 
 impl Pending {
@@ -166,7 +169,7 @@ impl Pending {
             Pending::Tool { options, .. } => options.is_empty(),
             Pending::Gift { options, .. } => options.is_empty(),
             Pending::Interrogation { options } => options.is_empty(),
-            Pending::Chain { options, .. } | Pending::Cell { options, .. } => options.is_empty(),
+            Pending::Chain { options, .. } | Pending::Cell { options, .. } | Pending::Prey { options } => options.is_empty(),
         }
     }
 }

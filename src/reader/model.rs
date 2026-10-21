@@ -5,8 +5,10 @@
 
 use super::panels::{Panels, Screen};
 use super::scene::{CELLS, Scene};
-use crate::board::{CellModel, ChoiceKind, EventMark, Model, ObjectiveModel, Step};
+use crate::board::{CellModel, ChoiceKind, EventMark, Model, ObjectiveModel, PreyMark, Step};
 use crate::engine::data::{Beast, IRON_LAW, Tool, data};
+use crate::engine::devour::eats;
+use crate::engine::state::Params;
 use crate::engine::text::{cell_label, tier_name};
 
 /// Length of an S16 run: the counter starts at 20 days until Riot, except
@@ -113,6 +115,7 @@ pub fn to_model(scene: &Scene, panels: &Panels, held_tools: &[Tool], under: Opti
             m.step = Step::Manage;
             m.devour_used = !panels.decision.contains(&"Consume");
             m.swap_used = !panels.decision.contains(&"Replace");
+            m.hunt_used = !panels.decision.contains(&"Hunt");
         }
         Screen::InstrumentPick => {
             m.step = Step::Choice;
@@ -127,9 +130,12 @@ pub fn to_model(scene: &Scene, panels: &Panels, held_tools: &[Tool], under: Opti
             m.choice.kind = ChoiceKind::Gift;
             m.choice.options.clear();
         }
+        // The Hunt's target pick, played with the Blood-Stained Trap from a
+        // Lion's cell, else the Sewer Ratway's cell pick.
         Screen::CellPick => {
             m.step = Step::Choice;
-            m.choice.kind = ChoiceKind::Cell;
+            let lion = usize::try_from(m.warden).ok().and_then(|n| m.cells.get(n)).is_some_and(|c| matches!(c, CellModel::Inmate { beast: Beast::Lion, .. }));
+            m.choice.kind = if lion && held_tools.contains(&Tool::Trap) { ChoiceKind::Prey } else { ChoiceKind::Cell };
             m.choice.options.clear();
         }
         Screen::Interrogation => {
@@ -146,6 +152,7 @@ pub fn to_model(scene: &Scene, panels: &Panels, held_tools: &[Tool], under: Opti
             m.step = Step::Manage;
             m.devour_used = true;
             m.swap_used = true;
+            m.hunt_used = true;
         }
         Screen::DayBanner => {
             m.step = Step::Manage;
@@ -261,5 +268,25 @@ fn read_board(scene: &Scene, under: Option<&Model>, m: &mut Model, warn: &mut Ve
             }
         }
         None => warn.push(Warning::read("The warden's arrow was not found: the warden is put in the Interrogation Room.".to_string())),
+    }
+
+    // A Prey crosshair is drawn on the prey only: it goes to a Lion of the
+    // same rarity that eats the prey, the warden's first (the Hunt is played
+    // from the Lion's cell), else the lowest cell. A Lion holds one mark.
+    for c in CELLS.filter(|&c| scene.cell(c).prey && !scene.cell(c).covered) {
+        let n = index(c);
+        let CellModel::Inmate { beast: meal, tier, .. } = m.cells[n] else { continue };
+        let free = |l: usize| {
+            l != n && matches!(&m.cells[l], CellModel::Inmate { beast: Beast::Lion, tier: t, prey: None, .. } if *t == tier && eats(Beast::Lion).contains(&meal))
+        };
+        let lion = usize::try_from(m.warden).ok().filter(|&l| l < m.cells.len() && free(l)).or_else(|| (0..m.cells.len()).find(|&l| free(l)));
+        match lion {
+            Some(l) => {
+                if let CellModel::Inmate { prey, .. } = &mut m.cells[l] {
+                    *prey = Some(PreyMark { cell: Some(n as i64), rounds: i64::from(Params::default().prey_rounds) });
+                }
+            }
+            None => warn.push(Warning::cell(n, format!("Check cell {}: a Prey mark read with no {} to link it to.", cell_label(n), d.beast_names[Beast::Lion.index()]))),
+        }
     }
 }

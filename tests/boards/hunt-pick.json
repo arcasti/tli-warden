@@ -1,0 +1,31 @@
+{
+  "v": 1,
+  "day": 9,
+  "maxDays": 20,
+  "step": "choice",
+  "choice": { "kind": "prey", "options": [] },
+  "warden": 2,
+  "devourUsed": false,
+  "swapUsed": true,
+  "huntUsed": false,
+  "tools": ["trap"],
+  "vault": [],
+  "cells": [
+    { "kind": "office" },
+    { "kind": "inmate", "beast": "rat", "tier": 2 },
+    { "kind": "inmate", "beast": "lion", "tier": 2 },
+    { "kind": "sealed", "event": null },
+    { "kind": "empty" },
+    { "kind": "inmate", "beast": "wolf", "tier": 2 },
+    { "kind": "inmate", "beast": "mammoth", "tier": 3 },
+    { "kind": "sealed", "event": null },
+    { "kind": "empty" },
+    { "kind": "inmate", "beast": "wolf", "tier": 0 },
+    { "kind": "sealed", "event": null },
+    { "kind": "empty" },
+    { "kind": "inmate", "beast": "mammoth", "tier": 1 },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null }
+  ]
+}

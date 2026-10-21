@@ -3,8 +3,11 @@
 //! Skips when trainingdata/s16 (git-ignored) is missing.
 
 use std::path::Path;
-use warden::board::{CellModel, Model};
-use warden::engine::data::Beast;
+use warden::board::{CellModel, ChoiceKind, Model, PreyMark, Step, build_state};
+use warden::engine::data::{Beast, data};
+use warden::engine::state::Pending;
+use warden::solver::TUNED;
+use warden::solver::solve::solve;
 use warden::reader::model::{RUN_DAYS, TIER_CONF, to_model};
 use warden::reader::panels::{Screen, read_panels};
 use warden::reader::scene::{CELLS, FrameTruth, Scene, build_templates, load_labeled, read_scene, read_scene_with};
@@ -173,6 +176,7 @@ fn tusk_reads() {
     let scene = read_scene(&load_png(&path).unwrap());
     let tusks: Vec<u8> = CELLS.filter(|&c| scene.cell(c).tusk).collect();
     assert_eq!(tusks, [7, 9]);
+    assert_eq!(CELLS.filter(|&c| scene.cell(c).prey).count(), 0, "a Prey mark read on the Tusk");
     let (model, _) = read_model(&path, &[]).unwrap();
     let ivory: Vec<u8> = CELLS.filter(|&c| model.cells[c as usize - 1].ivory()).collect();
     assert_eq!(ivory, [7, 9]);
@@ -371,4 +375,110 @@ fn off_board_and_run_end() {
     assert_eq!(off, present(&["rec1-t095.png", "rec4-t340.png", "rec4-t424.png"]));
     assert_eq!(ended, present(&["rec4-t422.png"]));
     assert_eq!(status, present(&["rec5-t018.png", "rec5-t047.png", "rec6-t206.png"]));
+}
+
+/// The Blood-Stained Trap's Hunt card: on the day-2 manage screen of
+/// hunt-run-0005 (2560x1440) it is on offer, beside Consume, Replace and End;
+/// hunt-pierce-d6, at a Lion after a Replace, offers none, and neither does
+/// hunt-tyler-d3, where the Hunt was used. Skips when a frame is missing.
+#[test]
+fn hunt_card_reads() {
+    for (name, used) in [("hunt-run-0005.png", false), ("hunt-pierce-d6.png", true), ("hunt-tyler-d3.png", true)] {
+        let path = common::frames().join(name);
+        if !path.is_file() {
+            println!("skipped: {} is missing", path.display());
+            continue;
+        }
+        let panels = read_panels(&load_png(&path).unwrap());
+        assert_eq!(panels.screen, Screen::Manage, "{name}");
+        let (model, _) = read_model(&path, &[]).unwrap();
+        assert_eq!(model.hunt_used, used, "{name}");
+        if !used {
+            assert_eq!(panels.decision, ["Consume", "Replace", "Hunt", "End"], "{name}");
+        }
+    }
+}
+
+/// hunt-tyler-d3: the Prey crosshair on the Magic Wolf in cell 4, marked by
+/// the Magic Lion in the warden's cell 10 (the other Magic Lion is in cell
+/// 7). The crosshair does not read as the Tusk. Skips when the frame is
+/// missing.
+#[test]
+fn prey_mark_reads() {
+    let path = common::frames().join("hunt-tyler-d3.png");
+    if !path.is_file() {
+        println!("skipped: {} is missing", path.display());
+        return;
+    }
+    let scene = read_scene(&load_png(&path).unwrap());
+    assert_eq!(CELLS.filter(|&c| scene.cell(c).prey).collect::<Vec<_>>(), [4]);
+    let (model, warnings) = read_model(&path, &[]).unwrap();
+    assert!(!model.cells[3].ivory(), "cell 4 read the Tusk");
+    let marks: Vec<(usize, PreyMark)> = model
+        .cells
+        .iter()
+        .enumerate()
+        .filter_map(|(n, c)| match c {
+            CellModel::Inmate { prey: Some(mark), .. } => Some((n + 1, *mark)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(marks, [(10, PreyMark { cell: Some(3), rounds: 3 })]);
+    assert!(!warnings.iter().any(|w| w.text.contains("Prey")), "{warnings:?}");
+}
+
+/// The Prey crosshair reads only where one is drawn: no other frame of
+/// trainingdata/s16 has one. Skips when the frames are missing.
+#[test]
+fn prey_marks_only_where_drawn() {
+    let dir = common::frames();
+    if !dir.is_dir() {
+        println!("skipped: {} is missing", dir.display());
+        return;
+    }
+    let marked = [("hunt-tyler-d3.png", vec![4u8]), ("hunt-run-0008.png", vec![4]), ("hunt-run-0012.png", vec![4]), ("hunt-run-0038.png", vec![6])];
+    let mut seen = 0;
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "png") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let want = marked.iter().find(|m| m.0 == name).map_or(Vec::new(), |m| m.1.clone());
+        let scene = read_scene(&load_png(&path).unwrap());
+        assert_eq!(CELLS.filter(|&c| scene.cell(c).prey).collect::<Vec<_>>(), want, "{name}");
+        seen += 1;
+    }
+    assert!(seen > 0, "no frames in {}", dir.display());
+}
+
+/// "Select an Objective" in the Trap run (2560x1440): on hunt-run-0039 the
+/// Hunt's pick, from the Legendary Lion in the warden's cell 13, brackets the
+/// Legendary Wolves in cells 4 and 10, and the solver's pick is a Hunt mark.
+/// The heading stays up with no brackets while a Chromatic Prisoner leaves on
+/// the next morning (hunt-run-0028 and 0040): nothing is picked there. The
+/// Sewer Ratway's pick (rec2-t340) stays a cell choice. Skips when a frame is
+/// missing.
+#[test]
+fn hunt_target_pick_reads() {
+    let dir = common::frames();
+    let frames = ["hunt-run-0039.png", "hunt-run-0028.png", "hunt-run-0040.png", "rec2-t340.png"].map(|f| dir.join(f));
+    if !frames.iter().all(|f| f.is_file()) {
+        println!("skipped: a frame in {} is missing", dir.display());
+        return;
+    }
+    let (model, warnings) = read_model(&frames[0], &[]).unwrap();
+    assert_eq!((model.step, model.choice.kind), (Step::Choice, ChoiceKind::Prey), "{warnings:?}");
+    let (st, problems) = build_state(&model, 1);
+    assert!(problems.is_empty(), "{problems:?}");
+    // The dimmed board hides the crosshair on cell 6, so the frame alone offers it too.
+    assert!(matches!(&st.pending[..], [Pending::Prey { options }] if options.contains(&3) && options.contains(&9)), "{:?}", st.pending);
+    let options = solve(&st, 20, 1, &TUNED);
+    assert!(options[0].label.starts_with(&format!("{}: mark", data().hunt_name)), "{}", options[0].label);
+
+    for f in &frames[1..3] {
+        assert_eq!(read_panels(&load_png(f).unwrap()).screen, Screen::Unknown, "{}", f.display());
+    }
+    let (model, _) = read_model(&frames[3], &[]).unwrap();
+    assert_eq!(model.choice.kind, ChoiceKind::Cell);
 }

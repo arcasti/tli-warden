@@ -323,6 +323,34 @@ fn has_target_jaws(img: &Rgba, cell: u8) -> bool {
     bands.into_iter().all(|(xs, ys)| colour_share(img, xs, ys, red) >= TARGET_MIN)
 }
 
+/// Mean share of pale grey pixels in the four boxes at a cell's corners that
+/// marks the white corner brackets of a "Select an Objective" pick: the
+/// Sewer Ratway's around every cell but the Interrogation Room, the Hunt's
+/// around its targets. Measured on rec2-t340 and 13 frames of a Trap run
+/// under that heading (2560x1440): bracketed cells score 0.11 to 0.32, every
+/// other cell 0.00.
+const BRACKET_MIN: f32 = 0.05;
+/// Share of pale grey pixels on the portrait that marks the white glow the
+/// Hunt draws on a lone target in place of the brackets: 0.48 on the one
+/// such frame, every other cell of those frames at most 0.14 (a Chromatic
+/// Prisoner rising) and of the manage screen before it 0.06.
+const HIGHLIGHT_MIN: f32 = 0.3;
+
+/// Whether a "Select an Objective" pick is on screen: a cell in corner
+/// brackets or in the Hunt's white glow (see [`BRACKET_MIN`] and
+/// [`HIGHLIGHT_MIN`]). The heading stays up, with neither, while a Prey mark
+/// lands and on the next morning while a Chromatic Prisoner leaves its cell.
+pub fn pick_shown(img: &Rgba) -> bool {
+    let pale = |r: i32, g: i32, b: i32| r.min(g).min(b) >= 150 && r.max(g).max(b) - r.min(g).min(b) < 40;
+    CELLS.into_iter().any(|c| {
+        let (cx, cy) = portrait(c);
+        let xs = [(cx - 80, cx - 52), (cx + 52, cx + 80)];
+        let ys = [(cy - 66, cy - 38), (cy + 34, cy + 62)];
+        let brackets: f32 = xs.iter().flat_map(|&x| ys.iter().map(move |&y| (x, y))).map(|(x, y)| colour_share(img, x, y, pale)).sum::<f32>() / 4.0;
+        brackets >= BRACKET_MIN || colour_share(img, (cx - 40, cx + 40), (cy - 50, cy + 40), pale) >= HIGHLIGHT_MIN
+    })
+}
+
 /// Share of the pixels in a box whose colour passes `pick`.
 fn colour_share(img: &Rgba, (x0, x1): (i32, i32), (y0, y1): (i32, i32), pick: impl Fn(i32, i32, i32) -> bool) -> f32 {
     let mut n = 0;
@@ -352,6 +380,29 @@ fn has_tusk(img: &Rgba, cell: u8) -> bool {
     let (cx, cy) = portrait(cell);
     let cream = |r: i32, g: i32, b: i32| r > 170 && r < 248 && g > 140 && r - b > 45 && r - b <= 100 && r - g < 45;
     colour_share(img, (cx - 20, cx + 25), (cy + 22, cy + 50), cream) >= TUSK_MIN
+}
+
+/// Share of amber pixels in the stem of the Blood-Stained Trap's Prey
+/// crosshair, a gold and cream ring over the bottom of the portrait.
+/// Measured on 79 s16 frames and a 98-frame Trap run (2560x1440): the 38
+/// marked cells score 0.045 to 0.201 (0.045 and 0.080 on cells caught in a
+/// rise animation), unmarked cells at most 0.083 (fire at the bottom of
+/// rec4-t422) and the Tusk 0.000.
+const PREY_STEM_MIN: f32 = 0.03;
+/// Share of cream pixels in each of the crosshair's two arms. The 38 marked
+/// cells score 0.106 to 0.190 on their weaker arm; the two unmarked cells
+/// with any amber in the stem (above 0.005) score 0.000. The Tusk scores up
+/// to 0.324 on the left arm and 0.000 on the right.
+const PREY_ARM_MIN: f32 = 0.05;
+
+/// Whether the Prey crosshair is on a cell: see [`PREY_STEM_MIN`] and
+/// [`PREY_ARM_MIN`]. One frame of a cell's rise animation washes it out.
+fn has_prey_mark(img: &Rgba, cell: u8) -> bool {
+    let (cx, cy) = portrait(cell);
+    let amber = |r: i32, g: i32, b: i32| r > 180 && g > 100 && b < 80 && r - b > 130;
+    let cream = |r: i32, g: i32, b: i32| r > 190 && g > 170 && b > 120 && r - b < 90;
+    let arms = [(cx - 19, cx - 7), (cx + 7, cx + 18)].map(|xs| colour_share(img, xs, (cy + 24, cy + 42), cream));
+    colour_share(img, (cx - 4, cx + 5), (cy + 22, cy + 54), amber) >= PREY_STEM_MIN && arms.iter().all(|&a| a >= PREY_ARM_MIN)
 }
 
 /// Half the width and height of the box around a portrait that a tooltip
@@ -716,6 +767,10 @@ pub struct CellRead {
     /// The Tusk of Iron Tongs of Lust: Mammoth. Read on any inmate, since
     /// whether a Replace keeps the mark on the cell is not known.
     pub tusk: bool,
+    /// The Blood-Stained Trap's Prey crosshair: a Lion's Hunt marked this
+    /// inmate. Its cream ring also passes the Tusk test, so a marked cell
+    /// reads no Tusk.
+    pub prey: bool,
     /// A tooltip panel covers the cell, so the reads above are of the panel.
     pub covered: bool,
 }
@@ -845,7 +900,8 @@ pub fn read_scene_with(img: &Rgba, t: &Templates) -> Scene {
                 let (jaws, conf) = t.crown_split.decide(crown_score(img, c));
                 (r.jaws, r.jaws_conf) = (jaws, conf);
                 r.target = has_target_jaws(img, c);
-                r.tusk = has_tusk(img, c);
+                r.prey = has_prey_mark(img, c);
+                r.tusk = !r.prey && has_tusk(img, c);
             } else if r.locked {
                 r.beast_conf = r.locked_conf;
                 let (tier, conf, strength) = glow_tier(img, c, false, t);

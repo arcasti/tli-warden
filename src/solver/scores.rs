@@ -5,7 +5,7 @@ use super::chain::{best_meal, coin_of_fate, devour_delta, replace_odds};
 use super::values::{activation, execution_value, fresh_value, stair_delta, swap_value};
 use super::{Comp, Ctx, Dist, Params, Rng32, TOP, beasts, composition, dist_worth, door_dist, seen_door, tier_values, worth};
 use crate::engine::data::{Beast, Card, ObjectiveKind, RAINBOW, Tool, data};
-use crate::engine::devour::{Bite, eater_mask, hunt_targets, sure_gain};
+use crate::engine::devour::{Bite, eater_mask, sure_gain};
 use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATWAY};
 use crate::engine::rules::{clockwise_path, land, steps_between};
 use crate::engine::state::{Cell, Inmate, State};
@@ -426,13 +426,18 @@ fn tusk_gain(ctx: &Ctx) -> f64 {
     (st.params.ivory_count as usize).min(board.len()) as f64 * lift
 }
 
-/// huntGain: what a Hunt now adds, the value of the prey marks it would place.
-pub fn hunt_gain(ctx: &Ctx) -> f64 {
+/// huntGain: what a Hunt on the target in `cell` adds, the value of its prey mark.
+fn hunt_gain(ctx: &Ctx, cell: usize) -> f64 {
     let st = ctx.st;
-    let targets = hunt_targets(st);
-    let Some(lion) = st.cells[st.position].inmate.filter(|_| !targets.is_empty()) else { return 0.0 };
-    targets.iter().fold(0.0, |sum, &n| {
-        sum + link_value(ctx, lion.id, st.cells[n].inmate.expect("prey").id, st.params.prey_rounds as i32)
+    let (lion, prey) = (st.cells[st.position].inmate.expect("lion"), st.cells[cell].inmate.expect("prey"));
+    link_value(ctx, lion.id, prey.id, st.params.prey_rounds as i32)
+}
+
+/// bestHunt: the target among `options` whose prey mark is worth the most, with its gain.
+pub fn best_hunt(ctx: &Ctx, options: &[usize]) -> Option<(usize, f64)> {
+    options.iter().map(|&n| (n, hunt_gain(ctx, n))).fold(None, |best, (n, g)| match best {
+        Some((_, b)) if b >= g => best,
+        _ => Some((n, g)),
     })
 }
 

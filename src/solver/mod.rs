@@ -10,13 +10,13 @@ pub mod solve;
 pub mod values;
 
 use crate::engine::data::{Beast, CAGE_FIGHT, LOOT, ObjectiveKind, RAINBOW, Tool, data};
-use crate::engine::devour::{can_devour_now, devour_options, start_options};
+use crate::engine::devour::{can_devour_now, devour_options, hunt_targets, start_options};
 use crate::engine::rng::rand;
 use crate::engine::rules::door_weights;
 use crate::engine::state::{Cell, Pending, Phase, State};
 use crate::engine::{Action, ChoiceId};
 use chain::replace_odds;
-use scores::{best_by_board, devour_scores, hunt_gain, patrol_scores, swap_gain_here};
+use scores::{best_by_board, best_hunt, devour_scores, patrol_scores, swap_gain_here};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 use values::fresh_activation;
@@ -418,6 +418,8 @@ pub fn decide(st: &State, p: &Params, roll: &mut Rng32) -> Option<Action> {
             Pending::Cell { options, .. } => {
                 Some(Action::Choose { id: ChoiceId::Cell(patrol_scores(&mut ctx, options)[0].0) })
             }
+            // The Hunt's target pick: the prey mark worth the most.
+            Pending::Prey { options } => best_hunt(&ctx, options).map(|(n, _)| Action::Choose { id: ChoiceId::Cell(n) }),
             Pending::Tool { options, .. } => {
                 name(TOOL_RANK.iter().find(|t| options.contains(t)).unwrap_or(&options[0]).key())
             }
@@ -433,8 +435,10 @@ pub fn decide(st: &State, p: &Params, roll: &mut Rng32) -> Option<Action> {
     }
     // Manage: a Hunt goes first, as a devour after it already counts the
     // prey marks it would end.
-    if hunt_gain(&ctx) > 0.0 {
-        return Some(Action::Hunt);
+    if let Some((cell, gain)) = best_hunt(&ctx, &hunt_targets(st))
+        && gain > 0.0
+    {
+        return Some(Action::Hunt { cell });
     }
     let swap_gain = swap_gain_here(&ctx);
     if can_devour_now(st) {

@@ -5,7 +5,7 @@
 
 use serde_json::Value;
 use std::path::Path;
-use warden::board::build_state;
+use warden::board::{ChoiceKind, build_state};
 use warden::engine::data::{Tool, data};
 use warden::reader::load_png;
 use warden::reader::model::{RUN_DAYS, to_model};
@@ -81,7 +81,8 @@ fn panels_against_labels() {
             let options = solve(&st, 20, 1, &TUNED);
             assert!(!options.is_empty(), "{f}: no option");
             if cell_pick {
-                assert!(options.iter().all(|o| o.label.starts_with("Move to ")), "{f}: {:?}", options[0].label);
+                let start = if model.choice.kind == ChoiceKind::Prey { data().hunt_name.as_str() } else { "Move to " };
+                assert!(options.iter().all(|o| o.label.starts_with(start)), "{f}: {:?}", options[0].label);
             }
             solved += 1;
         }

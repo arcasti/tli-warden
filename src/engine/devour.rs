@@ -323,7 +323,7 @@ pub fn end_chain(s: &mut State) -> Outcome {
 }
 
 /// Hunt targets: with the Blood-Stained Trap, a Lion in the warden's cell
-/// marks every open Consumable target that has no prey mark yet.
+/// may mark one open Consumable target that has no prey mark yet.
 pub fn hunt_targets(s: &State) -> Vec<usize> {
     let n = s.position;
     let lion = s.cells[n].inmate.filter(|i| !s.cells[n].sealed && i.beast == Beast::Lion);
@@ -338,21 +338,24 @@ pub fn hunt_targets(s: &State) -> Vec<usize> {
         .collect()
 }
 
-pub fn hunt(s: &mut State) -> Outcome {
+/// Why there is no Hunt to play: also a board problem on a Hunt target pick.
+pub const HUNT_NEEDS: &str =
+    "Hunt needs the Blood-Stained Trap, a Berserk Lion in the warden's cell and a Consumable target without a Prey mark.";
+
+/// Hunt: the Lion marks the inmate in `cell`, one of its targets, as prey.
+pub fn hunt(s: &mut State, cell: usize) -> Outcome {
     if let Some(reason) = guard(s, Need::Manage) {
         return Outcome::Fail(reason);
     }
     let targets = hunt_targets(s);
     let Some(lion) = s.cells[s.position].inmate.filter(|_| !targets.is_empty()) else {
-        return Outcome::Fail(
-            "Hunt needs the Blood-Stained Trap, a Berserk Lion in the warden's cell and a Consumable target without a Prey mark.",
-        );
+        return Outcome::Fail(HUNT_NEEDS);
     };
-    for n in targets {
-        if let Some(prey) = s.cells[n].inmate {
-            s.prey.push(PreyLink { lion: lion.id, prey: prey.id, prey_beast: prey.beast, rounds: s.params.prey_rounds as i32, next: s.day + 1 });
-        }
+    if !targets.contains(&cell) {
+        return Outcome::Fail("The Hunt cannot mark that target.");
     }
+    let prey = s.cells[cell].inmate.expect("prey");
+    s.prey.push(PreyLink { lion: lion.id, prey: prey.id, prey_beast: prey.beast, rounds: s.params.prey_rounds as i32, next: s.day + 1 });
     s.used.hunt += 1;
     Outcome::Ok
 }

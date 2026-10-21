@@ -6,7 +6,7 @@
 
 use super::instruments::read_held;
 use super::ocr::{Line, ocr, ocr_all};
-use super::scene::beast_at;
+use super::scene::{beast_at, pick_shown};
 use super::{Rect, Rgba};
 use crate::engine::data::{Beast, Tool, data};
 
@@ -28,7 +28,7 @@ pub enum Screen {
     /// The Interrogation Room's Instigate and Bestow cards under the board.
     Interrogation,
     /// "Select an Objective" under the board: the Sewer Ratway's pick of the
-    /// cell the warden moves to.
+    /// cell the warden moves to, or the Hunt's pick of the Lion's prey.
     CellPick,
     /// The "Day N" plaque over a dimmed board.
     DayBanner,
@@ -80,7 +80,7 @@ pub struct Panels {
     /// Destination cards in order, as screen cell numbers (1 = Go to
     /// Interrogation Room); None for a card whose text did not read.
     pub doors: Vec<Option<u8>>,
-    /// Buttons on screen: "Consume", "Replace", "End", or "Cancel" on a
+    /// Buttons on screen: "Consume", "Replace", "Hunt", "End", or "Cancel" on a
     /// target pick.
     pub decision: Vec<&'static str>,
     /// The instruments on an instrument pick, in card order.
@@ -113,7 +113,9 @@ impl Panels {
 const DAYS: (Rect, f32) = (Rect::new(800, 0, 320, 60), 2.0);
 const TITLE: (Rect, f32) = (Rect::new(0, 70, 1918, 60), 1.5);
 const HEADING: (Rect, f32) = (Rect::new(420, 680, 1100, 40), 2.0);
-const CARDS: (Rect, f32) = (Rect::new(440, 740, 1040, 200), 1.5);
+/// Wide enough for the four decision cards of a Hunt day, whose Consume and
+/// End names sit at about x 440 and 1476 (hunt-run-0005).
+const CARDS: (Rect, f32) = (Rect::new(360, 740, 1160, 200), 1.5);
 const TARGET: (Rect, f32) = (Rect::new(700, 800, 520, 50), 2.0);
 const CANCEL: (Rect, f32) = (Rect::new(1600, 740, 318, 140), 2.0);
 const BANNER: (Rect, f32) = (Rect::new(760, 400, 400, 130), 2.0);
@@ -355,8 +357,8 @@ fn interrogation(lines: &[Line]) -> bool {
 fn buttons(lines: &[Line]) -> Vec<&'static str> {
     let mut found: Vec<(i32, &'static str)> = Vec::new();
     for l in lines {
-        if let Some((i, _)) = best_match(&l.text, &["Consume", "Replace", "End"], 0.65) {
-            let name = ["Consume", "Replace", "End"][i];
+        if let Some((i, _)) = best_match(&l.text, &["Consume", "Replace", "Hunt", "End"], 0.65) {
+            let name = ["Consume", "Replace", "Hunt", "End"][i];
             if !found.iter().any(|f| f.1 == name) {
                 found.push((l.rect.x, name));
             }
@@ -454,7 +456,11 @@ pub fn read_panels_titled(img: &Rgba, title: &Rgba) -> Panels {
         p.decision = buttons(&cards);
         let doors = doors(&cards, |x| reread(img, x));
         if has(&heading, "Select an Objective", 0.75) {
-            p.screen = Screen::CellPick;
+            // Without brackets or a target glow nothing is picked: the board
+            // shows between the pick and the next screen.
+            if pick_shown(img) {
+                p.screen = Screen::CellPick;
+            }
         } else if interrogation(&cards) {
             // Its heading is "Make Your Decision", as on the manage step.
             p.screen = Screen::Interrogation;

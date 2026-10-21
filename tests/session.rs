@@ -7,7 +7,7 @@ use std::path::Path;
 mod common;
 use warden::app::runlog::RunLog;
 use warden::app::session::{CellEdit, casket_meals, consume_targets, DaysClock, HELD_BLOCKS, MAX_WAIT, RECHECK, ROUND, Reading, SETTLE, Session, Watch, differs, fingerprint};
-use warden::board::{CellModel, ChoiceKind, EventMark, Model, Step, build_state};
+use warden::board::{CellModel, ChoiceKind, EventMark, Model, PreyMark, Step, build_state};
 use warden::engine::data::{Beast, IRON_LAW, OPULENCE, Tool};
 use warden::engine::devour::{devour_options, start_options};
 use warden::engine::{Action, ChoiceId};
@@ -1453,4 +1453,59 @@ fn rollouts_same_on_any_thread_count() {
     r.run(25);
     r.run_on(35, 3);
     assert_eq!(r.ranking(), one);
+}
+
+/// A Prey mark loses a round each day after it is first read: the crosshair
+/// on cell 4 of the Trap run reads 3 rounds on day 3 (hunt-run-0008) and 2
+/// on day 4 (hunt-run-0012). Day 3 read twice after it is a new run's, at 3
+/// again (a lone higher days counter is taken as a misread). Skips when a
+/// frame is missing.
+#[test]
+fn prey_mark_rounds_count_down() {
+    let dir = common::frames();
+    let frames = ["hunt-run-0008.png", "hunt-run-0012.png", "hunt-run-0008.png", "hunt-run-0008.png"].map(|f| dir.join(f));
+    if !frames.iter().all(|f| f.is_file()) {
+        println!("skipped: a hunt-run frame in {} is missing", dir.display());
+        return;
+    }
+    let mut s = Session::new(20, Vec::new(), None, None);
+    for (f, (day, rounds)) in frames.iter().zip([(3, 3), (4, 2), (4, 2), (3, 3)]) {
+        s.read_in_background(load_png(f).unwrap());
+        s.wait();
+        let model = &s.reading.as_ref().unwrap().model;
+        let marks: Vec<PreyMark> = model.cells.iter().filter_map(|c| match c {
+            CellModel::Inmate { prey: Some(mark), .. } => Some(*mark),
+            _ => None,
+        }).collect();
+        assert_eq!((model.day, marks), (day, vec![PreyMark { cell: Some(3), rounds }]), "{}", f.display());
+    }
+}
+
+/// The Hunt's target pick (hunt-run-0006) shows no cards: it keeps the day's
+/// used Consume from the manage screen before it (hunt-run-0005), and its
+/// cells, since the white glow on the lone target, the Normal Wolf in cell 4,
+/// spoils that cell's read. The pick marks that Wolf. Skips when a frame is
+/// missing.
+#[test]
+fn hunt_pick_keeps_manage_read() {
+    let dir = common::frames();
+    let (manage, hunt) = (dir.join("hunt-run-0005.png"), dir.join("hunt-run-0006.png"));
+    if !manage.is_file() || !hunt.is_file() {
+        println!("skipped: a hunt-run frame in {} is missing", dir.display());
+        return;
+    }
+    let mut s = Session::new(20, Vec::new(), None, None);
+    s.read_in_background(load_png(&manage).unwrap());
+    s.wait();
+    let before = s.reading.clone().unwrap().model;
+    assert_eq!((before.step, before.devour_used, before.swap_used), (Step::Manage, false, false));
+    s.read_in_background(load_png(&hunt).unwrap());
+    s.wait();
+    let r = s.reading.clone().unwrap();
+    assert_eq!((r.screen, r.model.step, r.model.choice.kind), (Screen::CellPick, Step::Choice, ChoiceKind::Prey));
+    assert_eq!((r.model.devour_used, r.model.swap_used, r.model.hunt_used), (false, false, false));
+    assert_eq!(r.model.cells, before.cells);
+    assert!(s.problems.is_empty(), "{:?}", s.problems);
+    let label = &s.pick.as_ref().expect("a pick").label;
+    assert!(label.starts_with(&format!("{}: mark", warden::engine::data::data().hunt_name)) && label.contains(" in 04 "), "{label}");
 }

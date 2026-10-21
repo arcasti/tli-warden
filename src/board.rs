@@ -5,7 +5,7 @@
 
 use crate::engine::data::{Beast, Card, Gift, RAINBOW, Tool, data};
 use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATWAY};
-use crate::engine::devour::can_eat;
+use crate::engine::devour::{HUNT_NEEDS, can_eat, hunt_targets};
 use crate::engine::rules::{new_game_with, steps_between};
 use crate::engine::state::{Cell, EventRef, Inmate, Nest, ObjectiveState, Params, Pending, Phase, PreyLink, State, ToolReason, Used, VaultEntry};
 use crate::engine::text::cell_label;
@@ -87,6 +87,8 @@ pub enum ChoiceKind {
     Cell,
     /// The Interrogation Room's Instigate or Bestow.
     Interrogation,
+    /// The Hunt's target pick: one of the Lion's Consumable targets.
+    Prey,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -108,6 +110,7 @@ pub struct Model {
     pub dest: Vec<usize>,
     pub devour_used: bool,
     pub swap_used: bool,
+    pub hunt_used: bool,
     pub event_kind: EventKindModel,
     pub choice: Choice,
     pub chain_armed: bool,
@@ -148,6 +151,7 @@ impl Model {
             dest: Vec::new(),
             devour_used: false,
             swap_used: false,
+            hunt_used: false,
             event_kind: EventKindModel::Chain,
             choice: Choice { kind: ChoiceKind::Tool, options: Vec::new() },
             chain_armed: false,
@@ -284,6 +288,7 @@ fn normalize(v: &Value) -> Model {
         .collect();
     m.devour_used = truthy(o.get("devourUsed"));
     m.swap_used = truthy(o.get("swapUsed"));
+    m.hunt_used = truthy(o.get("huntUsed"));
     if o.get("eventKind").and_then(Value::as_str) == Some("execution") {
         m.event_kind = EventKindModel::Execution;
     }
@@ -291,6 +296,7 @@ fn normalize(v: &Value) -> Model {
         match choice.get("kind").and_then(Value::as_str) {
             Some("gift") => m.choice.kind = ChoiceKind::Gift,
             Some("cell") => m.choice.kind = ChoiceKind::Cell,
+            Some("prey") => m.choice.kind = ChoiceKind::Prey,
             Some("interrogation") => m.choice.kind = ChoiceKind::Interrogation,
             _ => {}
         }
@@ -417,7 +423,7 @@ pub fn build_state(m: &Model, seed: u32) -> (State, Vec<String>) {
     st.pending = Vec::new();
     st.phase = Phase::Manage;
 
-    let used_today = Used { swap: u32::from(m.swap_used), devour: u32::from(m.devour_used), hunt: 0 };
+    let used_today = Used { swap: u32::from(m.swap_used), devour: u32::from(m.devour_used), hunt: u32::from(m.hunt_used) };
     match m.step {
         Step::Patrol => {
             st.phase = Phase::Patrol;
@@ -452,6 +458,8 @@ pub fn build_state(m: &Model, seed: u32) -> (State, Vec<String>) {
                 ChoiceKind::Gift => Pending::Gift { options: Gift::ALL.to_vec(), picks: 1 },
                 ChoiceKind::Cell => Pending::Cell { id: SEWER_RATWAY, options: (0..d.cell_count).filter(|&n| n != d.room).collect() },
                 ChoiceKind::Interrogation => Pending::Interrogation { options: Card::ALL.to_vec() },
+                // The pick comes before the mark: the targets as the Manage phase has them.
+                ChoiceKind::Prey => Pending::Prey { options: hunt_targets(&st) },
                 ChoiceKind::Tool => {
                     let mut options: Vec<Tool> = Vec::new();
                     for &t in &m.choice.options {
@@ -463,7 +471,11 @@ pub fn build_state(m: &Model, seed: u32) -> (State, Vec<String>) {
                 }
             };
             if pending.is_empty() {
-                problems.push(format!("Pick the {}s on offer.", d.instrument_name));
+                problems.push(if m.choice.kind == ChoiceKind::Prey {
+                    HUNT_NEEDS.to_string()
+                } else {
+                    format!("Pick the {}s on offer.", d.instrument_name)
+                });
             }
             st.pending = vec![pending];
         }

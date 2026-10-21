@@ -985,10 +985,63 @@ fn treasure_seals_the_last_meal() {
     assert!(s.problems.is_empty(), "{:?}", s.problems);
 }
 
+/// The Consume target screen rec3-t117 with the Shackles and the Saw held,
+/// then the day 9 patrol board rec3-t161 (`_` for its panel read empty, as
+/// while the board fades in): the session and the reading on show.
+fn chain_then_board(board: &str) -> Option<(Session, Reading)> {
+    let frames = ["rec3-t113.png", "rec3-t114.png", "rec3-t116.png", "rec3-t117.png"];
+    if !have(&[board]) {
+        return None;
+    }
+    let mut s = read_all(Vec::new(), &frames)?;
+    let chain = s.reading.clone().unwrap();
+    assert_eq!(chain.screen, Screen::ChainTarget);
+    assert_eq!(s.tools, [Tool::Longchain, Tool::Saw]);
+    s.read_in_background(frame(board));
+    s.wait();
+    Some((s, chain))
+}
+
+/// A board read with an empty instrument panel right after a Consume target
+/// screen is kept once; a second such read in a row is taken.
+#[test]
+fn fading_board_after_a_chain_is_kept_once() {
+    let Some((mut s, chain)) = chain_then_board("_rec3-t161.png") else { return };
+    let kept = s.reading.clone().unwrap();
+    assert_eq!((&kept.model, kept.screen, kept.at), (&chain.model, chain.screen, chain.at));
+    assert_eq!(kept.kept_lines(), ["The board is still coming in: showing the last reading."]);
+    assert_eq!(s.tools, [Tool::Longchain, Tool::Saw]);
+
+    s.read_in_background(frame("_rec3-t161.png"));
+    s.wait();
+    let r = s.reading.clone().unwrap();
+    assert_eq!(r.screen, Screen::Patrol);
+    assert!(r.kept_lines().is_empty(), "{:?}", r.warnings);
+    assert!(s.tools.is_empty());
+}
+
+/// A board whose panel reads the held instruments is taken at once after a
+/// Consume target screen.
+#[test]
+fn board_after_a_chain_is_taken() {
+    let Some((s, _)) = chain_then_board("rec3-t161.png") else { return };
+    let r = s.reading.clone().unwrap();
+    assert_eq!(r.screen, Screen::Patrol);
+    assert!(r.kept_lines().is_empty(), "{:?}", r.warnings);
+    assert_eq!(s.tools, [Tool::Longchain, Tool::Saw]);
+}
+
 /// Saved frame `name`; a leading `~` covers its first instrument slot with
-/// noise, so the panel's read is unsure.
+/// noise, so the panel's read is unsure, and a leading `_` with one colour,
+/// so the panel reads empty.
 fn frame(name: &str) -> Rgba {
-    let Some(name) = name.strip_prefix('~') else { return load_png(&common::frames().join(name)).unwrap() };
+    let (noise, name) = match name.strip_prefix('~') {
+        Some(rest) => (true, rest),
+        None => match name.strip_prefix('_') {
+            Some(rest) => (false, rest),
+            None => return load_png(&common::frames().join(name)).unwrap(),
+        },
+    };
     let mut img = load_png(&common::frames().join(name)).unwrap();
     // The slot's 89 px icon around (122, 391); frames load at 1918x1078.
     let mut seed = 1u32;
@@ -996,7 +1049,7 @@ fn frame(name: &str) -> Rgba {
         for x in 77..167 {
             seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
             let i = (y * img.w + x) * 4;
-            img.data[i..i + 3].fill((seed >> 24) as u8);
+            img.data[i..i + 3].fill(if noise { (seed >> 24) as u8 } else { 20 });
         }
     }
     img
@@ -1276,7 +1329,7 @@ fn run_log_saves_a_frame_per_board() {
 
 /// True when the saved frames hold every one of `names`; says which is missing otherwise.
 fn have(names: &[&str]) -> bool {
-    let missing = names.iter().find(|f| !common::frames().join(f.trim_start_matches('~')).is_file());
+    let missing = names.iter().find(|f| !common::frames().join(f.trim_start_matches(['~', '_'])).is_file());
     if let Some(f) = missing {
         println!("skipped: {f} is missing");
     }

@@ -62,7 +62,7 @@ impl Reading {
 
 /// Whether a warning is a line [`Session::take_read`] puts over a kept reading.
 fn kept_line(text: &str) -> bool {
-    text == POPUP || text == OFF_BOARD || text.starts_with(THEME_READ) || text.starts_with(SHAPE)
+    text == POPUP || text == OFF_BOARD || text == FADING || text.starts_with(THEME_READ) || text.starts_with(SHAPE)
 }
 
 /// The days left until the Riot over a run's readings. The counter only
@@ -283,6 +283,8 @@ pub fn casket_meals(m: &mut Model, read: &Model, jawed: &[usize]) -> Vec<Warning
 const POPUP: &str = "A popup covers the game: showing the last reading.";
 /// The line shown over the last reading while the board is not on screen.
 const OFF_BOARD: &str = "The prison board is not on screen: showing the last reading.";
+/// The line shown over the last reading while the board fades in after a Consume target screen.
+const FADING: &str = "The board is still coming in: showing the last reading.";
 /// How the line shown over the last reading after the run theme scroll starts.
 const THEME_READ: &str = "The run's theme: ";
 /// The line for a read kept between runs, see [`Session::install`].
@@ -532,6 +534,8 @@ pub struct Session {
     /// The player set the held list on the pick on show: nothing is inferred
     /// from it.
     pick_named: bool,
+    /// The last read was kept as the board fading in, see [`Session::take_read`].
+    fade_kept: bool,
     /// The session's lines for the stored read (a held list it changed).
     notes: Vec<String>,
     /// The session changed `tools` or `theme`, see [`Session::take_tools_changed`].
@@ -599,6 +603,7 @@ impl Session {
             advised_tool: None,
             held_edit: None,
             pick_named: false,
+            fade_kept: false,
             notes: Vec::new(),
             tools_changed: false,
             theme_fresh: false,
@@ -717,10 +722,19 @@ impl Session {
             self.theme = Some(id);
             self.theme_fresh = true;
         }
+        // The board fading in after a Consume target screen reads the
+        // instrument panel as empty, and its cells unsure, for a frame. A run
+        // loses no instrument, so such a read is kept once and the next taken.
+        let fading = !self.fade_kept
+            && self.reading.as_ref().is_some_and(|r| r.screen == Screen::ChainTarget)
+            && !self.tools.is_empty()
+            && panels.held.as_ref().is_some_and(Vec::is_empty);
+        self.fade_kept = fading;
         let kept = shape.clone().or_else(|| match panels.screen {
             Screen::Theme => Some(format!("{THEME_READ}{}.", data().theme_name(self.theme).unwrap_or_default())),
             Screen::Popup => Some(POPUP.to_string()),
             _ if panels.off_board() => Some(OFF_BOARD.to_string()),
+            _ if fading => Some(FADING.to_string()),
             _ => None,
         });
         if let Some(line) = kept {

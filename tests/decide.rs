@@ -7,9 +7,7 @@
 
 use serde_json::{Value, json};
 use warden::engine::data::Tool;
-use warden::engine::Action;
 use warden::engine::state::State;
-use warden::solver::solve::{FollowUp, follow_up};
 use warden::solver::{TUNED, bench};
 
 mod common;
@@ -58,32 +56,6 @@ fn board(name: &str) -> State {
     let (st, problems) = common::build(name);
     assert!(problems.is_empty(), "{problems:?}");
     st
-}
-
-#[test]
-fn follow_up_after_a_known_marker() {
-    // Cell 15's Chain Reaction marker is known: its Confirm follows the patrol on every resample.
-    let st = board("patrol.json");
-    let Some(FollowUp::Move(next)) = follow_up(&st, &Action::Patrol { cell: 14 }) else { panic!("expected a move") };
-    assert_eq!((next.action, next.label.as_str()), (Action::Event, "Confirm Chain Reaction"));
-}
-
-#[test]
-fn follow_up_when_only_the_end_is_left() {
-    // Consume used: after the Replace, End the day is the only move.
-    let mut st = board("manage.json");
-    (st.used.devour, st.used.swap) = (1, 0);
-    let Some(FollowUp::Move(next)) = follow_up(&st, &Action::Swap) else { panic!("expected a move") };
-    assert_eq!((next.action, next.why.as_str()), (Action::End, "It's the only move left."));
-}
-
-#[test]
-fn follow_up_behind_a_door_depends() {
-    let st = board("patrol.json");
-    // A locked door: what it holds decides the next move.
-    assert!(matches!(follow_up(&st, &Action::Patrol { cell: 9 }), Some(FollowUp::Depends)));
-    // An unseen incident: the Confirm would name one the player can't see yet.
-    assert!(matches!(follow_up(&st, &Action::Patrol { cell: 5 }), Some(FollowUp::Depends)));
 }
 
 #[test]

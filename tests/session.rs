@@ -15,7 +15,7 @@ use warden::reader::{Rgba, load_png, read_model};
 use warden::reader::model::WarningKind;
 use warden::reader::panels::Screen;
 use warden::solver::TUNED;
-use warden::solver::solve::{Rollouts, follow_up, solve};
+use warden::solver::solve::{Rollouts, solve};
 
 const ROLLOUTS: usize = 400;
 
@@ -143,18 +143,6 @@ fn marker_correction() {
     s.set_marker(n as u8 + 1, false).unwrap();
     assert_eq!(cell(&s), CellModel::Sealed { event: None });
     assert!(s.set_marker(1, true).is_err(), "the Interrogation Room takes no marker");
-}
-
-/// A Then line for the advised move: the session's follow-up is the
-/// solver's for the action it advises after the solve.
-#[test]
-fn session_follows_the_advised_move() {
-    let Some(s) = read_all(Vec::new(), &["rec1-t087.png"]) else { return };
-    let advised = s.advice().expect("an advised move");
-    let (st, _) = build_state(&s.reading.as_ref().unwrap().model, 1);
-    let expected = follow_up(&st, &advised.action);
-    assert!(expected.is_some(), "the run goes on after {}", advised.label);
-    assert_eq!(s.follow_up(), expected.as_ref());
 }
 
 /// A live frame of another 16:9 size reads as the reference size does; a

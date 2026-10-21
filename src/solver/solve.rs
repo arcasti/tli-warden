@@ -361,7 +361,7 @@ pub(crate) fn set_priority(priority: i32) {
 pub(crate) fn set_priority(_: i32) {}
 
 /// The strategy's pick with its label and a short reason (instant: no playouts).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 pub struct Instant {
     pub action: Action,
     pub label: String,
@@ -385,44 +385,6 @@ fn labelled(st: &State, action: Action) -> Option<Instant> {
     };
     let why = reason(st, &action);
     Some(Instant { action, label, why })
-}
-
-/// The strategy's move after `action`: the same on every resample of what
-/// the player can't see, or depending on it (what a door reveals, a roll).
-#[derive(Clone, Debug, PartialEq)]
-pub enum FollowUp {
-    Move(Instant),
-    Depends,
-}
-
-/// Seeds of the hidden information `follow_up` plays `action` under.
-const FOLLOW_SEEDS: u32 = 8;
-
-/// follow_up: plays `action` on resamples of the hidden information and
-/// asks the strategy for the next move on each. None when `action` can't
-/// be played or the run ends with it.
-pub fn follow_up(st: &State, action: &Action) -> Option<FollowUp> {
-    let mut next: Vec<Instant> = Vec::new();
-    for seed in 1..=FOLLOW_SEEDS {
-        let mut trial = st.clone();
-        hide_future(&mut trial, seed);
-        if !apply(&mut trial, action).is_ok() {
-            return None;
-        }
-        let only = candidates(&trial).len() == 1;
-        next.extend(instant(&trial).map(|mut i| {
-            if only {
-                i.why = "It's the only move left.".to_string();
-            }
-            i
-        }));
-    }
-    let first = next.first()?;
-    // The label too: a Confirm names the incident, which may be one the player can't see yet.
-    if next.len() == FOLLOW_SEEDS as usize && next.iter().all(|i| i.action == first.action && i.label == first.label) {
-        return Some(FollowUp::Move(next.swap_remove(0)));
-    }
-    Some(FollowUp::Depends)
 }
 
 /// toFixed: like Rust's `{:.d$}`, but a tie rounds up as in the JS.

@@ -17,7 +17,7 @@ use crate::solver::advise::{Advice, Pick, advise, also_good};
 use serde_json::json;
 use crate::engine::{Action, ChoiceId};
 use crate::engine::state::{Pending, State};
-use crate::solver::solve::{FollowUp, Rollouts, SolveOption, follow_up, instant, instant_bite};
+use crate::solver::solve::{Rollouts, SolveOption, instant, instant_bite};
 use crate::engine::devour::{eats, offer_chain, start_options};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -489,8 +489,6 @@ pub struct Session {
     pub rollouts: usize,
     /// The state the running solve plays from.
     state: Option<State>,
-    /// The advised action and the strategy's move after it, see [`follow_up`].
-    next: Option<(Action, Option<FollowUp>)>,
     /// The stored read, its days replaced by the clock's count.
     scene: Option<(Scene, Panels, SystemTime)>,
     /// The size of the last frame read, before it was scaled.
@@ -575,7 +573,6 @@ impl Session {
             solving: false,
             rollouts: rollouts.max(1),
             state: None,
-            next: None,
             scene: None,
             size: (REF_W, REF_H),
             ui_scale: None,
@@ -899,20 +896,14 @@ impl Session {
         log.event("read", r.at, fields);
     }
 
-    /// Logs the advice of a finished solve: the pick, the picks about as
-    /// good, and the strategy's move after the pick.
+    /// Logs the advice of a finished solve: the pick and the picks about as
+    /// good.
     fn log_advice(&self) {
         let (Some(log), Some(a)) = (&self.log, self.advice()) else { return };
-        let then = match self.follow_up() {
-            Some(FollowUp::Move(next)) => Some(next.label.as_str()),
-            Some(FollowUp::Depends) => Some("depends"),
-            None => None,
-        };
         let fields = json!({
             "read_at": self.reading.as_ref().map(|r| timestamp(r.at)),
             "pick": a.label,
             "also_good": also_good(&self.ranking, a.option).into_iter().map(|k| self.ranking[k].label.as_str()).collect::<Vec<_>>(),
-            "then": then,
             "rounds": self.rounds,
         });
         log.event("advice", SystemTime::now(), fields);
@@ -1142,30 +1133,16 @@ impl Session {
         advise(self.pick.as_ref(), &self.ranking, !self.solving || self.rounds >= LIVE_MIN)
     }
 
-    /// The strategy's move after the advised one; None when there is none
-    /// (the run ends with it, or nothing is advised).
-    pub fn follow_up(&self) -> Option<&FollowUp> {
-        self.next.as_ref().and_then(|(_, f)| f.as_ref())
-    }
-
-    /// Works out the move after the advised one when the advice changes, and
-    /// keeps the instrument advised on an instrument pick.
-    fn follow(&mut self) {
-        let (Some(st), Some(advice)) = (&self.state, self.advice()) else {
-            self.next = None;
-            return;
-        };
+    /// Keeps the instrument advised on an instrument pick.
+    fn note_advised_tool(&mut self) {
         if !self.pick_named
             && self.reading.as_ref().is_some_and(|r| r.screen == Screen::InstrumentPick)
+            && let Some(advice) = self.advice()
             && let Action::Choose { id: ChoiceId::Name(key) } = &advice.action
             && let Some(t) = Tool::from_key(key)
         {
             self.advised_tool = Some(t);
         }
-        if self.next.as_ref().is_some_and(|(action, _)| *action == advice.action) {
-            return;
-        }
-        self.next = Some((advice.action.clone(), follow_up(st, &advice.action)));
     }
 
     /// Starts a solve of the current model on a worker thread, replacing any
@@ -1217,7 +1194,7 @@ impl Session {
         let pick = if first { instant_bite(&st, &bites) } else { instant(&st) };
         self.pick = pick.map(|i| Pick { action: i.action, label: i.label, why: i.why });
         self.state = Some(st.clone());
-        self.follow();
+        self.note_advised_tool();
         let (tx, rx) = channel();
         self.rx = Some(rx);
         self.solving = true;
@@ -1252,7 +1229,6 @@ impl Session {
         self.rounds = 0;
         self.pick = None;
         self.state = None;
-        self.next = None;
         self.problems.clear();
         self.solving = false;
         self.rx = None;
@@ -1332,7 +1308,7 @@ impl Session {
             changed = true;
         }
         if changed {
-            self.follow();
+            self.note_advised_tool();
         }
         if was_solving && !self.solving {
             self.log_advice();
@@ -1368,7 +1344,7 @@ impl Session {
                 Err(_) => self.solving = false,
             }
         }
-        self.follow();
+        self.note_advised_tool();
         if was_solving {
             self.log_advice();
         }

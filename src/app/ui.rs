@@ -1,11 +1,11 @@
 //! The window: reads on the read hotkey, the Read button, a saved screenshot
 //! or by itself when the game's screen changes (auto read, turned on and off
 //! by the Auto button or the auto read hotkey). It has four tabs. Board shows
-//! the screen's ring of cells (click a cell to correct it) with the pick, the
-//! move after it and the other good picks marked on their cells, and the pick
-//! written in the courtyard inside the ring. Moves lists every move the
-//! playouts rated. Run holds the held instruments and the run theme, and
-//! Settings the keys and options. The window moves itself to the empty area
+//! the screen's ring of cells (click a cell to correct it) with the pick and
+//! the other good picks marked on their cells, and the pick written in the
+//! courtyard inside the ring. Moves lists every move the playouts rated.
+//! Run holds the held instruments and the run theme, and Settings the keys
+//! and options. The window moves itself to the empty area
 //! under the game's instrument panel once, when the game is first found.
 //! Under the tab row it offers to install itself when it runs from elsewhere,
 //! asks once whether to share run logs, and offers to update once installed,
@@ -15,7 +15,6 @@ use super::capture::{Event, Watcher, capture, game_rect};
 use super::hotkey::{Hotkey, parse};
 use super::session::{CellEdit, Session};
 use crate::solver::advise::also_good;
-use crate::solver::solve::FollowUp;
 use super::runlog::{RunLog, folder_name};
 use super::settings::{self, Settings};
 use super::share::{self, Uploader};
@@ -600,7 +599,7 @@ impl WardenApp {
     }
 
     /// The ring with the pick in its courtyard and marks on the cells of the
-    /// pick, the move after it and the other good picks. Over a kept reading,
+    /// pick and the other good picks. Over a kept reading,
     /// the lines saying why the frames since were not read, and "last
     /// reading" in the courtyard.
     fn board_tab(&mut self, ui: &mut egui::Ui) {
@@ -626,16 +625,11 @@ impl WardenApp {
         };
         let advice = s.advice();
         let warden = reading.model.warden;
-        let then = match s.follow_up() {
-            Some(FollowUp::Move(next)) => Some(next),
-            _ => None,
-        };
         let pick = advice.as_ref().and_then(|a| action_cell(&a.action, warden));
         // The good moves on a cell are marked on the ring.
         let near = advice.as_ref().map(|a| also_good(&s.ranking, a.option)).unwrap_or_default();
         let marks = Marks {
             pick,
-            then: then.and_then(|n| action_cell(&n.action, warden)),
             near: near.into_iter().filter_map(|k| action_cell(&s.ranking[k].action, warden)).filter(|&c| Some(c) != pick).collect(),
         };
         let kept = reading.kept_lines();
@@ -659,8 +653,7 @@ impl WardenApp {
             }
         }
         let pick = advice.as_ref().map(|a| move_name(&a.action, short(&a.label)));
-        let next = then.map(|n| move_name(&n.action, short(&n.label)));
-        courtyard(ui, court, &day, pick.as_deref(), next.as_deref(), s.solving);
+        courtyard(ui, court, &day, pick.as_deref(), s.solving);
         if let Some(a) = &advice {
             ui.interact(court, egui::Id::unique("warden-courtyard"), Sense::hover()).on_hover_text(format!("{}\n{}", a.label, a.why));
         }
@@ -670,7 +663,7 @@ impl WardenApp {
     }
 
     /// The problems and the warnings of no cell, then every rated move with
-    /// its mean as a bar; the advised one with the move after it and why.
+    /// its mean as a bar; the advised one with why.
     fn moves_tab(&mut self, ui: &mut egui::Ui) {
         let s = &self.session;
         ui.horizontal(|ui| {
@@ -734,9 +727,6 @@ impl WardenApp {
                 ui.horizontal(|ui| {
                     ui.add_space(14.0);
                     ui.vertical(|ui| {
-                        if let Some(FollowUp::Move(next)) = s.follow_up() {
-                            ui.label(RichText::new(format!("then {}", move_name(&next.action, &next.label))).small().color(Color32::from_gray(221)));
-                        }
                         ui.label(RichText::new(&a.why).small().weak());
                     });
                 });
@@ -1089,11 +1079,10 @@ fn describe(cell: &CellModel) -> String {
     }
 }
 
-/// The model cells the board marks: the pick's, the next move's and those of
-/// the other good picks.
+/// The model cells the board marks: the pick's and those of the other good
+/// picks.
 struct Marks {
     pick: Option<usize>,
-    then: Option<usize>,
     near: Vec<usize>,
 }
 
@@ -1107,7 +1096,6 @@ fn board(ui: &mut egui::Ui, m: &Model, warned: &[(usize, &str)], marks: &Marks) 
     let at = |col: usize, row: usize| Rect::from_min_size(area.min + Vec2::new(col as f32 * (w + GAP), row as f32 * (tile.y + GAP)), tile);
     let court = at(1, 1).union(at(4, 2));
     let mut clicked = None;
-    let mut badges = Vec::new();
     for (n, cell) in m.cells.iter().enumerate().take(16) {
         let (col, row) = ring(n);
         let rect = at(col, row);
@@ -1125,10 +1113,6 @@ fn board(ui: &mut egui::Ui, m: &Model, warned: &[(usize, &str)], marks: &Marks) 
         tile_shape(p, rect, cell, n, response.hovered());
         if marks.pick == Some(n) {
             p.rect_stroke(rect, 4.0, Stroke::new(2.0, LEADER), StrokeKind::Inside);
-            badges.push((rect, "1", LEADER, Color32::from_rgb(13, 36, 16)));
-        } else if marks.then == Some(n) {
-            dashed_outline(p, rect.shrink(0.75), Stroke::new(1.5, LEADER));
-            badges.push((rect, "2", DARK_GREEN, PALE_GREEN));
         }
         if marks.near.contains(&n) {
             p.circle_filled(rect.left_top() + Vec2::new(6.0, 6.0), 3.0, LEADER.gamma_multiply(0.8));
@@ -1142,24 +1126,12 @@ fn board(ui: &mut egui::Ui, m: &Model, warned: &[(usize, &str)], marks: &Marks) 
             p.rect_stroke(rect, 4.0, Stroke::new(2.5, WARDEN), StrokeKind::Outside);
         }
     }
-    let p = ui.painter();
-    for (rect, text, fill, colour) in badges {
-        let c = rect.left_top() + Vec2::splat(7.0);
-        p.circle_filled(c, 6.5, fill);
-        p.text(c, Align2::CENTER_CENTER, text, FontId::proportional(10.0), colour);
-    }
     (clicked, court)
 }
 
-/// The edge of `rect` in dashes.
-fn dashed_outline(p: &egui::Painter, rect: Rect, stroke: Stroke) {
-    let corners = [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom(), rect.left_top()];
-    p.extend(Shape::dashed_line(&corners, stroke, 4.0, 3.0));
-}
-
-/// The pick written in the ring's courtyard, centred: the day, the move with
-/// a spinner while the playouts run, and the move after it.
-fn courtyard(ui: &egui::Ui, court: Rect, day: &str, pick: Option<&str>, then: Option<&str>, solving: bool) {
+/// The pick written in the ring's courtyard, centred: the day and the move,
+/// with a spinner while the playouts run.
+fn courtyard(ui: &egui::Ui, court: Rect, day: &str, pick: Option<&str>, solving: bool) {
     let p = ui.painter().with_clip_rect(court);
     let small = egui::TextStyle::Small.resolve(ui.style());
     let spin = 14.0;
@@ -1172,11 +1144,8 @@ fn courtyard(ui: &egui::Ui, court: Rect, day: &str, pick: Option<&str>, then: Op
     let mut lines = vec![(layout(day.to_string(), small.clone(), ui.visuals().weak_text_color(), wrap), false)];
     match pick {
         Some(pick) => lines.push((layout(pick.to_string(), FontId::proportional(15.0), LEADER, wrap - spin), solving)),
-        None if solving => lines.push((layout("Solving...".to_string(), small.clone(), ui.visuals().text_color(), wrap - spin), true)),
+        None if solving => lines.push((layout("Solving...".to_string(), small, ui.visuals().text_color(), wrap - spin), true)),
         None => {}
-    }
-    if let Some(then) = then {
-        lines.push((layout(format!("then {then}"), small, Color32::from_gray(207), wrap), false));
     }
     let gap = 2.0;
     let height: f32 = lines.iter().map(|(g, _)| g.rect.height() + gap).sum::<f32>() - gap;

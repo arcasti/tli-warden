@@ -16,7 +16,7 @@ use warden::engine::data::Tool;
 use warden::reader::{read_model, save_png};
 use warden::solver::bench::{LOW, Solo, bench, is_low, mean_se, spread, strategy_bench, summarize};
 use warden::solver::{Params, TUNED};
-use warden::solver::solve::{FollowUp, follow_up, instant, solve};
+use warden::solver::solve::{instant, solve};
 
 /// println! that ignores a closed pipe (`| head`) instead of aborting.
 macro_rules! out {
@@ -308,15 +308,7 @@ fn run_solve(args: &[String]) -> Result<ExitCode, String> {
     }
 
     match instant(&st) {
-        Some(pick) => {
-            out!("Pick: {}\n  {}", pick.label, pick.why);
-            if let Some(next) = follow_up(&st, &pick.action) {
-                match next {
-                    FollowUp::Move(next) => out!("Then: {}\n  {}", next.label, next.why),
-                    FollowUp::Depends => out!("Then: depends on what this move reveals; read the board again."),
-                }
-            }
-        }
+        Some(pick) => out!("Pick: {}\n  {}", pick.label, pick.why),
         None => out!("No move: the run is over."),
     }
     let options = solve(&st, rollouts, seed, &TUNED);

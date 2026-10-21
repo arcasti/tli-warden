@@ -24,7 +24,7 @@ Download `warden.exe` from the [latest release](https://github.com/arcasti/tli-w
 Then play. The window stays on top of the game.
 
 - Auto read (on by default) captures the game window whenever the screen changes and reads it. F8 turns it on or off and F9 reads once, but both only work while the game is not focused, because the game swallows key presses.
-- The Board tab shows the ring of cells as read, the recommended move in the middle, and under the day the run's objective with its progress ("Undercurrents 1/2"), which the advice plays toward. Click a cell to correct a misread one.
+- The Board tab shows the ring of cells as read, the recommended move in the middle, and under the day the run's objective with its progress ("Undercurrents 1/2"), which the advice plays toward. Click a cell to correct a misread one. While a game panel covers the board, such as the Chromatic reward after a Chromatic is vaulted, the Board tab keeps the last reading: close the panel and Warden reads the cells again.
 - The Moves tab ranks every option by the mean Riot loot over the playouts, and lists the reader's warnings. Each Inmate left at the Riot and each vaulted Chromatic yields a Warden's Cache of its rarity, weighted Chromatic 1, Ultimate 0.2 and Legendary 0.05.
 - The Run tab lists the Torture Instruments you hold and the run's theme. Warden follows both from the game; set them there if a read missed one.
 

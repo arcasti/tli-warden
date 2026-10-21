@@ -713,7 +713,8 @@ impl Session {
     /// board than the last frame saved, the frame. A read that keeps the last
     /// reading (or, with none on show, sets [`Session::missed`]) is logged as
     /// a miss with its frame, saved once per screen in a row and once a
-    /// minute while that screen lasts.
+    /// minute while that screen lasts; a miss off the board or between runs
+    /// saves no frame.
     fn install(&mut self, (scene, panels, size, frame, u): Scanned) {
         self.ui_scale = Some(u);
         let screen = panels.screen;
@@ -722,7 +723,11 @@ impl Session {
                 self.missed = None;
                 self.log_read(frame);
             }
-            Taken::Kept(line) => self.log_miss(screen, line, frame),
+            Taken::Kept(line) => {
+                // Off the board or between runs the frame shows another game screen.
+                let frame = frame.filter(|_| line != OFF_BOARD && line != RUN_OVER_WAIT);
+                self.log_miss(screen, line, frame);
+            }
             Taken::Skipped => {}
         }
     }

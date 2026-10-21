@@ -832,8 +832,8 @@ fn off_board_read_without_a_reading_is_missed() {
 }
 
 /// The run log gets a "miss" line for a read that installed nothing, with
-/// its frame saved once per screen in a row, and the "window" line names the
-/// OCR language.
+/// no frame for one off the board, and the "window" line names the OCR
+/// language.
 #[test]
 fn run_log_logs_a_miss() {
     let root = std::env::temp_dir().join(format!("warden-run-log-miss-{}", std::process::id()));
@@ -856,9 +856,9 @@ fn run_log_logs_a_miss() {
     assert_eq!(misses[0]["screen"], "Unknown");
     assert_eq!(misses[0]["line"], "The prison board is not on screen: showing the last reading.");
     assert_eq!(misses[0]["size"], serde_json::json!([1920, 1080]));
-    assert_eq!(misses[0]["frame"], "frame-0001.jpg");
-    assert!(misses[1]["frame"].is_null());
-    assert!(run.join("frame-0001.jpg").is_file());
+    // Off the board, the frame shows another game screen: none is saved.
+    assert!(misses.iter().all(|m| m["frame"].is_null()));
+    assert!(!run.join("frame-0001.jpg").exists());
     drop(s);
     std::fs::remove_dir_all(&root).unwrap();
 }

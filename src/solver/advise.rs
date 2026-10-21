@@ -80,7 +80,6 @@ pub struct Shown {
 pub fn shown(st: &State, ranking: &[SolveOption], advice: &Advice) -> Shown {
     let others = also_good(ranking, advice.option);
     let tie = ranking.len() >= 2 && others.len() == ranking.len() - 1;
-    let same = "they score about the same";
     let alike = "The playouts can't tell them apart.";
     let plain = Shown { headline: None, why: advice.why.clone() };
     match st.pending.first() {
@@ -99,7 +98,7 @@ pub fn shown(st: &State, ranking: &[SolveOption], advice: &Advice) -> Shown {
                         if r == 1 { "scores" } else { "score" },
                     ),
                 };
-                return Shown { headline: Some(format!("Any treasure: {same}")), why };
+                return Shown { headline: Some("Take any treasure".to_string()), why };
             }
             match &advice.action {
                 Action::Choose { id: ChoiceId::Name(key) } if noops.iter().any(|g| g.key() == key.as_str()) => Shown {
@@ -109,8 +108,8 @@ pub fn shown(st: &State, ranking: &[SolveOption], advice: &Advice) -> Shown {
                 _ => plain,
             }
         }
-        Some(Pending::Interrogation { .. }) if tie => Shown { headline: Some(format!("Either card: {same}")), why: alike.to_string() },
-        Some(Pending::Tool { .. }) if tie => Shown { headline: Some(format!("Any instrument: {same}")), why: alike.to_string() },
+        Some(Pending::Interrogation { .. }) if tie => Shown { headline: Some("Take either card".to_string()), why: alike.to_string() },
+        Some(Pending::Tool { .. }) if tie => Shown { headline: Some("Take any instrument".to_string()), why: alike.to_string() },
         _ => plain,
     }
 }

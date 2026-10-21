@@ -120,6 +120,13 @@ pub struct WardenApp {
     /// The window was moved to the game once, or placement is off; it is
     /// never moved again, so a window the player drags stays put.
     placed: bool,
+    /// The window height the player last left it at; the Board tab grows
+    /// the window past it to fit and shrinks back to it.
+    chosen_height: f32,
+    /// The height the window was last set to fit the Board tab.
+    fitted_height: Option<f32>,
+    /// The window height last frame, to tell the player's drag from a fit.
+    last_height: f32,
     /// The tab on show.
     tab: Tab,
     /// The cell warnings of the last reading, so the Board tab opens when
@@ -171,6 +178,9 @@ impl WardenApp {
             watching: None,
             ocr_problem: ocr::problem(),
             placed: false,
+            chosen_height: 0.0,
+            fitted_height: None,
+            last_height: 0.0,
             tab: Tab::Board,
             warned: 0,
             current,
@@ -296,6 +306,28 @@ impl WardenApp {
                 self.keys[i].hotkey = self.register(which, &saved).ok();
                 self.keys[i].text = saved;
             }
+        }
+    }
+
+    /// Sets the window `delta` points taller to show the whole Board tab,
+    /// but never shorter than the height the player dragged it to.
+    fn fit_board(&mut self, ctx: &egui::Context, delta: f32) {
+        let (size, monitor, minimized) = ctx.input(|i| (i.viewport().inner_rect.map(|r| r.size()), i.viewport().monitor_size, i.viewport().minimized));
+        let Some(size) = size.filter(|_| minimized != Some(true)) else { return };
+        let h = size.y;
+        let near = |a: f32, b: f32| (a - b).abs() <= 1.0;
+        // A change that is not the last fit arriving is the player's drag.
+        if !near(h, self.last_height) && self.fitted_height.is_none_or(|f| !near(h, f)) {
+            (self.chosen_height, self.fitted_height) = (h, None);
+        }
+        self.last_height = h;
+        let mut target = self.chosen_height.max(h + delta);
+        if let Some(m) = monitor {
+            target = target.min(m.y * 0.9);
+        }
+        if !near(target, h) && self.fitted_height.is_none_or(|f| !near(target, f)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(size.x, target)));
+            self.fitted_height = Some(target);
         }
     }
 
@@ -545,12 +577,16 @@ impl eframe::App for WardenApp {
             if let Some(e) = &self.error {
                 ui.colored_label(Color32::LIGHT_RED, e);
             }
-            egui::ScrollArea::vertical().show(ui, |ui| match self.tab {
+            let out = egui::ScrollArea::vertical().show(ui, |ui| match self.tab {
                 Tab::Board => self.board_tab(ui),
                 Tab::Moves => self.moves_tab(ui),
                 Tab::Run => self.instruments(ui),
                 Tab::Settings => self.settings_section(ui),
             });
+            if self.tab == Tab::Board {
+                let spare = ui.available_height().max(0.0);
+                self.fit_board(ui.ctx(), out.content_size.y - out.inner_rect.height() - spare);
+            }
         });
         self.edit_window(&ui.ctx().clone());
     }

@@ -860,7 +860,7 @@ fn shown_names_the_gifts_that_change_nothing() {
     };
     let tied = ranking(9.162);
     let s = shown(&st, &tied, &advice(&tied));
-    assert_eq!(s.headline.as_deref(), Some("Any treasure: they score about the same"));
+    assert_eq!(s.headline.as_deref(), Some("Take any treasure"));
     assert_eq!(
         s.why,
         "Brass Horn of Strife, Crimson Vintage and Brand of Original Sin change nothing on this board. Three-Headed Thumb Ring scores no better."

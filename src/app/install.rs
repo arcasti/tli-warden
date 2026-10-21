@@ -76,7 +76,8 @@ pub fn install(current: &Path) -> Result<PathBuf, String> {
     }
     let link = shortcut_path().ok_or("APPDATA is not set")?;
     shortcut(&exe, &link).map_err(|e| format!("{}: {e}", link.display()))?;
-    desktop_shortcut(&exe)?;
+    // The desktop is a convenience: an install goes ahead without it.
+    let _ = desktop_shortcut(&exe);
     register(&exe)?;
     Ok(exe)
 }

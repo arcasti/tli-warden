@@ -2,7 +2,7 @@
 //! player's corrections and held instruments, and the ranking, which a
 //! worker thread fills in rounds so the window shows it as it firms up.
 
-use crate::board::{CellModel, EventMark, Model, build_state};
+use crate::board::{CellModel, EventMark, Model, Step, build_state};
 use crate::engine::data::{Beast, Gift, RAINBOW, Tool, VAULT_CAP, data};
 use crate::engine::rules::treasure_picks;
 use crate::engine::text::{cell_label, tier_name, tool_name};
@@ -1029,7 +1029,8 @@ impl Session {
                         _ => read.clone(),
                     };
                 }
-                m.warden = reading.model.warden;
+                // The board before may be the day's patrol.
+                (m.warden, m.step) = (reading.model.warden, Step::Manage);
                 if let Some((scene, _, _)) = &self.scene {
                     let cells: Vec<usize> = jawed(scene).into_iter().filter(|&n| unedited(n)).collect();
                     reading.warnings.extend(casket_meals(&mut m, &reading.model, &cells));
@@ -1166,10 +1167,20 @@ impl Session {
         // A Consume target screen picks the day's first bite, or a chain's
         // next, among the cells the screen marks as targets.
         let target = reading.screen == Screen::ChainTarget;
-        if target && self.chained
-            && let Some(eater) = st.cells[st.position].inmate
-        {
-            offer_chain(&mut st, eater.id);
+        if target && self.chained {
+            if let Some(eater) = st.cells[st.position].inmate {
+                offer_chain(&mut st, eater.id);
+            }
+            // The game opens this screen only while the eater has a target, so
+            // a board read that gives it none is wrong (the eater's rarity not
+            // risen yet, a misread target) and gets no advice.
+            if !st.pending.iter().any(|p| matches!(p, Pending::Chain { .. })) {
+                self.problems = vec![format!(
+                    "The board read gives the eater in cell {} nothing to Consume, but the game marks targets: check the eater and the marked cells.",
+                    cell_label(st.position)
+                )];
+                return;
+            }
         }
         let first = target && !self.chained;
         let mut warning = None;

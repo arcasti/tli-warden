@@ -484,6 +484,25 @@ fn consume_target_picks_a_bite() {
     assert!(s.ranking.iter().all(|o| matches!(o.action, Action::Chain { .. } | Action::EndChain)), "{:?}", s.ranking);
 }
 
+/// The game opens a chain's Consume target screen only while the eater has a
+/// target, so a board that gives it none (an eater read before its rarity
+/// rose, a misread target) is a misread: no advice, never a Replace or End
+/// the day, and a problem naming the eater's cell.
+#[test]
+fn consume_target_with_no_target_read_gets_no_advice() {
+    let Some(mut s) = read_all(Vec::new(), &["rec3-t113.png", "rec3-t114.png", "rec3-t116.png"]) else { return };
+    // A Normal Rat on the eater's cell: no Mammoth on the board to eat.
+    s.edit_cell(16, CellEdit::Inmate { beast: Beast::Rat, tier: 0 }).unwrap();
+    s.wait();
+    let r = s.reading.clone().unwrap();
+    assert_eq!(r.screen, Screen::ChainTarget);
+    let (st, _) = build_state(&r.model, 1);
+    assert!(devour_options(&st, st.position).is_empty(), "the edited eater has no target");
+    assert_eq!(s.advice(), None, "{:?}", s.ranking);
+    assert!(s.ranking.is_empty(), "{:?}", s.ranking);
+    assert!(s.problems.iter().any(|p| p.contains("eater in cell 16")), "{:?}", s.problems);
+}
+
 /// The red jaws over the targets of the Consume target screen rec4-t110
 /// spoil the read of cell 03: read alone it warns. After the board rec4-t070
 /// of the day before, where 03 is locked, it gives no warning: a jawed cell

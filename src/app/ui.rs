@@ -636,6 +636,9 @@ impl WardenApp {
         for line in &kept {
             ui.label(RichText::new(*line).small().color(Color32::YELLOW));
         }
+        for p in &s.problems {
+            ui.label(RichText::new(p).small().color(Color32::LIGHT_RED));
+        }
         let warned: Vec<(usize, &str)> = reading.warnings.iter().filter_map(|w| Some((w.cell?, w.text.as_str()))).collect();
         let (clicked, court) = board(ui, &reading.model, &warned, &marks);
         let mut day = riot(reading.model.day, reading.days_left);

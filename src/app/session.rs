@@ -1349,7 +1349,7 @@ impl Session {
         if self.run_over.is_some() {
             return;
         }
-        let vaulted = self.reading.as_ref().and(self.vault_top.as_ref()).map(|(_, v)| v.len());
+        let vaulted = self.vault_top.as_ref().map(|(_, v)| v.len());
         self.run_over = Some(match vaulted {
             Some(1) => "The run is over: 1 Chromatic Prisoner vaulted.".to_string(),
             Some(n) => format!("The run is over: {n} Chromatic Prisoners vaulted."),

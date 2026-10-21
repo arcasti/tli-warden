@@ -322,7 +322,9 @@ pub fn build_state(m: &Model, seed: u32) -> (State, Vec<String>) {
     let mut problems = Vec::new();
     let mut random = Rng32::new(seed);
     let drill_days = m.max_days.clamp(5, 60) as u32;
-    let mut st = new_game_with("ANALYZER", Params { drill_days, ..Params::default() });
+    // The reader does not see the Iron Tongs' Tusk marks, so the advice could
+    // never steer to one: playouts from a read board give the Tusk no tiers.
+    let mut st = new_game_with("ANALYZER", Params { drill_days, ivory_count: 0, ..Params::default() });
     st.rng = (random.roll() * 4294967296.0) as u32;
     // The objective comes from the model when the player read it; the board
     // shows no theme, so the run's own draw would add one.

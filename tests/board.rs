@@ -166,6 +166,8 @@ fn builds_like_the_js() {
                 v.as_object_mut().unwrap().remove(key);
             }
         }
+        // The Rust gives a read board's Tusk no tiers: the reader does not see the marks.
+        js_state["params"]["ivoryCount"] = serde_json::json!(0);
         // The JS marks every "scratch" door scratched; the Rust only with Filthy Claws.
         if !st.has(Tool::Claws) {
             for cell in js_state["cells"].as_array_mut().unwrap() {
@@ -635,9 +637,21 @@ fn a_tusk_cell_outscores_the_same_cell_unmarked() {
         let mut ctx = warden::solver::context(st, &TUNED);
         warden::solver::scores::patrol_scores(&mut ctx, &[9])[0].1
     };
+    // A read board gives the Tusk no tiers; price one as the engine rolls it.
+    st.params.ivory_count = warden::engine::state::Params::default().ivory_count;
     let plain = score(&st);
     st.cells[9].ivory = true;
     assert!(score(&st) > plain + 1e-6, "{plain}");
+}
+
+#[test]
+fn a_read_first_pick_does_not_take_the_iron_tongs() {
+    // A first pick from a run log. The reader sees no Tusk marks, so the
+    // advice could never steer to one and the Tongs gain nothing.
+    let (st, problems) = build("tongs-pick.json");
+    assert!(problems.is_empty(), "{problems:?}");
+    let options = warden::solver::solve::solve(&st, 100, 1, &TUNED);
+    assert_ne!(options[0].label, "Take Iron Tongs of Lust: Mammoth", "{:?}", options.iter().map(|o| (&o.label, o.mean)).collect::<Vec<_>>());
 }
 
 #[test]

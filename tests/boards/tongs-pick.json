@@ -1,0 +1,87 @@
+{
+  "cells": [
+    {
+      "kind": "office"
+    },
+    {
+      "event": null,
+      "kind": "sealed"
+    },
+    {
+      "event": null,
+      "kind": "sealed"
+    },
+    {
+      "event": null,
+      "kind": "sealed"
+    },
+    {
+      "event": null,
+      "kind": "sealed"
+    },
+    {
+      "event": null,
+      "kind": "sealed"
+    },
+    {
+      "event": null,
+      "kind": "sealed"
+    },
+    {
+      "event": null,
+      "kind": "sealed"
+    },
+    {
+      "event": null,
+      "kind": "sealed"
+    },
+    {
+      "event": null,
+      "kind": "sealed"
+    },
+    {
+      "event": null,
+      "kind": "sealed"
+    },
+    {
+      "event": null,
+      "kind": "sealed"
+    },
+    {
+      "event": null,
+      "kind": "sealed"
+    },
+    {
+      "event": null,
+      "kind": "sealed"
+    },
+    {
+      "event": null,
+      "kind": "sealed"
+    },
+    {
+      "event": null,
+      "kind": "sealed"
+    }
+  ],
+  "chainArmed": false,
+  "choice": {
+    "kind": "tool",
+    "options": [
+      "beastcage",
+      "tongs",
+      "stake"
+    ]
+  },
+  "day": 1,
+  "dest": [],
+  "devourUsed": false,
+  "eventKind": "chain",
+  "maxDays": 20,
+  "step": "choice",
+  "swapUsed": false,
+  "tools": [],
+  "v": 1,
+  "vault": [],
+  "warden": 0
+}

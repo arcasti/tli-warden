@@ -8,7 +8,7 @@ use std::path::Path;
 use warden::board::build_state;
 use warden::engine::data::{Tool, data};
 use warden::reader::load_png;
-use warden::reader::model::to_model;
+use warden::reader::model::{RUN_DAYS, to_model};
 use warden::reader::panels::read_panels;
 use warden::reader::scene::read_scene;
 use warden::solver::TUNED;
@@ -75,7 +75,7 @@ fn panels_against_labels() {
         let cell_pick = screen == "cellPick";
         if board && (phase == "manage" || !doors.is_empty()) || cell_pick {
             let held: Vec<Tool> = strings(&l["tools"]).iter().filter_map(|t| Tool::from_key(t)).collect();
-            let (model, warnings) = to_model(&read_scene(&img), &p, &held, None);
+            let (model, warnings) = to_model(&read_scene(&img), &p, &held, None, RUN_DAYS);
             let (st, problems) = build_state(&model, 1);
             assert!(problems.is_empty(), "{f}: {problems:?} (warnings {warnings:?})");
             let options = solve(&st, 20, 1, &TUNED);

@@ -8,7 +8,7 @@ mod common;
 use warden::app::runlog::RunLog;
 use warden::app::session::{CellEdit, casket_meals, consume_targets, DaysClock, HELD_BLOCKS, MAX_WAIT, RECHECK, ROUND, Reading, SETTLE, Session, Watch, differs, fingerprint};
 use warden::board::{CellModel, ChoiceKind, EventMark, Model, Step, build_state};
-use warden::engine::data::{Beast, OPULENCE, Tool};
+use warden::engine::data::{Beast, IRON_LAW, OPULENCE, Tool};
 use warden::engine::devour::{devour_options, start_options};
 use warden::engine::{Action, ChoiceId};
 use warden::reader::{Rgba, load_png, read_model};
@@ -1102,6 +1102,25 @@ fn saved_instruments_clear_on_a_higher_count() {
         }
         assert_eq!(s.days_left(), Some(20));
         assert_eq!(s.tools, held, "saved at {days:?}");
+    }
+}
+
+/// Under Iron Law the run lasts 30 days, so 20 days left (rec1-t029) is
+/// day 10; without a theme it is day 1 of 20.
+#[test]
+fn iron_law_run_reads_at_30_days() {
+    let dir = common::frames();
+    let frame = dir.join("rec1-t029.png");
+    if !frame.is_file() {
+        println!("skipped: {} is missing", dir.display());
+        return;
+    }
+    for (theme, day, max_days) in [(Some(IRON_LAW), 10, 30), (None, 1, 20)] {
+        let mut s = Session::new(20, vec![], theme, None);
+        s.read_in_background(load_png(&frame).unwrap());
+        s.wait();
+        let m = &s.reading.as_ref().expect("a reading").model;
+        assert_eq!((m.day, m.max_days), (day, max_days), "theme {theme:?}");
     }
 }
 

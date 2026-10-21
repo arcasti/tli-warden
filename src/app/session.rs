@@ -3,7 +3,7 @@
 //! worker thread fills in rounds so the window shows it as it firms up.
 
 use crate::board::{CellModel, EventMark, Model, Step, build_state};
-use crate::engine::data::{Beast, Gift, RAINBOW, Tool, VAULT_CAP, data};
+use crate::engine::data::{Beast, Gift, IRON_LAW, RAINBOW, Tool, VAULT_CAP, data};
 use crate::engine::rules::treasure_picks;
 use crate::engine::text::{cell_label, tier_name, tool_name};
 use crate::reader::model::{RUN_DAYS, Warning, WarningKind, to_model};
@@ -96,9 +96,6 @@ impl DaysClock {
         (left, matches!((before, left), (Some(b), Some(l)) if l > b))
     }
 }
-
-/// The days left at a run's start.
-const RUN_START_DAYS: u32 = RUN_DAYS as u32;
 
 /// Whether `screen` is a pick that covers the board with no board read under
 /// it (`under`): the run start is assumed.
@@ -728,12 +725,13 @@ impl Session {
         // earlier read or a past session can be stale. A lower count kept is a
         // past run's, so the instruments and theme held with it go.
         let (days, new_run) = if run_start(panels.screen, self.board.as_ref()) && panels.days.is_none() {
-            let new_run = self.days.left.is_some_and(|left| left < RUN_START_DAYS);
+            let start = self.run_days() as u32;
+            let new_run = self.days.left.is_some_and(|left| left < start);
             if new_run {
                 self.held_before_higher = self.tools.len();
             }
-            self.days = DaysClock { left: Some(RUN_START_DAYS), higher: None };
-            (Some(RUN_START_DAYS), new_run)
+            self.days = DaysClock { left: Some(start), higher: None };
+            (Some(start), new_run)
         } else {
             self.days.update_run(panels.days)
         };
@@ -760,6 +758,14 @@ impl Session {
         // A higher count waiting for its second read already belongs to the new run.
         if self.days.higher.is_none() {
             self.theme_fresh = false;
+        }
+        // Only Iron Law runs past 20 days, so a longer count names the theme
+        // when the lobby's scroll was not read; after the new-run clear above,
+        // which would drop it again.
+        if days.is_some_and(|left| i64::from(left) > RUN_DAYS) && self.theme != Some(IRON_LAW) {
+            self.tools_changed = true;
+            self.theme = Some(IRON_LAW);
+            self.theme_fresh = true;
         }
         if !matches!(panels.screen, Screen::InstrumentPick | Screen::PrisonStatus | Screen::Unknown) {
             self.pick_named = false;
@@ -799,7 +805,7 @@ impl Session {
             && let (Some((_, over, _)), Some(r)) = (&self.scene, &self.reading)
             && over.screen == Screen::TreasurePick
         {
-            if to_model(&scene, &panels, &self.tools, self.board.as_ref()).0.cells == r.model.cells {
+            if to_model(&scene, &panels, &self.tools, self.board.as_ref(), self.run_days()).0.cells == r.model.cells {
                 return Taken::Skipped;
             }
             after_pick = taken + 1 < treasure_picks(self.theme);
@@ -820,7 +826,7 @@ impl Session {
             (Screen::PrisonStatus | Screen::Unknown, Some((pick, mut over, _)))
                 if after_pick || (panels.screen == Screen::PrisonStatus && matches!(over.screen, Screen::TreasurePick | Screen::InstrumentPick)) =>
             {
-                self.board = Some(to_model(&scene, &panels, &self.tools, self.board.as_ref()).0);
+                self.board = Some(to_model(&scene, &panels, &self.tools, self.board.as_ref(), self.run_days()).0);
                 self.consume = None;
                 self.meal = None;
                 self.chained = false;
@@ -1048,6 +1054,14 @@ impl Session {
         self.solve();
     }
 
+    /// The days the run lasts: Iron Law extends it.
+    fn run_days(&self) -> i64 {
+        match self.theme {
+            Some(IRON_LAW) => data().theme(IRON_LAW).and_then(|t| t.value).unwrap_or(RUN_DAYS),
+            _ => RUN_DAYS,
+        }
+    }
+
     /// The reading of the stored read with the tools and the edits.
     fn build(&self) -> Option<Reading> {
         let (scene, panels, at) = self.scene.as_ref()?;
@@ -1055,7 +1069,7 @@ impl Session {
         let vaulted = self.consume.as_ref().filter(|_| panels.screen == Screen::TreasurePick).and_then(|m| vaulted(m, self.meal, chains));
         let under = vaulted.as_ref().map(|(m, _, _)| m).or(self.board.as_ref());
         let assumed_days = run_start(panels.screen, under) && self.days_read.is_none();
-        let (mut model, mut warnings) = to_model(scene, panels, &self.tools, under);
+        let (mut model, mut warnings) = to_model(scene, panels, &self.tools, under, self.run_days());
         // Chromatics never leave the vault in a run: a read that shows fewer
         // (the panel did not read, or only some of its slots) keeps the last
         // board's. A day before the board's is a new run.

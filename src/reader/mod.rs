@@ -153,5 +153,5 @@ pub fn read_model(path: &Path, held_tools: &[crate::engine::data::Tool]) -> Resu
     let (img, title) = load_layouts(path)?;
     let panels = panels::read_panels_titled(&img, title.as_ref().unwrap_or(&img));
     let held = if held_tools.is_empty() { panels.held.clone().unwrap_or_default() } else { held_tools.to_vec() };
-    Ok(model::to_model(&scene::read_scene(&img), &panels, &held, None))
+    Ok(model::to_model(&scene::read_scene(&img), &panels, &held, None, model::RUN_DAYS))
 }

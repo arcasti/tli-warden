@@ -5,7 +5,7 @@
 use std::path::Path;
 use warden::board::{CellModel, Model};
 use warden::engine::data::Beast;
-use warden::reader::model::{TIER_CONF, to_model};
+use warden::reader::model::{RUN_DAYS, TIER_CONF, to_model};
 use warden::reader::panels::{Screen, read_panels};
 use warden::reader::scene::{CELLS, FrameTruth, Scene, build_templates, load_labeled, read_scene, read_scene_with};
 use warden::reader::{Rgba, load_png, read_model};
@@ -272,7 +272,7 @@ fn tooltip_covers_cells() {
     assert_eq!(covered(&scene), vec![15, 16]);
 
     let panels = read_panels(&img);
-    let (_, warnings) = to_model(&scene, &panels, &[], None);
+    let (_, warnings) = to_model(&scene, &panels, &[], None, RUN_DAYS);
     let texts: Vec<&str> = warnings.iter().map(|w| w.text.as_str()).collect();
     assert!(texts.contains(&"Check cell 15: a tooltip covers it."), "{texts:?}");
     assert!(texts.contains(&"Check cell 16: a tooltip covers it."), "{texts:?}");
@@ -280,7 +280,7 @@ fn tooltip_covers_cells() {
     let mut under = Model::blank();
     under.cells[14] = CellModel::Inmate { beast: Beast::Rat, tier: 3, ivory: false, prey: None, event: None };
     under.cells[15] = CellModel::Empty { event: None };
-    let (m, warnings) = to_model(&scene, &panels, &[], Some(&under));
+    let (m, warnings) = to_model(&scene, &panels, &[], Some(&under), RUN_DAYS);
     assert_eq!(m.cells[14..16], under.cells[14..16]);
     let texts: Vec<&str> = warnings.iter().map(|w| w.text.as_str()).collect();
     assert!(texts.contains(&"A tooltip covers cells 15 and 16: they are kept from the last board read."), "{texts:?}");
@@ -307,10 +307,30 @@ fn tooltip_in_a_recorded_frame() {
     let mut under = Model::blank();
     under.cells[14] = lion.clone();
     under.cells[15] = lion;
-    let (m, warnings) = to_model(&scene, &read_panels(&img), &[], Some(&under));
+    let (m, warnings) = to_model(&scene, &read_panels(&img), &[], Some(&under), RUN_DAYS);
     assert_eq!(m.cells[13..16], under.cells[13..16]);
     let texts: Vec<&str> = warnings.iter().map(|w| w.text.as_str()).collect();
     assert!(texts.contains(&"A tooltip covers cells 14, 15 and 16: they are kept from the last board read."), "{texts:?}");
+}
+
+/// The day counts down from the run's length, and a counter above a 20-day
+/// run's length is an Iron Law run of 30 days (rec1-t029's board, its
+/// counter overridden).
+#[test]
+fn iron_law_days() {
+    let path = common::frames().join("rec1-t029.png");
+    if !path.is_file() {
+        println!("skipped: {} is missing", path.display());
+        return;
+    }
+    let img = load_png(&path).unwrap();
+    let scene = read_scene(&img);
+    let mut panels = read_panels(&img);
+    for (run_days, left, day, max_days) in [(20, 29, 1, 30), (20, 25, 5, 30), (30, 12, 18, 30), (20, 12, 8, 20)] {
+        panels.days = Some(left);
+        let (m, _) = to_model(&scene, &panels, &[], None, run_days);
+        assert_eq!((m.day, m.max_days), (day, max_days), "run of {run_days}, {left} days left");
+    }
 }
 
 /// Every saved frame: only the loading screen of rec4-t424 and the day

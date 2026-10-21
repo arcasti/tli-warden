@@ -424,7 +424,7 @@ impl WardenApp {
     fn notice_line(&mut self, ui: &mut egui::Ui) {
         if self.current.is_some() && !self.installed && self.settings.offer_install {
             ui.horizontal_wrapped(|ui| {
-                ui.label("Install Warden: a Start menu entry and updates");
+                ui.label("Install Warden: Start menu and desktop shortcuts, and updates");
                 if ui.button("Install").clicked() {
                     self.install(ui.ctx());
                 }
@@ -851,7 +851,7 @@ impl WardenApp {
             }
             if !self.installed && self.current.is_some() {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button("Install").on_hover_text("A Start menu entry and updates, for this Windows user").clicked() {
+                    if ui.button("Install").on_hover_text("Start menu and desktop shortcuts and updates, for this Windows user").clicked() {
                         self.install(ui.ctx());
                     }
                 });

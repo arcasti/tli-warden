@@ -19,7 +19,7 @@ Unofficial. Not affiliated with or endorsed by the developers or publishers of *
 
 ## Use
 
-Download `warden.exe` from the [latest release](https://github.com/arcasti/tli-warden/releases/latest) and run it. It offers to install itself for the current Windows user, with a Start menu entry and an entry in Apps & features and no admin rights; say Not now and it runs from wherever it is, with an Install button left in the settings. At start it asks GitHub for a newer release and, when there is one, shows an Update button, which downloads the new `warden.exe`, checks it against the SHA-256 GitHub lists for it, and restarts Warden on it. The check can be turned off in the settings. Uninstall in Apps & features removes the program and keeps `%APPDATA%\warden`.
+Download `warden.exe` from the [latest release](https://github.com/arcasti/tli-warden/releases/latest) and run it. It offers to install itself for the current Windows user, with a Start menu entry, a desktop shortcut and an entry in Apps & features, and no admin rights; say Not now and it runs from wherever it is, with an Install button left in the settings. At start it asks GitHub for a newer release and, when there is one, shows an Update button, which downloads the new `warden.exe`, checks it against the SHA-256 GitHub lists for it, and restarts Warden on it. The check can be turned off in the settings. Uninstall in Apps & features removes the program and keeps `%APPDATA%\warden`.
 
 Then play. The window stays on top of the game.
 

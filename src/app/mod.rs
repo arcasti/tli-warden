@@ -33,7 +33,12 @@ pub fn run(preload: Option<&std::path::Path>) -> Result<(), String> {
             let _ = install::register(current);
         }
     }
-    let settings = settings::Settings::load();
+    let mut settings = settings::Settings::load();
+    if let Some(current) = current.as_ref().filter(|_| installed && !settings.desktop_shortcut) {
+        let _ = install::desktop_shortcut(current);
+        settings.desktop_shortcut = true;
+        let _ = settings.save();
+    }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Warden")

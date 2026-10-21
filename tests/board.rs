@@ -17,7 +17,9 @@ use warden::engine::apply;
 use warden::solver::chain::{Meal, bite, chain_odds, devour_delta, replace_odds, rise};
 use warden::solver::scores::{patrol_scores, swap_gain_here};
 use warden::solver::values::swap_value;
-use warden::solver::solve::reason;
+use warden::solver::solve::{SolveOption, reason};
+use warden::solver::advise::{Advice, shown};
+use warden::engine::text::tool_name;
 use warden::solver::bench::start;
 use warden::solver::{Rng32, TUNED, decide};
 
@@ -821,4 +823,50 @@ fn eater_mask_matches_bites() {
             }
         }
     }
+}
+
+/// On a treasure pick where the treasures tie, the window says so and names
+/// the ones that change nothing; with the Ring behind, the Horn's why says it
+/// changes nothing.
+#[test]
+fn shown_names_the_gifts_that_change_nothing() {
+    let (st, problems) = build("gift-noop.json");
+    assert!(problems.is_empty(), "{problems:?}");
+    let Some(Pending::Gift { options, .. }) = st.pending.first() else { panic!("no gift pick: {:?}", st.pending) };
+    let key = |name: &str| options.iter().map(|g| g.key()).find(|&k| tool_name(k) == name).unwrap_or_else(|| panic!("no {name}"));
+    let row = |name: &str, mean: f64, gap_se: f64| SolveOption {
+        label: format!("Take {name}"),
+        action: Action::Choose { id: ChoiceId::Name(key(name).to_string()) },
+        mean,
+        se: 0.01,
+        gap_se,
+        n: 400,
+        best: 0.0,
+        policy: false,
+    };
+    let ranking = |ring: f64| {
+        vec![
+            row("Brass Horn of Strife", 9.164, 0.0),
+            row("Crimson Vintage", 9.164, 0.0),
+            row("Brand of Original Sin", 9.164, 0.0),
+            row("Three-Headed Thumb Ring", ring, 0.002),
+        ]
+    };
+    let advice = |ranking: &[SolveOption]| Advice {
+        action: ranking[0].action.clone(),
+        label: ranking[0].label.clone(),
+        why: "The playouts rate it best.".to_string(),
+        option: Some(0),
+    };
+    let tied = ranking(9.162);
+    let s = shown(&st, &tied, &advice(&tied));
+    assert_eq!(s.headline.as_deref(), Some("Any treasure: they score about the same"));
+    assert_eq!(
+        s.why,
+        "Brass Horn of Strife, Crimson Vintage and Brand of Original Sin change nothing on this board. Three-Headed Thumb Ring scores no better."
+    );
+    let behind = ranking(9.0);
+    let s = shown(&st, &behind, &advice(&behind));
+    assert_eq!(s.headline, None);
+    assert_eq!(s.why, "Brass Horn of Strife changes nothing on this board, and the other treasures score lower.");
 }

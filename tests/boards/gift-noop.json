@@ -1,0 +1,24 @@
+{
+  "v": 1, "day": 19, "maxDays": 20, "step": "choice", "warden": 11,
+  "choice": { "kind": "gift" },
+  "tools": ["blacklist", "claws"],
+  "vault": ["wolf","lion","wolf","mammoth","rat","rat","mammoth","wolf","wolf"],
+  "cells": [
+    { "kind": "office" },
+    { "kind": "scratch", "tier": 1 },
+    { "kind": "sealed", "event": null },
+    { "kind": "inmate", "beast": "rat", "tier": 3 },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": "unknown" },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "scratch", "tier": 0 },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null }
+  ]
+}

@@ -656,10 +656,12 @@ impl WardenApp {
                 day.push_str(&format!("\n{name} {}/{}", goal.progress, o.target));
             }
         }
-        let pick = advice.as_ref().map(|a| move_name(&a.action, short(&a.label)));
+        let shown = advice.as_ref().map(|a| s.shown(a));
+        let pick = advice.as_ref().zip(shown.as_ref()).map(|(a, sh)| sh.headline.clone().unwrap_or_else(|| move_name(&a.action, short(&a.label))));
         courtyard(ui, court, &day, pick.as_deref(), s.solving);
-        if let Some(a) = &advice {
+        if let (Some(a), Some(sh)) = (&advice, &shown) {
             ui.interact(court, egui::Id::unique("warden-courtyard"), Sense::hover()).on_hover_text(format!("{}\n{}", a.label, a.why));
+            ui.add(egui::Label::new(RichText::new(&sh.why).small().weak()).wrap());
         }
         if clicked.is_some() {
             self.editing = clicked;
@@ -698,6 +700,7 @@ impl WardenApp {
             return;
         }
         let advice = s.advice();
+        let shown = advice.as_ref().map(|a| s.shown(a));
         let advised = advice.as_ref().and_then(|a| a.option);
         let near = also_good(&s.ranking, advised);
         let (min, max) = s.ranking.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), o| (lo.min(o.mean), hi.max(o.mean)));
@@ -727,11 +730,11 @@ impl WardenApp {
                     ui.label(number);
                 });
             });
-            if chosen && let Some(a) = &advice {
+            if chosen && let Some(sh) = &shown {
                 ui.horizontal(|ui| {
                     ui.add_space(14.0);
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(&a.why).small().weak());
+                        ui.label(RichText::new(&sh.why).small().weak());
                     });
                 });
             }

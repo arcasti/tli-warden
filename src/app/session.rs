@@ -13,7 +13,7 @@ use crate::reader::layout::{is_16_9, lay_out_scaled};
 use crate::reader::{REF_H, REF_W, Rgba};
 use crate::solver::TUNED;
 use super::runlog::{RunLog, timestamp};
-use crate::solver::advise::{Advice, Pick, advise, also_good};
+use crate::solver::advise::{Advice, Pick, Shown, advise, also_good, shown};
 use serde_json::json;
 use crate::engine::{Action, ChoiceId};
 use crate::engine::state::{Pending, State};
@@ -1258,6 +1258,14 @@ impl Session {
     /// What the window recommends now; see [`advise`].
     pub fn advice(&self) -> Option<Advice> {
         advise(self.pick.as_ref(), &self.ranking, !self.solving || self.rounds >= LIVE_MIN)
+    }
+
+    /// How the window shows the advice `a`; see [`shown`].
+    pub fn shown(&self, a: &Advice) -> Shown {
+        match &self.state {
+            Some(st) => shown(st, &self.ranking, a),
+            None => Shown { headline: None, why: a.why.clone() },
+        }
     }
 
     /// Keeps the instrument advised on an instrument pick.

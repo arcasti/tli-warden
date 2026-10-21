@@ -3,7 +3,10 @@
 //! plays it to measure what following the advice is worth.
 
 use super::solve::SolveOption;
-use crate::engine::Action;
+use crate::engine::data::Gift;
+use crate::engine::state::{Pending, State};
+use crate::engine::text::tool_name;
+use crate::engine::{Action, ChoiceId, apply};
 
 /// The strategy's own pick and why, before any playout.
 #[derive(Clone, Debug, PartialEq)]
@@ -61,6 +64,76 @@ pub fn also_good(ranking: &[SolveOption], advised: Option<usize>) -> Vec<usize> 
         })
         .map(|(k, _)| k)
         .collect()
+}
+
+/// What the window shows for the advice: a headline replacing the move's name, and the line under the board.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shown {
+    pub headline: Option<String>,
+    pub why: String,
+}
+
+/// The advice as the window shows it. On a named pick (treasure, card,
+/// instrument) where every option ties, the headline says so instead of
+/// naming one; on a treasure pick, the why names the treasures that change
+/// nothing on the board.
+pub fn shown(st: &State, ranking: &[SolveOption], advice: &Advice) -> Shown {
+    let others = also_good(ranking, advice.option);
+    let tie = ranking.len() >= 2 && others.len() == ranking.len() - 1;
+    let same = "they score about the same";
+    let alike = "The playouts can't tell them apart.";
+    let plain = Shown { headline: None, why: advice.why.clone() };
+    match st.pending.first() {
+        Some(Pending::Gift { options, .. }) => {
+            let (noops, rest): (Vec<&Gift>, Vec<&Gift>) = options.iter().partition(|g| changes_nothing(st, g.key()));
+            let names = |gs: &[&Gift]| join(&gs.iter().map(|g| tool_name(g.key())).collect::<Vec<_>>());
+            if tie {
+                let why = match (noops.len(), rest.len()) {
+                    (0, _) => alike.to_string(),
+                    (_, 0) => "No treasure changes anything on this board.".to_string(),
+                    (n, r) => format!(
+                        "{} {} nothing on this board. {} {} no better.",
+                        names(&noops),
+                        if n == 1 { "changes" } else { "change" },
+                        names(&rest),
+                        if r == 1 { "scores" } else { "score" },
+                    ),
+                };
+                return Shown { headline: Some(format!("Any treasure: {same}")), why };
+            }
+            match &advice.action {
+                Action::Choose { id: ChoiceId::Name(key) } if noops.iter().any(|g| g.key() == key.as_str()) => Shown {
+                    headline: None,
+                    why: format!("{} changes nothing on this board, and the other treasures score lower.", tool_name(key)),
+                },
+                _ => plain,
+            }
+        }
+        Some(Pending::Interrogation { .. }) if tie => Shown { headline: Some(format!("Either card: {same}")), why: alike.to_string() },
+        Some(Pending::Tool { .. }) if tie => Shown { headline: Some(format!("Any instrument: {same}")), why: alike.to_string() },
+        _ => plain,
+    }
+}
+
+/// Whether taking the treasure `key` leaves the cells and the vault as they
+/// are, over three dice.
+fn changes_nothing(st: &State, key: &str) -> bool {
+    [0x9e37_79b9u32, 0x85eb_ca6b, 0xc2b2_ae35].iter().all(|&rng| {
+        let mut trial = st.clone();
+        trial.rng = rng;
+        apply(&mut trial, &Action::Choose { id: ChoiceId::Name(key.to_string()) }).is_ok()
+            && trial.cells == st.cells
+            && trial.vault == st.vault
+    })
+}
+
+/// Names joined as "A, B and C".
+fn join(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [only] => only.clone(),
+        [init @ .., last] => format!("{} and {last}", init.join(", ")),
+    }
 }
 
 #[cfg(test)]

@@ -136,11 +136,9 @@ pub fn register(exe: &Path) -> Result<(), String> {
     result
 }
 
-/// Asks, then removes the Start menu shortcut and the installed apps entry,
-/// and starts a command that removes the install folder once this process
-/// has exited; the caller exits next. Settings and run logs stay.
+/// Asks, then removes the Start menu shortcut, the installed apps entry and
+/// the install folder; the caller exits next. Settings and run logs stay.
 pub fn uninstall() -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
     use windows::Win32::UI::WindowsAndMessaging::{IDYES, MB_ICONQUESTION, MB_YESNO, MessageBoxW};
     // SAFETY: both strings outlive the call and no owner window is given.
     let answer = unsafe {
@@ -161,16 +159,20 @@ pub fn uninstall() -> Result<(), String> {
         deleted.ok().map_err(|e| format!(r"HKEY_CURRENT_USER\{UNINSTALL_KEY}: {}", e.message()))?;
     }
     let Some(dir) = install_dir().filter(|d| d.exists()) else { return Ok(()) };
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    // The command runs outside `dir`, which it could not remove otherwise;
-    // the ping gives this process time to exit.
-    std::process::Command::new("cmd.exe")
-        .raw_arg(format!("/d /c ping -n 3 127.0.0.1 >nul & rmdir /s /q \"{}\"", dir.display()))
-        .current_dir(std::env::temp_dir())
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-        .map(drop)
-        .map_err(|e| format!("cmd.exe to remove {}: {e}", dir.display()))
+    let current = std::env::current_exe().map_err(|e| format!("this program's path: {e}"))?;
+    remove_dir(&dir, &current, &std::env::temp_dir())
+}
+
+/// Removes the install folder `dir`. A running exe can't be deleted but can
+/// be moved, so `current`, when it runs from `dir`, first goes to `temp`
+/// (as warden-uninstalled-<pid>.exe), which Windows' temporary file cleanup
+/// empties.
+fn remove_dir(dir: &Path, current: &Path, temp: &Path) -> Result<(), String> {
+    if current.parent().is_some_and(|p| same_path(p, dir)) {
+        let parked = temp.join(format!("warden-uninstalled-{}.exe", std::process::id()));
+        std::fs::rename(current, &parked).map_err(|e| format!("{} to {}: {e}", current.display(), parked.display()))?;
+    }
+    std::fs::remove_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))
 }
 
 #[cfg(test)]
@@ -184,5 +186,27 @@ mod tests {
         assert!(installed_here(Path::new(&dir.join(update::ASSET).to_string_lossy().to_uppercase())));
         assert!(!installed_here(&std::env::temp_dir().join(update::ASSET)));
         assert!(!installed_here(&dir.join("sub").join(update::ASSET)));
+    }
+
+    #[test]
+    fn remove_dir_moves_the_running_exe_out_first() {
+        let base = std::env::temp_dir().join(format!("warden-remove-dir-{}", std::process::id()));
+        let (dir, temp) = (base.join("Warden"), base.join("temp"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&temp).unwrap();
+        // ping.exe stands in for the running warden.exe: copied in and run
+        // from there, it holds the folder as a running image does.
+        let exe = dir.join(update::ASSET);
+        std::fs::copy(r"C:\Windows\System32\PING.EXE", &exe).unwrap();
+        std::fs::write(dir.join("warden.old.exe"), b"old").unwrap();
+        let mut child = std::process::Command::new(&exe).args(["-n", "30", "127.0.0.1"]).stdout(std::process::Stdio::null()).spawn().unwrap();
+        assert!(std::fs::remove_file(&exe).is_err(), "a running exe can't be deleted");
+        let parked = temp.join(format!("warden-uninstalled-{}.exe", std::process::id()));
+        let result = remove_dir(&dir, &exe, &temp);
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_eq!(result, Ok(()));
+        assert!(!dir.exists() && parked.exists());
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }

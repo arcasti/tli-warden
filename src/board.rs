@@ -71,6 +71,11 @@ impl CellModel {
             CellModel::Office | CellModel::Nest { .. } => None,
         }
     }
+
+    /// Whether the cell's inmate carries the Tusk.
+    pub fn ivory(&self) -> bool {
+        matches!(self, CellModel::Inmate { ivory: true, .. })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

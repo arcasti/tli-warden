@@ -8,7 +8,7 @@ use warden::engine::data::Beast;
 use warden::reader::model::{TIER_CONF, to_model};
 use warden::reader::panels::{Screen, read_panels};
 use warden::reader::scene::{CELLS, FrameTruth, Scene, build_templates, load_labeled, read_scene, read_scene_with};
-use warden::reader::{Rgba, load_png};
+use warden::reader::{Rgba, load_png, read_model};
 
 mod common;
 use common::Tally;
@@ -157,6 +157,25 @@ fn consume_targets_read() {
     let scene = read_scene(&load_png(&path).unwrap());
     let targets: Vec<u8> = CELLS.filter(|&c| scene.cell(c).target).collect();
     assert_eq!(targets, [4, 5, 12, 13]);
+}
+
+/// trainingdata/reports/tusk-cells7-9.png (outside s16): the Tusk of Iron
+/// Tongs of Lust: Mammoth on the Mammoths in cells 7 and 9, not on the
+/// unmarked Mammoth in cell 8. The board model carries it as ivory. Skips
+/// when the frame is missing.
+#[test]
+fn tusk_reads() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("trainingdata/reports/tusk-cells7-9.png");
+    if !path.is_file() {
+        println!("skipped: {} is missing", path.display());
+        return;
+    }
+    let scene = read_scene(&load_png(&path).unwrap());
+    let tusks: Vec<u8> = CELLS.filter(|&c| scene.cell(c).tusk).collect();
+    assert_eq!(tusks, [7, 9]);
+    let (model, _) = read_model(&path, &[]).unwrap();
+    let ivory: Vec<u8> = CELLS.filter(|&c| model.cells[c as usize - 1].ivory()).collect();
+    assert_eq!(ivory, [7, 9]);
 }
 
 /// trainingdata/reports/consume-target-cell2.png (outside s16): a player's

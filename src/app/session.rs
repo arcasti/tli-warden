@@ -277,7 +277,7 @@ pub fn casket_meals(m: &mut Model, read: &Model, jawed: &[usize]) -> Vec<Warning
             );
             warnings.push(Warning { cell: Some(n), kind: WarningKind::Read, text });
         }
-        m.cells[n] = CellModel::Inmate { beast, tier, ivory: false, prey: None, event: m.cells[n].event() };
+        m.cells[n] = CellModel::Inmate { beast, tier, ivory: m.cells[n].ivory(), prey: None, event: m.cells[n].event() };
     }
     warnings
 }
@@ -1089,12 +1089,12 @@ impl Session {
         warnings.extend(self.notes.iter().map(|text| Warning { cell: None, kind: WarningKind::Read, text: text.clone() }));
         for (&cell, edit) in &self.edits {
             let n = cell as usize - 1;
-            // A correction keeps the cell's incident marker.
-            let event = model.cells[n].event();
+            // A correction keeps the cell's incident marker and Tusk.
+            let (event, ivory) = (model.cells[n].event(), model.cells[n].ivory());
             model.cells[n] = match *edit {
                 CellEdit::Locked => CellModel::Sealed { event },
                 CellEdit::Empty => CellModel::Empty { event },
-                CellEdit::Inmate { beast, tier } => CellModel::Inmate { beast, tier, ivory: false, prey: None, event },
+                CellEdit::Inmate { beast, tier } => CellModel::Inmate { beast, tier, ivory, prey: None, event },
             };
         }
         // The Office and a Nest carry no marker.

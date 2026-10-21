@@ -229,7 +229,7 @@ fn read_board(scene: &Scene, under: Option<&Model>, m: &mut Model, warn: &mut Ve
                     } else if r.tier_conf < TIER_CONF {
                         warn.push(Warning::cell(n, format!("Check cell {at}: rarity read as {name} (confidence {:.2}).", r.tier_conf)));
                     }
-                    CellModel::Inmate { beast, tier: i64::from(tier), ivory: false, prey: None, event }
+                    CellModel::Inmate { beast, tier: i64::from(tier), ivory: r.tusk, prey: None, event }
                 }
                 None => {
                     if r.beast_conf < CONF {

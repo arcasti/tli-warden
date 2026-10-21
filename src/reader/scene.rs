@@ -334,6 +334,36 @@ fn has_target_jaws(img: &Rgba, cell: u8) -> bool {
     bands.into_iter().all(|(xs, ys)| share(xs, ys) >= TARGET_MIN)
 }
 
+/// Share of cream pixels that marks the Tusk of Iron Tongs of Lust: Mammoth,
+/// a curved tusk drawn over the bottom of the portrait. Measured on a 62-frame
+/// run: 150 marked Mammoth cells score 0.063 to 0.094, unmarked Mammoths
+/// 0.000, every other beast and empty cell at most 0.013 (one frame in the
+/// middle of a chain animation aside); the cells of the 32 labeled
+/// trainingdata/s16 frames at most 0.010. The upper bounds on r and r - b
+/// leave out the warden's gold arrow, brighter and more saturated than the
+/// Tusk, which scored 0.040 where it crossed a Rat's box.
+const TUSK_MIN: f32 = 0.03;
+
+/// Whether the Tusk mark is on a cell: see [`TUSK_MIN`].
+fn has_tusk(img: &Rgba, cell: u8) -> bool {
+    tusk_share(img, cell) >= TUSK_MIN
+}
+
+fn tusk_share(img: &Rgba, cell: u8) -> f32 {
+    let (cx, cy) = portrait(cell);
+    let (x0, x1, y0, y1) = (cx - 20, cx + 25, cy + 22, cy + 50);
+    let mut n = 0;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let [r, g, b] = img.rgb(x, y).map(|v| v as i32);
+            if r > 170 && r < 248 && g > 140 && r - b > 45 && r - b <= 100 && r - g < 45 {
+                n += 1;
+            }
+        }
+    }
+    n as f32 / ((x1 - x0) * (y1 - y0)) as f32
+}
+
 /// Half the width and height of the box around a portrait that a tooltip
 /// panel is looked for in.
 const TIP_BOX: (i32, i32) = (70, 45);
@@ -693,6 +723,9 @@ pub struct CellRead {
     /// The big red jaws a Consume target pick draws around each inmate the
     /// eater can consume.
     pub target: bool,
+    /// The Tusk of Iron Tongs of Lust: Mammoth. Read on any inmate, since
+    /// whether a Replace keeps the mark on the cell is not known.
+    pub tusk: bool,
     /// A tooltip panel covers the cell, so the reads above are of the panel.
     pub covered: bool,
 }
@@ -822,6 +855,7 @@ pub fn read_scene_with(img: &Rgba, t: &Templates) -> Scene {
                 let (jaws, conf) = t.crown_split.decide(crown_score(img, c));
                 (r.jaws, r.jaws_conf) = (jaws, conf);
                 r.target = has_target_jaws(img, c);
+                r.tusk = has_tusk(img, c);
             } else if r.locked {
                 r.beast_conf = r.locked_conf;
                 let (tier, conf, strength) = glow_tier(img, c, false, t);

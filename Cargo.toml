@@ -1,6 +1,6 @@
 [package]
 name = "warden"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2024"
 description = "Live advisor for the Tartarus prison board in Torchlight: Infinite"
 license = "GPL-3.0-only"

@@ -314,24 +314,27 @@ const TARGET_MIN: f32 = 0.04;
 /// Whether the big jaws surround a cell's portrait: see [`TARGET_MIN`].
 fn has_target_jaws(img: &Rgba, cell: u8) -> bool {
     let (cx, cy) = portrait(cell);
-    let share = |(x0, x1): (i32, i32), (y0, y1): (i32, i32)| {
-        let mut n = 0;
-        for y in y0..y1 {
-            for x in x0..x1 {
-                let [r, g, b] = img.rgb(x, y).map(|v| v as i32);
-                if r > 150 && g * 2 < r && b * 2 < r {
-                    n += 1;
-                }
-            }
-        }
-        n as f32 / ((x1 - x0) * (y1 - y0)) as f32
-    };
+    let red = |r: i32, g: i32, b: i32| r > 150 && g * 2 < r && b * 2 < r;
     let bands = [
         ((cx - 40, cx + 40), (cy + 50, cy + 80)),
         ((cx - 58, cx - 38), (cy - 30, cy + 50)),
         ((cx + 38, cx + 58), (cy - 30, cy + 50)),
     ];
-    bands.into_iter().all(|(xs, ys)| share(xs, ys) >= TARGET_MIN)
+    bands.into_iter().all(|(xs, ys)| colour_share(img, xs, ys, red) >= TARGET_MIN)
+}
+
+/// Share of the pixels in a box whose colour passes `pick`.
+fn colour_share(img: &Rgba, (x0, x1): (i32, i32), (y0, y1): (i32, i32), pick: impl Fn(i32, i32, i32) -> bool) -> f32 {
+    let mut n = 0;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let [r, g, b] = img.rgb(x, y).map(|v| v as i32);
+            if pick(r, g, b) {
+                n += 1;
+            }
+        }
+    }
+    n as f32 / ((x1 - x0) * (y1 - y0)) as f32
 }
 
 /// Share of cream pixels that marks the Tusk of Iron Tongs of Lust: Mammoth,
@@ -346,22 +349,9 @@ const TUSK_MIN: f32 = 0.03;
 
 /// Whether the Tusk mark is on a cell: see [`TUSK_MIN`].
 fn has_tusk(img: &Rgba, cell: u8) -> bool {
-    tusk_share(img, cell) >= TUSK_MIN
-}
-
-fn tusk_share(img: &Rgba, cell: u8) -> f32 {
     let (cx, cy) = portrait(cell);
-    let (x0, x1, y0, y1) = (cx - 20, cx + 25, cy + 22, cy + 50);
-    let mut n = 0;
-    for y in y0..y1 {
-        for x in x0..x1 {
-            let [r, g, b] = img.rgb(x, y).map(|v| v as i32);
-            if r > 170 && r < 248 && g > 140 && r - b > 45 && r - b <= 100 && r - g < 45 {
-                n += 1;
-            }
-        }
-    }
-    n as f32 / ((x1 - x0) * (y1 - y0)) as f32
+    let cream = |r: i32, g: i32, b: i32| r > 170 && r < 248 && g > 140 && r - b > 45 && r - b <= 100 && r - g < 45;
+    colour_share(img, (cx - 20, cx + 25), (cy + 22, cy + 50), cream) >= TUSK_MIN
 }
 
 /// Half the width and height of the box around a portrait that a tooltip

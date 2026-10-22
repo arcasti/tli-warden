@@ -40,7 +40,7 @@ pub fn incident_score(ctx: &Ctx, c: &Cell, comp: &Comp) -> f64 {
     match c.event {
         // A marker whose incident the player can't see is any that fits
         // its cell, at the draw odds.
-        Some(_) if !marker_seen(ctx.st, c) => {
+        Some(_) if !marker_seen(ctx.st) => {
             let (mut exec, mut chain, mut total) = (0.0, 0.0, 0.0);
             for (id, w) in fitting_incidents(ctx.st, c.n) {
                 let w = f64::from(w);
@@ -105,7 +105,7 @@ fn landing_gain(st: &State, n: usize, action: &Action, samples: u32, &(v, r): &(
 pub fn incident_why(st: &State, c: &Cell) -> Option<String> {
     let id = c.event?;
     Some(match id {
-        _ if !marker_seen(st, c) => "a Prison Incident waits there".to_string(),
+        _ if !marker_seen(st) => "a Prison Incident waits there".to_string(),
         EXECUTION_EFFICIENCY => "an Execution Efficiency waits there".to_string(),
         CHAIN_REACTION => "a Chain Reaction waits there".to_string(),
         _ => format!("{} waits there", an(incident_name(id))),
@@ -183,7 +183,7 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
         // Landing on a marker fires its incident, which can't be declined.
         score += incident_score(ctx, c, &board);
         // Any other known marker, and the Interrogation Room, are played on a copy.
-        if let Some(id) = c.event.filter(|&id| marker_seen(st, c) && id != EXECUTION_EFFICIENCY && id != CHAIN_REACTION) {
+        if let Some(id) = c.event.filter(|&id| marker_seen(st) && id != EXECUTION_EFFICIENCY && id != CHAIN_REACTION) {
             let samples = if SURE_INCIDENTS.contains(&id) { 1 } else { 3 };
             score += p.w_event * landing_gain(st, n, &Action::Event, samples, &tiers);
         } else if n == data().room {

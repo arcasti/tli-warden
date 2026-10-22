@@ -11,7 +11,7 @@ use warden::engine::actions::{Action, ChoiceId};
 use warden::engine::data::{Beast, CAGE_FIGHT, Gift, Tool, data};
 use warden::engine::devour::{bites, devour_options, eater_mask};
 use warden::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATWAY};
-use warden::engine::rules::steps_between;
+use warden::engine::rules::{marker_seen, steps_between};
 use warden::engine::state::{ObjectiveState, Pending, Phase, ToolReason, Used};
 use warden::engine::apply;
 use warden::solver::chain::{Meal, bite, chain_odds, devour_delta, replace_odds, rise};
@@ -90,7 +90,7 @@ fn good_boards_build_the_model() {
     assert_eq!(patrol.destinations, vec![5, 9, 14]);
     assert_eq!(patrol.vault.iter().map(|v| v.beast).collect::<Vec<_>>(), vec![Beast::Wolf]);
     assert_eq!(patrol.prey.len(), 1);
-    assert_eq!(patrol.cells[5].event_known, Some(false));
+    assert!(patrol.cells[5].event.is_some() && !marker_seen(&patrol));
 }
 
 /// The Sewer Ratway cell pick: every cell but the room is an option, the
@@ -102,7 +102,8 @@ fn ratway_board_picks_a_cell() {
     assert!(problems.is_empty(), "{problems:?}");
     let all: Vec<usize> = (0..d.cell_count).filter(|&n| n != d.room).collect();
     assert_eq!(st.pending, vec![Pending::Cell { id: SEWER_RATWAY, options: all }]);
-    assert_eq!((st.cells[3].event, st.cells[3].event_known), (Some(CHAIN_REACTION), Some(false)));
+    assert_eq!(st.cells[3].event, Some(CHAIN_REACTION));
+    assert!(!marker_seen(&st));
     assert_eq!((st.cells[5].event, st.cells[5].sealed), (Some(EXECUTION_EFFICIENCY), false));
     assert_eq!(st.cells[12].event, None);
     let pick = warden::solver::solve::instant(&st).expect("pick");
@@ -195,14 +196,10 @@ fn drop_rust_only(rust: &mut Value, js: &Value) {
     if js["params"].get("vaultCap").is_none() {
         rust["params"].as_object_mut().unwrap().remove("vaultCap");
     }
-    if js["params"].get("maiden").is_none() {
-        rust["params"].as_object_mut().unwrap().remove("maiden");
-    }
-    if js["params"].get("hiddenIncidents").is_none() {
-        rust["params"].as_object_mut().unwrap().remove("hiddenIncidents");
-    }
-    if js["params"].get("markersAvoidWarden").is_none() {
-        rust["params"].as_object_mut().unwrap().remove("markersAvoidWarden");
+    for key in ["maiden", "hiddenIncidents", "markersAvoidWarden"] {
+        if js["params"].get(key).is_none() {
+            rust["params"].as_object_mut().unwrap().remove(key);
+        }
     }
     for (r, j) in rust["pending"].as_array_mut().unwrap().iter_mut().zip(js["pending"].as_array().unwrap()) {
         for key in ["reason", "picks"] {
@@ -247,6 +244,11 @@ fn builds_like_the_js() {
             for cell in js_state["cells"].as_array_mut().unwrap() {
                 cell["scratch"] = Value::Bool(false);
             }
+        }
+        // The JS marks an unnamed marker eventKnown false; the Rust board hides every incident
+        // through params.hiddenIncidents.
+        for cell in js_state["cells"].as_array_mut().unwrap() {
+            cell.as_object_mut().unwrap().remove("eventKnown");
         }
         if let Some(diff) = first_diff("state", &normalize(rust), &normalize(js_state)) {
             panic!("{name}: {diff}");
@@ -832,7 +834,6 @@ fn an_extra_portion_marker_beats_a_plain_door() {
     let plain = decide(&st, &TUNED, &mut Rng32::new(1));
     assert_eq!(plain, Some(Action::Patrol { cell: door }));
     st.cells[marker].event = Some(212);
-    st.cells[marker].event_known = Some(true);
     // A read board hides every incident; this one shows its marker's.
     st.params.hidden_incidents = false;
     assert_eq!(decide(&st, &TUNED, &mut Rng32::new(1)), Some(Action::Patrol { cell: marker }));

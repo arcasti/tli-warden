@@ -127,9 +127,7 @@ fn unseen_markers_draw_any_fitting_incident() {
     let mut st = new_game("unseen");
     let n = st.cells.iter().position(|c| c.sealed && c.event.is_none()).expect("a free sealed cell");
     assert!(add_marker(&mut st, Some(n)));
-    assert!(marker_seen(&st, &st.cells[n]));
-    st.params.hidden_incidents = true;
-    assert!(!marker_seen(&st, &st.cells[n]));
+    assert!(!marker_seen(&st));
     let mut ids = std::collections::BTreeSet::new();
     for seed in 0..200 {
         let mut copy = st.clone();

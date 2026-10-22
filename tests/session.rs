@@ -934,7 +934,7 @@ fn open_cell_marker() {
     let model = s.reading.clone().unwrap().model;
     assert_eq!(model.cells[12], CellModel::Empty { event: Some(EventMark::Unknown) });
     let (st, _) = build_state(&model, 1);
-    assert!(!st.cells[12].sealed && st.cells[12].event.is_some() && st.cells[12].event_known == Some(false));
+    assert!(!st.cells[12].sealed && st.cells[12].event.is_some());
 }
 
 /// A low-confidence cell read warns on the first two reads that give it and

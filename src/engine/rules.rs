@@ -237,10 +237,10 @@ pub fn fitting_incidents(s: &State, n: usize) -> impl Iterator<Item = (u32, u32)
     data().incidents.iter().filter(move |e| drawable(s, e) && incident_fits(e.id, cell)).map(move |e| (e.id, incident_weight(s, e.id)))
 }
 
-/// Whether the player sees a marker's incident: not when a read board
-/// couldn't name it, nor in a game whose incidents stay hidden.
-pub fn marker_seen(s: &State, c: &Cell) -> bool {
-    c.event_known != Some(false) && !s.params.hidden_incidents
+/// Whether the player sees a marker's incident: not in a game whose
+/// incidents stay hidden, which includes every read board.
+pub fn marker_seen(s: &State) -> bool {
+    !s.params.hidden_incidents
 }
 
 /// Draws an incident by weight among those that fit at least one of `spots`.

@@ -38,20 +38,16 @@ pub struct Params {
     pub maiden: bool,
     /// Whether a marker's incident stays unseen until it fires, as in the
     /// game; the JS engine shows it, and its traces leave the field out.
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default = "rises", skip_serializing_if = "bool::clone")]
     pub hidden_incidents: bool,
     /// Whether a new marker stays off the warden's cell, as the run logs
     /// show; the JS engine allowed it, and its traces leave the field out.
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub markers_avoid_warden: bool,
 }
 
 fn rises() -> bool {
     true
-}
-
-fn is_false(b: &bool) -> bool {
-    !b
 }
 
 impl Default for Params {
@@ -81,7 +77,7 @@ impl Default for Params {
             theme: 0,
             vault_cap: Some(VAULT_CAP),
             maiden: true,
-            hidden_incidents: false,
+            hidden_incidents: true,
             markers_avoid_warden: true,
         }
     }
@@ -119,16 +115,12 @@ pub struct Cell {
     pub nest: Option<Nest>,
     pub event: Option<u32>,
     pub ivory: bool,
-    /// False when the player sees a marker but not its incident (set by the
-    /// board reader, never by the engine); None leaves it out of the JSON.
-    #[serde(rename = "eventKnown", default, skip_serializing_if = "Option::is_none")]
-    pub event_known: Option<bool>,
 }
 
 impl Cell {
     /// blankCell: the office is never sealed and never holds anyone.
     pub fn blank(n: usize) -> Cell {
-        Cell { n, sealed: n != data().room, inmate: None, hidden: None, known: 0, scratch: false, nest: None, event: None, ivory: false, event_known: None }
+        Cell { n, sealed: n != data().room, inmate: None, hidden: None, known: 0, scratch: false, nest: None, event: None, ivory: false }
     }
 
     /// An open cell with an inmate in it.

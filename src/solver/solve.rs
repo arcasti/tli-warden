@@ -8,7 +8,7 @@ use super::{Params, Rng32, TOOL_RANK, TUNED, composition, decide, decide_bite};
 use crate::engine::data::{Beast, RAINBOW, Tool};
 use crate::engine::devour::{can_devour_now, hunt_targets, start_options};
 use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, execution_victims};
-use crate::engine::rules::{clockwise_path, fitting_incidents, marker_seen, patrol_options};
+use crate::engine::rules::{clockwise_path, draw_incident, marker_seen, patrol_options};
 use crate::engine::state::{Inmate, Pending, Phase, State};
 use crate::engine::text::{cell_label, describe, incident_name, plural, tier_name, tool_name};
 use crate::engine::{Action, ChoiceId, apply, data::data};
@@ -36,23 +36,10 @@ pub fn hide_future(st: &mut State, seed: u32) {
     // A marker whose incident the player can't see is any that fits its
     // cell, drawn by weight.
     for n in 0..st.cells.len() {
-        if st.cells[n].event.is_none() || marker_seen(st, &st.cells[n]) {
+        if st.cells[n].event.is_none() || marker_seen(st) {
             continue;
         }
-        let total: u32 = fitting_incidents(st, n).map(|(_, w)| w).sum();
-        if total == 0 {
-            continue;
-        }
-        let mut left = random.roll() * f64::from(total);
-        let mut drawn = None;
-        for (id, w) in fitting_incidents(st, n) {
-            drawn = Some(id);
-            left -= f64::from(w);
-            if left < 0.0 {
-                break;
-            }
-        }
-        st.cells[n].event = drawn;
+        st.cells[n].event = draw_incident(st, &[n]);
     }
     for c in &mut st.cells {
         if !c.sealed || c.known >= 2 {
@@ -148,7 +135,7 @@ pub fn candidates(st: &State) -> Vec<Candidate> {
             } else if n == data().room {
                 "Instigate or Bestow".to_string()
             } else if let Some(id) = c.event {
-                if !marker_seen(st, c) { "a Prison Incident marker".to_string() } else { format!("the {} marker", incident_name(id)) }
+                if !marker_seen(st) { "a Prison Incident marker".to_string() } else { format!("the {} marker", incident_name(id)) }
             } else if c.sealed {
                 (if c.nest.is_some() { "the Rat Nest" } else { "a locked door" }).to_string()
             } else if let Some(i) = c.inmate {

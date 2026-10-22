@@ -7,7 +7,7 @@ use super::{Comp, Ctx, Dist, Params, Rng32, TOP, beasts, composition, dist_worth
 use crate::engine::data::{Beast, Card, ObjectiveKind, RAINBOW, Tool, data};
 use crate::engine::devour::{Bite, eater_mask, sure_gain};
 use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATWAY};
-use crate::engine::rules::{clockwise_path, land, steps_between};
+use crate::engine::rules::{clockwise_path, fitting_incidents, land, marker_seen, steps_between};
 use crate::engine::state::{Cell, Inmate, State};
 use crate::engine::text::{an, describe, incident_name, plural};
 use crate::engine::{Action, ChoiceId, apply};
@@ -17,8 +17,9 @@ fn best_first(out: &mut [(usize, f64)]) {
     out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 }
 
-/// incidentScore: the value of the incident marker on a destination. Only
-/// the two incidents the engine simulates have a value.
+/// incidentScore: the value of the incident marker on a destination. Of a
+/// seen marker only the two incidents the engine simulates have a value; an
+/// unseen one also gets `w_incident` for the odds of any other.
 pub fn incident_score(ctx: &Ctx, c: &Cell, comp: &Comp) -> f64 {
     // Behind a door the executioner is whoever comes out; a Chain Reaction
     // landing opens it from the side.
@@ -37,8 +38,29 @@ pub fn incident_score(ctx: &Ctx, c: &Cell, comp: &Comp) -> f64 {
         exec
     };
     match c.event {
-        // A marker whose incident the player can't see is either, evenly.
-        Some(_) if c.event_known == Some(false) => 0.5 * execution() + 0.5 * ctx.p.w_chain,
+        // A marker whose incident the player can't see is any that fits
+        // its cell, at the draw odds.
+        Some(_) if !marker_seen(ctx.st, c) => {
+            let (mut exec, mut chain, mut total) = (0.0, 0.0, 0.0);
+            for (id, w) in fitting_incidents(ctx.st, c.n) {
+                let w = f64::from(w);
+                total += w;
+                match id {
+                    EXECUTION_EFFICIENCY => exec += w,
+                    CHAIN_REACTION => chain += w,
+                    _ => {}
+                }
+            }
+            if total == 0.0 {
+                return 0.0;
+            }
+            let (exec, chain) = (exec / total, chain / total);
+            let mut score = chain * ctx.p.w_chain + (1.0 - exec - chain) * ctx.p.w_incident;
+            if exec > 0.0 {
+                score += exec * execution();
+            }
+            score
+        }
         Some(EXECUTION_EFFICIENCY) => execution(),
         Some(CHAIN_REACTION) => ctx.p.w_chain,
         _ => 0.0,
@@ -80,10 +102,10 @@ fn landing_gain(st: &State, n: usize, action: &Action, samples: u32, &(v, r): &(
 }
 
 /// The `why` of incidentScore: what waits on the marker, if there is one.
-pub fn incident_why(c: &Cell) -> Option<String> {
+pub fn incident_why(st: &State, c: &Cell) -> Option<String> {
     let id = c.event?;
     Some(match id {
-        _ if c.event_known == Some(false) => "a Prison Incident waits there".to_string(),
+        _ if !marker_seen(st, c) => "a Prison Incident waits there".to_string(),
         EXECUTION_EFFICIENCY => "an Execution Efficiency waits there".to_string(),
         CHAIN_REACTION => "a Chain Reaction waits there".to_string(),
         _ => format!("{} waits there", an(incident_name(id))),
@@ -93,7 +115,7 @@ pub fn incident_why(c: &Cell) -> Option<String> {
 /// The `why` patrolScores gives landing on cell `n`.
 pub fn patrol_why(st: &State, n: usize) -> String {
     let c = &st.cells[n];
-    if let Some(why) = incident_why(c) {
+    if let Some(why) = incident_why(st, c) {
         return why;
     }
     if st.chain {
@@ -161,7 +183,7 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
         // Landing on a marker fires its incident, which can't be declined.
         score += incident_score(ctx, c, &board);
         // Any other known marker, and the Interrogation Room, are played on a copy.
-        if let Some(id) = c.event.filter(|&id| c.event_known != Some(false) && id != EXECUTION_EFFICIENCY && id != CHAIN_REACTION) {
+        if let Some(id) = c.event.filter(|&id| marker_seen(st, c) && id != EXECUTION_EFFICIENCY && id != CHAIN_REACTION) {
             let samples = if SURE_INCIDENTS.contains(&id) { 1 } else { 3 };
             score += p.w_event * landing_gain(st, n, &Action::Event, samples, &tiers);
         } else if n == data().room {

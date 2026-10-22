@@ -198,6 +198,9 @@ fn drop_rust_only(rust: &mut Value, js: &Value) {
     if js["params"].get("maiden").is_none() {
         rust["params"].as_object_mut().unwrap().remove("maiden");
     }
+    if js["params"].get("hiddenIncidents").is_none() {
+        rust["params"].as_object_mut().unwrap().remove("hiddenIncidents");
+    }
     for (r, j) in rust["pending"].as_array_mut().unwrap().iter_mut().zip(js["pending"].as_array().unwrap()) {
         for key in ["reason", "picks"] {
             if j.get(key).is_none() {
@@ -820,6 +823,8 @@ fn an_extra_portion_marker_beats_a_plain_door() {
     assert_eq!(plain, Some(Action::Patrol { cell: door }));
     st.cells[marker].event = Some(212);
     st.cells[marker].event_known = Some(true);
+    // A read board hides every incident; this one shows its marker's.
+    st.params.hidden_incidents = false;
     assert_eq!(decide(&st, &TUNED, &mut Rng32::new(1)), Some(Action::Patrol { cell: marker }));
 }
 

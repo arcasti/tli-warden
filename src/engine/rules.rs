@@ -1,7 +1,7 @@
 //! Setup, day flow, doors and incident markers (js/engine.js lines 406-1260).
 //! Function names follow the JS ones in snake case.
 
-use super::data::{Beast, Gift, IRON_LAW, OPULENCE, ObjectiveKind, RAINBOW, Spawn, Tool, data};
+use super::data::{Beast, Gift, IRON_LAW, Incident, OPULENCE, ObjectiveKind, RAINBOW, Spawn, Tool, data};
 use super::rng::{hash_seed, pick_index, pick_one, rand, shuffle};
 use super::state::{
     Cell, EventRef, Inmate, ObjectiveState, Params, Pending, Phase, Roster, RosterRow, RunResult, State, Stats, ToolReason,
@@ -219,19 +219,28 @@ pub fn incident_weight(s: &State, id: u32) -> u32 {
     s.incident_weights.get(&id).copied().unwrap_or_else(|| data().incident(id).weight)
 }
 
-/// Incidents that can be drawn now: weight above 0, no held instrument in
-/// excludeRelic, under repeatLimit when the data sets one.
+/// Whether an incident can be drawn now: weight above 0, no held instrument
+/// in excludeRelic, under repeatLimit when the data sets one.
+fn drawable(s: &State, e: &Incident) -> bool {
+    incident_weight(s, e.id) > 0
+        && !e.exclude.iter().any(|&t| s.has(t))
+        && !(e.repeat_limit > 0 && s.incident_counts.get(&e.id).copied().unwrap_or(0) >= e.repeat_limit)
+}
+
 fn incident_pool(s: &State) -> Vec<u32> {
-    data()
-        .incidents
-        .iter()
-        .filter(|e| {
-            incident_weight(s, e.id) > 0
-                && !e.exclude.iter().any(|&t| s.has(t))
-                && !(e.repeat_limit > 0 && s.incident_counts.get(&e.id).copied().unwrap_or(0) >= e.repeat_limit)
-        })
-        .map(|e| e.id)
-        .collect()
+    data().incidents.iter().filter(|e| drawable(s, e)).map(|e| e.id).collect()
+}
+
+/// The incidents a marker on cell `n` could carry, with their draw weights.
+pub fn fitting_incidents(s: &State, n: usize) -> impl Iterator<Item = (u32, u32)> + '_ {
+    let cell = &s.cells[n];
+    data().incidents.iter().filter(move |e| drawable(s, e) && incident_fits(e.id, cell)).map(move |e| (e.id, incident_weight(s, e.id)))
+}
+
+/// Whether the player sees a marker's incident: not when a read board
+/// couldn't name it, nor in a game whose incidents stay hidden.
+pub fn marker_seen(s: &State, c: &Cell) -> bool {
+    c.event_known != Some(false) && !s.params.hidden_incidents
 }
 
 /// Draws an incident by weight among those that fit at least one of `spots`.

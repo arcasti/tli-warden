@@ -52,6 +52,9 @@ pub struct Params {
     /// Torture Instrument pick: a move that completes it earns `w_goal`, a
     /// part of it the same share of `w_goal`.
     pub w_goal: f64,
+    /// The board value of an unseen marker's other incidents, those besides
+    /// Execution Efficiency and Chain Reaction.
+    pub w_incident: f64,
 }
 
 impl Params {
@@ -71,6 +74,7 @@ impl Params {
             "min_devour" => &mut self.min_devour,
             "swap_max_tier" => &mut self.swap_max_tier,
             "w_goal" => &mut self.w_goal,
+            "w_incident" => &mut self.w_incident,
             _ => return None,
         })
     }
@@ -90,6 +94,7 @@ pub static TUNED: Params = Params {
     min_devour: -2.0,
     swap_max_tier: 2.0,
     w_goal: 0.0,
+    w_incident: 1.0,
 };
 
 /// mulberry32 (rng32), for the solver's own dice (never the game's).

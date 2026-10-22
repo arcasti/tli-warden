@@ -118,3 +118,25 @@ fn solve_timing() {
         println!("top: {} (mean {:.3}, se {:.3}, n {})", top.label, top.mean, top.se, top.n);
     }
 }
+
+#[test]
+fn unseen_markers_draw_any_fitting_incident() {
+    use warden::engine::new_game;
+    use warden::engine::rules::{add_marker, incident_fits, marker_seen};
+    use warden::solver::solve::hide_future;
+    let mut st = new_game("unseen");
+    let n = st.cells.iter().position(|c| c.sealed && c.event.is_none()).expect("a free sealed cell");
+    assert!(add_marker(&mut st, Some(n)));
+    assert!(marker_seen(&st, &st.cells[n]));
+    st.params.hidden_incidents = true;
+    assert!(!marker_seen(&st, &st.cells[n]));
+    let mut ids = std::collections::BTreeSet::new();
+    for seed in 0..200 {
+        let mut copy = st.clone();
+        hide_future(&mut copy, seed);
+        let id = copy.cells[n].event.expect("the marker stays");
+        assert!(incident_fits(id, &copy.cells[n]), "incident {id} doesn't fit cell {n}");
+        ids.insert(id);
+    }
+    assert!(ids.len() > 2, "only {ids:?} drawn");
+}

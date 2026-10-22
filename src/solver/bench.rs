@@ -23,6 +23,7 @@ const GUARD: u32 = 2000;
 /// holding `held` as if picked before the first move.
 pub fn start(seed: u32, k: u32, held: &[Tool]) -> (State, Rng32) {
     let mut st = new_game(&format!("{seed}-{k}"));
+    st.params.hidden_incidents = true;
     for &tool in held {
         take_tool(&mut st, tool);
     }

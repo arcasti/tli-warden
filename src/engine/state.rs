@@ -36,10 +36,18 @@ pub struct Params {
     /// such field, so a state that keeps the rise leaves it out.
     #[serde(default = "rises", skip_serializing_if = "bool::clone")]
     pub maiden: bool,
+    /// Whether a marker's incident stays unseen until it fires, as in the
+    /// game; the JS engine shows it, and its traces leave the field out.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden_incidents: bool,
 }
 
 fn rises() -> bool {
     true
+}
+
+fn is_false(b: &bool) -> bool {
+    !b
 }
 
 impl Default for Params {
@@ -67,6 +75,7 @@ impl Default for Params {
             theme: 0,
             vault_cap: Some(VAULT_CAP),
             maiden: true,
+            hidden_incidents: false,
         }
     }
 }

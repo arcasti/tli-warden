@@ -944,7 +944,7 @@ impl Session {
         // Prison Status opens when its cells are the pick's, else the pick's
         // effect, the board the next pick covers while picks are left, and
         // the one a new treasure pick (as a Chromatic gives) covers after.
-        let mut picked = false;
+        let mut picked = None;
         let mut after_pick = false;
         if panels.screen == Screen::Unknown
             && self.days_read.is_some()
@@ -952,10 +952,11 @@ impl Session {
             && let (Some((_, over, _)), Some(r)) = (&self.scene, &self.reading)
             && over.screen == Screen::TreasurePick
         {
-            if to_model(&scene, &panels, &self.tools, self.board.as_ref(), self.run_days()).0.cells == r.model.cells {
+            let model = to_model(&scene, &panels, &self.tools, self.board.as_ref(), self.run_days()).0;
+            if model.cells == r.model.cells {
                 return Taken::Skipped;
             }
-            picked = true;
+            picked = Some(model);
             after_pick = taken + 1 < treasure_picks(self.theme);
             self.treasure = after_pick.then_some(taken + 1);
         }
@@ -971,11 +972,11 @@ impl Session {
         // in place of any board inferred after the consume. With picks left,
         // or under View Prison Status, the pick stays on show, solved on that
         // board; after the last pick the scene becomes this read.
-        let keep_pick = after_pick
-            || (panels.screen == Screen::PrisonStatus
-                && self.scene.as_ref().is_some_and(|(_, over, _)| matches!(over.screen, Screen::TreasurePick | Screen::InstrumentPick)));
-        if picked || keep_pick {
-            self.board = Some(to_model(&scene, &panels, &self.tools, self.board.as_ref(), self.run_days()).0);
+        let under_status = panels.screen == Screen::PrisonStatus
+            && self.scene.as_ref().is_some_and(|(_, over, _)| matches!(over.screen, Screen::TreasurePick | Screen::InstrumentPick));
+        let keep_pick = after_pick || under_status;
+        if picked.is_some() || under_status {
+            self.board = Some(picked.unwrap_or_else(|| to_model(&scene, &panels, &self.tools, self.board.as_ref(), self.run_days()).0));
             self.consume = None;
             self.meal = None;
             self.chained = false;

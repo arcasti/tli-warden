@@ -85,8 +85,7 @@ pub fn shown(st: &State, ranking: &[SolveOption], advice: &Advice) -> Shown {
     let plain = Shown { headline: None, why: advice.why.clone() };
     match st.pending.first() {
         Some(Pending::Gift { options, .. }) => {
-            let (noops, rest): (Vec<&Gift>, Vec<&Gift>) = options.iter().partition(|&&g| changes_nothing(st, g));
-            let names = |gs: &[&Gift]| join(&gs.iter().map(|g| tool_name(g.key())).collect::<Vec<_>>());
+            let (noops, rest): (Vec<Gift>, Vec<Gift>) = options.iter().partition(|&&g| changes_nothing(st, g));
             if tie {
                 let why = match (noops.len(), rest.len()) {
                     (0, _) => alike.to_string(),
@@ -94,24 +93,22 @@ pub fn shown(st: &State, ranking: &[SolveOption], advice: &Advice) -> Shown {
                     (n, r) => format!(
                         "{} {} nothing on this board. {} {} no better.",
                         names(&noops),
-                        if n == 1 { "changes" } else { "change" },
+                        change(n),
                         names(&rest),
                         if r == 1 { "scores" } else { "score" },
                     ),
                 };
                 return Shown { headline: Some("Take any treasure".to_string()), why };
             }
-            match advice.option.and_then(|k| gift_at(options, ranking, k)) {
-                Some(advised) if noops.contains(&&advised) => {
-                    // The advised treasure and the no-op ones tied with it.
-                    let mut idle: Vec<(usize, Gift)> = others.iter().filter_map(|&k| gift_at(options, ranking, k).map(|g| (k, g))).filter(|(_, g)| noops.contains(&g)).collect();
-                    idle.extend(advice.option.map(|k| (k, advised)));
-                    idle.sort_unstable_by_key(|&(k, _)| k);
-                    let gifts: Vec<&Gift> = idle.iter().map(|(_, g)| g).collect();
-                    let verb = if gifts.len() == 1 { "changes" } else { "change" };
-                    Shown { headline: None, why: format!("{} {verb} nothing on this board, and the other treasures score lower.", names(&gifts)) }
+            match advice.option.filter(|&k| gift_at(options, ranking, k).is_some_and(|g| noops.contains(&g))) {
+                Some(k) => {
+                    let idle = idle_tied(st, options, ranking, k);
+                    Shown {
+                        headline: None,
+                        why: format!("{} {} nothing on this board, and the other treasures score lower.", names(&idle), change(idle.len())),
+                    }
                 }
-                _ => plain,
+                None => plain,
             }
         }
         Some(Pending::Interrogation { .. }) if tie => Shown { headline: Some("Take either card".to_string()), why: alike.to_string() },
@@ -124,27 +121,29 @@ pub fn shown(st: &State, ranking: &[SolveOption], advice: &Advice) -> Shown {
 /// one changes something, the best-ranked such one, since the playouts can't
 /// rank them apart; otherwise the advice as it is.
 pub fn prefer_change(st: &State, ranking: &[SolveOption], advice: Advice) -> Advice {
-    let Some(Pending::Gift { options, .. }) = st.pending.first() else { return advice };
-    let idle = |k: usize| gift_at(options, ranking, k).filter(|&g| changes_nothing(st, g));
-    let Some(advised) = advice.option.and_then(idle) else { return advice };
-    let others = also_good(ranking, advice.option);
-    let acts = |k: usize| gift_at(options, ranking, k).is_some_and(|g| !changes_nothing(st, g));
-    let Some(&best) = others.iter().find(|&&k| acts(k)) else { return advice };
-    let mut tied: Vec<(usize, Gift)> = others.iter().filter_map(|&k| idle(k).map(|g| (k, g))).collect();
-    tied.extend(advice.option.map(|k| (k, advised)));
-    tied.sort_unstable_by_key(|&(k, _)| k);
-    let names: Vec<String> = tied.iter().map(|(_, g)| tool_name(g.key())).collect();
+    let (Some(Pending::Gift { options, .. }), Some(k)) = (st.pending.first(), advice.option) else { return advice };
+    let idle = idle_tied(st, options, ranking, k);
+    let acts = |j: usize| gift_at(options, ranking, j).is_some_and(|g| !idle.contains(&g));
+    if acts(k) {
+        return advice;
+    }
+    let Some(best) = also_good(ranking, Some(k)).into_iter().find(|&j| acts(j)) else { return advice };
     let row = &ranking[best];
     Advice {
         action: row.action.clone(),
         label: row.label.clone(),
-        why: format!(
-            "The playouts can't tell it from {}, which {} nothing on this board.",
-            join(&names),
-            if names.len() == 1 { "changes" } else { "change" },
-        ),
+        why: format!("The playouts can't tell it from {}, which {} nothing on this board.", names(&idle), change(idle.len())),
         option: Some(best),
     }
+}
+
+/// The treasures of ranking row `advised` and of the rows tied with it that
+/// change nothing on the board, in ranking order.
+fn idle_tied(st: &State, options: &[Gift], ranking: &[SolveOption], advised: usize) -> Vec<Gift> {
+    let mut rows = also_good(ranking, Some(advised));
+    rows.push(advised);
+    rows.sort_unstable();
+    rows.into_iter().filter_map(|k| gift_at(options, ranking, k)).filter(|&g| changes_nothing(st, g)).collect()
 }
 
 /// The treasure that ranking row `k` takes, if it is one of `options`.
@@ -165,6 +164,16 @@ fn changes_nothing(st: &State, gift: Gift) -> bool {
         apply_gift(&mut trial, gift);
         trial.cells == st.cells && trial.vault == st.vault
     })
+}
+
+/// The treasures' names joined as "A, B and C".
+fn names(gifts: &[Gift]) -> String {
+    join(&gifts.iter().map(|g| tool_name(g.key())).collect::<Vec<_>>())
+}
+
+/// The verb for `n` treasures that change nothing.
+fn change(n: usize) -> &'static str {
+    if n == 1 { "changes" } else { "change" }
 }
 
 /// Names joined as "A, B and C".

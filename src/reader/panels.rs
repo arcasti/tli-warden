@@ -466,12 +466,13 @@ pub fn read_panels_titled(img: &Rgba, title: &Rgba) -> Panels {
             p.screen = Screen::Interrogation;
             p.decision.clear();
         } else if has(&heading, "Select a Destination", 0.75) || (!doors.is_empty() && p.days.is_some()) {
-            // Door cards alone need the days counter: text on the lobby's
-            // objective dialog can read as a card.
+            // Door cards or decision buttons alone need the days counter:
+            // text on the lobby's objective dialog or any other game screen
+            // can read as one.
             p.screen = Screen::Patrol;
             p.doors = doors;
             p.decision.clear();
-        } else if has(&heading, "Make Your Decision", 0.75) || !p.decision.is_empty() {
+        } else if has(&heading, "Make Your Decision", 0.75) || (!p.decision.is_empty() && p.days.is_some()) {
             p.screen = Screen::Manage;
         } else if banner.iter().any(|l| squash(&l.text).starts_with("day")) {
             p.screen = Screen::DayBanner;

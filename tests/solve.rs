@@ -138,3 +138,36 @@ fn unseen_markers_draw_any_fitting_incident() {
     }
     assert!(ids.len() > 2, "only {ids:?} drawn");
 }
+
+#[test]
+fn rerolls_are_offered_only_with_one_left() {
+    use warden::engine::new_game;
+    let mut st = new_game("REROLL");
+    let rerolls = |st: &State| candidates(st).iter().filter(|c| c.label == "Re-roll").count();
+    assert_eq!(rerolls(&st), 0);
+    st.rerolls = 1;
+    assert_eq!(rerolls(&st), 1);
+    st.pending.clear();
+    assert_eq!(rerolls(&st), 0);
+}
+
+#[test]
+fn decide_rerolls_only_a_low_ranked_offer() {
+    use warden::engine::data::Tool;
+    use warden::engine::new_game;
+    use warden::engine::state::{Pending, ToolReason};
+    use warden::engine::{Action, ChoiceId};
+    use warden::solver::{Params, Rng32, TOOL_RANK, decide};
+    let p = Params { reroll_rank: 10.0, ..TUNED.clone() };
+    let mut st = new_game("REROLL");
+    st.rerolls = 1;
+    let pick = |st: &mut State, options: Vec<Tool>| {
+        st.pending = vec![Pending::Tool { options, reason: ToolReason::Start }];
+        decide(st, &p, &mut Rng32::new(1))
+    };
+    let take = |t: Tool| Some(Action::Choose { id: ChoiceId::Name(t.key().to_string()) });
+    assert_eq!(pick(&mut st, TOOL_RANK[20..23].to_vec()), Some(Action::Reroll));
+    assert_eq!(pick(&mut st, vec![TOOL_RANK[20], TOOL_RANK[0], TOOL_RANK[21]]), take(TOOL_RANK[0]));
+    st.rerolls = 0;
+    assert_eq!(pick(&mut st, TOOL_RANK[20..23].to_vec()), take(TOOL_RANK[20]));
+}

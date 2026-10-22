@@ -20,7 +20,7 @@ fn decides_as_recorded() {
         .map(|k| {
             let (actions, st) = common::strategy_game(k, |_, _| {});
             // The test's game loop must stay the bench's.
-            assert_eq!(bench::play_strategy(1, k, &[], &TUNED), bench::Solo { chromatics: st.vault.len(), loot: st.loot(), stats: st.stats, objective: st.objective.is_some_and(|o| o.done) }, "game {k}");
+            assert_eq!(bench::play_strategy(1, k, &[], 0, &TUNED), bench::Solo { chromatics: st.vault.len(), loot: st.loot(), stats: st.stats, objective: st.objective.is_some_and(|o| o.done) }, "game {k}");
             json!({ "k": k, "actions": actions, "vault": st.vault.len(), "stats": st.stats })
         })
         .collect();

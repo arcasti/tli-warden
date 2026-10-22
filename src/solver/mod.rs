@@ -55,6 +55,9 @@ pub struct Params {
     /// The board value of an unseen marker's other incidents, those besides
     /// Execution Efficiency and Chain Reaction.
     pub w_incident: f64,
+    /// With a Re-roll left, an instrument offer is re-rolled when its best
+    /// instrument sits at this TOOL_RANK index or lower down.
+    pub reroll_rank: f64,
 }
 
 impl Params {
@@ -75,6 +78,7 @@ impl Params {
             "swap_max_tier" => &mut self.swap_max_tier,
             "w_goal" => &mut self.w_goal,
             "w_incident" => &mut self.w_incident,
+            "reroll_rank" => &mut self.reroll_rank,
             _ => return None,
         })
     }
@@ -95,6 +99,7 @@ pub static TUNED: Params = Params {
     swap_max_tier: 2.0,
     w_goal: 0.0,
     w_incident: 64.0,
+    reroll_rank: 8.0,
 };
 
 /// mulberry32 (rng32), for the solver's own dice (never the game's).
@@ -426,7 +431,11 @@ pub fn decide(st: &State, p: &Params, roll: &mut Rng32) -> Option<Action> {
             // The Hunt's target pick: the prey mark worth the most.
             Pending::Prey { options } => best_hunt(&ctx, options).map(|(n, _)| Action::Choose { id: ChoiceId::Cell(n) }),
             Pending::Tool { options, .. } => {
-                name(TOOL_RANK.iter().find(|t| options.contains(t)).unwrap_or(&options[0]).key())
+                let best = TOOL_RANK.iter().position(|t| options.contains(t));
+                if st.rerolls > 0 && best.unwrap_or(TOOL_RANK.len()) as f64 >= p.reroll_rank {
+                    return Some(Action::Reroll);
+                }
+                name(best.map_or(options[0], |i| TOOL_RANK[i]).key())
             }
         };
     }

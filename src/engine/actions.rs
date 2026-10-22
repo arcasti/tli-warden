@@ -7,7 +7,7 @@ use super::gifts::{apply_gift, interrogate};
 use super::incidents::{ratway_move, resolve_event};
 use super::rng::{pick_index, shuffle};
 use super::rules::{
-    How, advance_day, after_growth, check_prey, destinations_from_dice, empty_cell, fires, land, make_inmate,
+    How, advance_day, after_growth, check_prey, destinations_from_dice, draw_tools, empty_cell, fires, land, make_inmate,
     open_random, roll_inmate, sync_markers, weights,
 };
 use super::state::{Inmate, Pending, Phase, State};
@@ -36,6 +36,8 @@ pub enum Action {
     /// The Hunt marks the inmate in `cell` as the Lion's prey.
     Hunt { cell: usize },
     End,
+    /// Re-roll the pending instrument offer.
+    Reroll,
 }
 
 /// The JS `{ ok }` result: a refused action changes nothing but the markers.
@@ -63,6 +65,7 @@ pub fn apply(s: &mut State, action: &Action) -> Outcome {
         Action::Swap => swap(s),
         Action::Hunt { cell } => hunt(s, *cell),
         Action::End => end_day(s),
+        Action::Reroll => reroll(s),
     };
     sync_markers(s);
     out
@@ -279,4 +282,23 @@ pub fn take_tool(s: &mut State, tool: Tool) {
         }
     }
     s.pending.retain(|p| !p.is_empty());
+}
+
+/// Re-roll: a new draw replaces every instrument of the pending pick, from
+/// the same pool as a fresh offer, so the old offer may come back.
+pub fn reroll(s: &mut State) -> Outcome {
+    let Some(Pending::Tool { options, .. }) = s.pending.first() else {
+        return Outcome::Fail("There is no instrument offer to re-roll.");
+    };
+    if s.rerolls == 0 {
+        return Outcome::Fail("No Re-roll left this run.");
+    }
+    let count = options.len();
+    s.rerolls -= 1;
+    let fresh = draw_tools(s, count);
+    if let Some(Pending::Tool { options, .. }) = s.pending.first_mut() {
+        *options = fresh;
+    }
+    s.pending.retain(|p| !p.is_empty());
+    Outcome::Ok
 }

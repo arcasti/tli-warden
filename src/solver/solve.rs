@@ -115,6 +115,9 @@ pub fn candidates(st: &State) -> Vec<Candidate> {
                 for t in options {
                     out.push(candidate(Action::Choose { id: ChoiceId::Name(t.key().to_string()) }, format!("Take {}", tool_name(t.key()))));
                 }
+                if st.rerolls > 0 {
+                    out.push(candidate(Action::Reroll, "Re-roll".to_string()));
+                }
             }
             Pending::Gift { options, .. } => {
                 for g in options {
@@ -545,6 +548,7 @@ pub fn reason(st: &State, action: &Action) -> String {
         Action::Chain { .. } => "This bite is worth more than stopping here.".to_string(),
         Action::EndChain => "Every next bite would cost more than it gains.".to_string(),
         Action::Hunt { cell } => hunt_reason(st, *cell),
+        Action::Reroll => "A new offer is likely to beat every instrument here.".to_string(),
         Action::Choose { id } => match st.pending.first() {
             Some(Pending::Gift { .. }) => "Worth the most on this board right now.".to_string(),
             Some(Pending::Cell { .. }) => "The best landing by the patrol scores.".to_string(),

@@ -48,7 +48,7 @@ pub struct Game {
 
 /// Plays game `k` both ways; the advice runs `rollouts` playouts per option.
 pub fn play(seed: u32, k: u32, rollouts: usize) -> Game {
-    let Solo { chromatics: strategy, loot: strategy_loot, .. } = play_strategy(seed, k, &[], &TUNED);
+    let Solo { chromatics: strategy, loot: strategy_loot, .. } = play_strategy(seed, k, &[], 0, &TUNED);
 
     let (mut st, mut rng) = start(seed, k, &[]);
     let (mut decisions, mut overruled) = (0, 0);
@@ -97,17 +97,20 @@ pub struct Solo {
     pub objective: bool,
 }
 
-/// Plays game `k` of `seed` with the strategy alone on weights `p`, holding `held`.
-pub fn play_strategy(seed: u32, k: u32, held: &[Tool], p: &Params) -> Solo {
+/// Plays game `k` of `seed` with the strategy alone on weights `p`, holding
+/// `held`, with `rerolls` instrument rerolls for the run.
+pub fn play_strategy(seed: u32, k: u32, held: &[Tool], rerolls: u8, p: &Params) -> Solo {
     let (mut st, mut rng) = start(seed, k, held);
+    st.params.rerolls = rerolls;
+    st.rerolls = rerolls;
     playout(&mut st, p, &mut rng);
     Solo { chromatics: st.vault.len(), loot: st.loot(), stats: st.stats, objective: st.objective.is_some_and(|o| o.done) }
 }
 
 /// Games 0..`games` of `seed` played by the strategy alone on weights `p`,
-/// holding `held`, on `threads` threads, in game order.
-pub fn strategy_bench(games: u32, seed: u32, threads: usize, held: &[Tool], p: &Params) -> Vec<Solo> {
-    each_game(games, threads, |k| play_strategy(seed, k, held, p))
+/// holding `held`, with `rerolls` rerolls, on `threads` threads, in game order.
+pub fn strategy_bench(games: u32, seed: u32, threads: usize, held: &[Tool], rerolls: u8, p: &Params) -> Vec<Solo> {
+    each_game(games, threads, |k| play_strategy(seed, k, held, rerolls, p))
 }
 
 /// `play` on games 0..`games` on `threads` threads, in game order.
@@ -224,7 +227,7 @@ mod tests {
             assert_eq!(st.phase, Phase::Ended);
             assert_eq!(g.strategy, st.vault.len(), "game {k}");
             assert!(g.decisions > 0 && g.overruled <= g.decisions);
-            assert_eq!(play_strategy(1, k as u32, &[], &TUNED), Solo { chromatics: g.strategy, loot: st.loot(), stats: st.stats, objective: st.objective.is_some_and(|o| o.done) }, "game {k}");
+            assert_eq!(play_strategy(1, k as u32, &[], 0, &TUNED), Solo { chromatics: g.strategy, loot: st.loot(), stats: st.stats, objective: st.objective.is_some_and(|o| o.done) }, "game {k}");
         }
         let s = summarize(&games);
         for x in [s.strategy.0, s.strategy.1, s.advice.0, s.advice.1, s.gain.0, s.gain.1] {
@@ -237,9 +240,9 @@ mod tests {
         let mut p = TUNED.clone();
         *p.weight_mut("w_step").unwrap() = 0.0;
         assert!(p.weight_mut("w_steps").is_none());
-        let (tuned, changed) = (strategy_bench(20, 1, 2, &[], &TUNED), strategy_bench(20, 1, 2, &[], &p));
+        let (tuned, changed) = (strategy_bench(20, 1, 2, &[], 0, &TUNED), strategy_bench(20, 1, 2, &[], 0, &p));
         assert_ne!(tuned, changed);
-        assert_eq!(changed[7], play_strategy(1, 7, &[], &p));
+        assert_eq!(changed[7], play_strategy(1, 7, &[], 0, &p));
     }
 
     #[test]

@@ -302,6 +302,7 @@ pub fn new_game_with(seed: &str, params: Params) -> State {
     let d = data();
     let seed: String = seed.trim().to_uppercase().chars().take(40).collect();
     let scenario = "empty".to_string();
+    let rerolls = params.rerolls;
     let mut s = State {
         v: VERSION,
         rng: hash_seed(&format!("{seed}|{scenario}")),
@@ -322,6 +323,7 @@ pub fn new_game_with(seed: &str, params: Params) -> State {
         vault: Vec::new(),
         cache: 0,
         tools: Vec::new(),
+        rerolls,
         pending: Vec::new(),
         objective: None,
         theme: None,
@@ -621,5 +623,38 @@ mod tests {
             begin_day(&mut s);
             assert_eq!(markers(&s), 1, "seed {seed}: a morning spawned a marker");
         }
+    }
+
+    fn offer(s: &State) -> (Vec<Tool>, ToolReason) {
+        match s.pending.first() {
+            Some(Pending::Tool { options, reason }) => (options.clone(), *reason),
+            other => panic!("no instrument pick: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reroll_redraws_the_offer_and_spends_one() {
+        use crate::engine::actions::{Action, apply};
+        let mut s = new_game_with("REROLL", Params { rerolls: 2, ..Params::default() });
+        assert_eq!(s.rerolls, 2);
+        for left in [1, 0] {
+            let (before, reason) = offer(&s);
+            let expected = draw_tools(&mut s.clone(), before.len());
+            assert!(apply(&mut s, &Action::Reroll).is_ok());
+            assert_eq!(s.rerolls, left);
+            assert_eq!(offer(&s), (expected, reason));
+        }
+        let at_zero = offer(&s);
+        assert!(!apply(&mut s, &Action::Reroll).is_ok());
+        assert_eq!(offer(&s), at_zero);
+    }
+
+    #[test]
+    fn reroll_needs_an_instrument_pick() {
+        use crate::engine::actions::{Action, apply};
+        let mut s = new_game_with("REROLL", Params { rerolls: 1, ..Params::default() });
+        s.pending.clear();
+        assert!(!apply(&mut s, &Action::Reroll).is_ok());
+        assert_eq!(s.rerolls, 1);
     }
 }

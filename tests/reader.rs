@@ -122,6 +122,24 @@ fn side_cell_incident_reads() {
     assert!(!scene.cell(7).event, "cell 7 has no incident");
 }
 
+/// trainingdata/reports/incident-cell{8,9}-1080p.png: two 1920x1080 frames of
+/// one recorded run, the "!" on cell 8 in the first and on cell 9 (none on
+/// cell 8) a day earlier. Skips when a frame is missing.
+#[test]
+fn cell8_incident_reads_at_1080p() {
+    let reports = Path::new(env!("CARGO_MANIFEST_DIR")).join("trainingdata/reports");
+    for (name, cell, other) in [("incident-cell8-1080p.png", 8, 9), ("incident-cell9-1080p.png", 9, 8)] {
+        let path = reports.join(name);
+        if !path.is_file() {
+            println!("skipped: {} is missing", path.display());
+            continue;
+        }
+        let scene = read_scene(&load_png(&path).unwrap());
+        assert!(scene.cell(cell).event, "{name}: cell {cell} incident");
+        assert!(!scene.cell(other).event, "{name}: cell {other} has no incident");
+    }
+}
+
 /// trainingdata/reports/jaws-orange-*.png (outside s16): Legendary inmates
 /// with the jaws crown on cells lit as reachable destinations (14 in the
 /// first frame, 13 and 16 in the second) read Legendary, not Ultimate, like

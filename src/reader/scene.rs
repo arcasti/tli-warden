@@ -45,15 +45,16 @@ fn padlock_spot(cell: u8) -> (i32, i32) {
 }
 
 /// The Prison Incident "!" at the cell's bottom right: measured at cells 6,
-/// 9, 13 and 14, and at cell 8, where the right column's frame puts it
-/// further out and higher (cell 7 is assumed to match cell 8; one frame,
-/// trainingdata/reports/incident-cell8.png).
+/// 7, 9, 13 and 14. Cell 8's sits 9 px higher: its peak is at (+71.5, +24)
+/// on six run frames at 1920x1080, 2560x1440 and 3440x1440, and at
+/// (+77.5, +24) on trainingdata/reports/incident-cell8.png, a 1911x1072
+/// frame whose layout lands the whole right column about 6 px further right.
+/// The score falls off within 2 px of the peak, so the spot sits between the
+/// two and the +-4 px search reaches both.
 fn event_spot(cell: u8) -> (i32, i32) {
     let (x, y) = PORTRAIT[cell as usize - 1];
     match cell {
-        // Cell 7's marker sits where the other cells' do (measured on a
-        // recorded frame); cell 8's has not been seen on a frame yet.
-        8 => (x + 80, y + 25),
+        8 => (x + 74, y + 24),
         _ => (x + 71, y + 33),
     }
 }

@@ -94,7 +94,7 @@ pub static TUNED: Params = Params {
     min_devour: -2.0,
     swap_max_tier: 2.0,
     w_goal: 0.0,
-    w_incident: 1.0,
+    w_incident: 64.0,
 };
 
 /// mulberry32 (rng32), for the solver's own dice (never the game's).

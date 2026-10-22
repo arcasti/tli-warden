@@ -465,7 +465,9 @@ pub fn read_panels_titled(img: &Rgba, title: &Rgba) -> Panels {
             // Its heading is "Make Your Decision", as on the manage step.
             p.screen = Screen::Interrogation;
             p.decision.clear();
-        } else if has(&heading, "Select a Destination", 0.75) || !doors.is_empty() {
+        } else if has(&heading, "Select a Destination", 0.75) || (!doors.is_empty() && p.days.is_some()) {
+            // Door cards alone need the days counter: text on the lobby's
+            // objective dialog can read as a card.
             p.screen = Screen::Patrol;
             p.doors = doors;
             p.decision.clear();

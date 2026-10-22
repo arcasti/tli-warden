@@ -336,8 +336,9 @@ fn iron_law_days() {
     }
 }
 
-/// Every saved frame: only the loading screen of rec4-t424 and the day
-/// banners of rec1-t095 and rec4-t340 are off the board, and only the riot
+/// Every saved frame: only the loading screen of rec4-t424, the day banners
+/// of rec1-t095 and rec4-t340 and the lobby's objective dialog of
+/// p2560-lobby (a 2560 x 1361 player frame) are off the board, and only the riot
 /// screen of rec4-t422 ends the run. The red Consume target screens of rec4
 /// (the days counter hidden) are not off the board. Only rec5-t018,
 /// rec5-t047 and rec6-t206 are View Prison Status; the treasure picks around
@@ -372,7 +373,7 @@ fn off_board_and_run_end() {
     }
     println!("off the board: {off:?}");
     let present = |list: &[&'static str]| list.iter().copied().filter(|n| names.iter().any(|m| m == n)).collect::<Vec<_>>();
-    assert_eq!(off, present(&["rec1-t095.png", "rec4-t340.png", "rec4-t424.png"]));
+    assert_eq!(off, present(&["p2560-lobby.png", "rec1-t095.png", "rec4-t340.png", "rec4-t424.png"]));
     assert_eq!(ended, present(&["rec4-t422.png"]));
     assert_eq!(status, present(&["rec5-t018.png", "rec5-t047.png", "rec6-t206.png"]));
 }

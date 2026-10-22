@@ -253,9 +253,12 @@ pub fn draw_incident(s: &mut State, spots: &[usize]) -> Option<u32> {
     Some(pool[pick_index(&mut s.rng, &w)])
 }
 
+/// Cells a new marker can go on: no marker yet, not the Interrogation Room,
+/// and not the warden's cell when the params keep markers off it.
 fn free_cells(s: &State) -> Vec<usize> {
     let room = data().room;
-    s.cells.iter().filter(|c| c.n != room && c.event.is_none()).map(|c| c.n).collect()
+    let warden = s.params.markers_avoid_warden.then_some(s.position);
+    s.cells.iter().filter(|c| c.n != room && c.event.is_none() && Some(c.n) != warden).map(|c| c.n).collect()
 }
 
 /// Puts a marker on `cell`, or on a random free cell that fits the drawn incident.
@@ -592,5 +595,31 @@ mod tests {
         assert_eq!(room.cells[0].inmate, None);
         assert_eq!(room.vault.len(), 10);
         assert!(gift(&room));
+    }
+
+    #[test]
+    fn new_markers_avoid_the_warden_and_mornings_add_none() {
+        let markers = |s: &State| s.cells.iter().filter(|c| c.event.is_some()).count();
+        let room = data().room;
+        for seed in 0..300 {
+            let mut s = new_game(&format!("MARKERS-{seed}"));
+            s.position = (room + 1 + seed % (s.cells.len() - 1)) % s.cells.len();
+            for c in &mut s.cells {
+                c.event = None;
+            }
+            sync_markers(&mut s);
+            for _ in 0..3 {
+                add_marker(&mut s, None);
+            }
+            assert!(markers(&s) > 0, "seed {seed}: no marker placed");
+            assert_eq!(s.cells[s.position].event, None, "seed {seed}: marker on the warden's cell");
+            for c in &mut s.cells {
+                c.event = None;
+            }
+            sync_markers(&mut s);
+            assert_eq!(markers(&s), 1, "seed {seed}");
+            begin_day(&mut s);
+            assert_eq!(markers(&s), 1, "seed {seed}: a morning spawned a marker");
+        }
     }
 }

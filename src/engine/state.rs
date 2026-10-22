@@ -40,6 +40,10 @@ pub struct Params {
     /// game; the JS engine shows it, and its traces leave the field out.
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden_incidents: bool,
+    /// Whether a new marker stays off the warden's cell, as the run logs
+    /// show; the JS engine allowed it, and its traces leave the field out.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub markers_avoid_warden: bool,
 }
 
 fn rises() -> bool {
@@ -61,7 +65,9 @@ impl Default for Params {
             reusable_cells: true,
             tier_weights: d.tier_weights,
             beast_weights: [25; 4],
-            incident_spawn_chance: d.incident_spawn_chance,
+            // The run logs show no morning spawn; the JS engine's 117 came from
+            // the share of day-one doors with a marker.
+            incident_spawn_chance: 0,
             execution_rerolls: false,
             ivory_count: 4,
             ivory_includes_swapped: true,
@@ -76,6 +82,7 @@ impl Default for Params {
             vault_cap: Some(VAULT_CAP),
             maiden: true,
             hidden_incidents: false,
+            markers_avoid_warden: true,
         }
     }
 }

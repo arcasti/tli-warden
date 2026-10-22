@@ -210,7 +210,6 @@ pub struct Data {
     pub theme_pity_runs: u32,
     /// Rarity draw weights for Normal to Ultimate.
     pub tier_weights: [u32; RAINBOW as usize],
-    pub incident_spawn_chance: u32,
     pub oppress_per_tier: f64,
     /// Who each beast eats (FOOD_CHAIN), by Beast index.
     pub food_chain: [Vec<Beast>; 4],
@@ -466,7 +465,6 @@ fn load(raw: &str) -> Data {
         theme_chance_per_10000: num(&board["specialTheme"]["chancePer10000"]),
         theme_pity_runs: uint(&board["specialTheme"]["pityRuns"]),
         tier_weights: std::array::from_fn(|t| uint(&rarities[t]["weight"])),
-        incident_spawn_chance: (num(&d["practice"]["incidentSpawnRate"]["value"]) * 10000.0).round() as u32,
         oppress_per_tier: num(&d["oppress"]["penaltyPerTierPercent"]["value"]),
         food_chain,
         tool_ids,

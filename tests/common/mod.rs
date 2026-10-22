@@ -33,9 +33,11 @@ pub fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join(name)
 }
 
-/// Params for replaying a JS trace: the JS engine had no vault cap.
+/// Params for replaying a JS trace: the JS engine had no vault cap, spawned
+/// markers each morning at 117 in 10000 per free cell, and let a new marker
+/// land on the warden's cell.
 pub fn no_cap() -> Params {
-    Params { vault_cap: None, ..Params::default() }
+    Params { vault_cap: None, incident_spawn_chance: 117, markers_avoid_warden: false, ..Params::default() }
 }
 
 /// Continues a replay from the traced JS state `js` where the JS rolled a repeated step and the

@@ -201,6 +201,9 @@ fn drop_rust_only(rust: &mut Value, js: &Value) {
     if js["params"].get("hiddenIncidents").is_none() {
         rust["params"].as_object_mut().unwrap().remove("hiddenIncidents");
     }
+    if js["params"].get("markersAvoidWarden").is_none() {
+        rust["params"].as_object_mut().unwrap().remove("markersAvoidWarden");
+    }
     for (r, j) in rust["pending"].as_array_mut().unwrap().iter_mut().zip(js["pending"].as_array().unwrap()) {
         for key in ["reason", "picks"] {
             if j.get(key).is_none() {
@@ -231,6 +234,13 @@ fn builds_like_the_js() {
             for key in ["dice", "incidentCounts"] {
                 v.as_object_mut().unwrap().remove(key);
             }
+        }
+        // The JS engine spawned markers each morning at 117 in 10000 per free cell; the run logs
+        // show no morning spawn, so the board's params hold 0.
+        assert_eq!(js_state["params"]["incidentSpawnChance"], 117, "{name} JS spawn chance");
+        assert_eq!(rust["params"]["incidentSpawnChance"], 0, "{name} spawn chance");
+        for v in [&mut rust, &mut js_state] {
+            v["params"].as_object_mut().unwrap().remove("incidentSpawnChance");
         }
         // The JS marks every "scratch" door scratched; the Rust only with Filthy Claws.
         if !st.has(Tool::Claws) {

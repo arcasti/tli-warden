@@ -1,6 +1,6 @@
 # Warden
 
-A Windows companion app for the Tartarus prison board (season 16) of *Torchlight: Infinite*. Warden watches the game window, reads the board from the screen, and shows the move it recommends: which destination to take, which Inmate to consume or replace, and which Torture Instrument or Warden's Treasure reward to pick.
+A Windows companion app for the Tartarus prison board (season 16) of *Torchlight: Infinite*. Warden watches the game window, reads the board from the screen, and shows the move it recommends: which destination to take, which Inmate to consume or replace, which Torture Instrument or Warden's Treasure reward to pick, and when to re-roll an instrument offer.
 
 Unofficial. Not affiliated with or endorsed by the developers or publishers of *Torchlight: Infinite*. Warden only reads pixels from the game window: it never touches the game's memory, files or network traffic, and it never clicks or types for you.
 
@@ -46,7 +46,7 @@ cargo build --release --bin warden-cli    # the command line: solve, read, captu
 cargo test --profile fast-test
 ```
 
-`warden-cli read <frame.png>` reads a saved screenshot and prints the board model, and `warden-cli solve <frame.png | board.json>` ranks the moves. `warden-cli bench --strategy-only --set w_step=0` plays 2000 runs with the strategy alone on the tuned weights and on the changed ones, and prints the Chromatics per run of each and the difference paired by run. `--hold guillotine` starts every run holding that instrument, and `--save file` on one build with `--against file` on another prints the paired difference between the two builds. The strategy tests compare 20 games and the solver's rankings in them with snapshots in `tests/fixtures`; after a deliberate strategy change, rerun `WARDEN_RECORD=1 cargo test --profile fast-test --test decide --test solve` to re-record them and review the fixture diff. The reader tests that need game screenshots look for them in `trainingdata/s16` and skip when it is missing; the screenshots are not in the repository.
+`warden-cli read <frame.png>` reads a saved screenshot and prints the board model, and `warden-cli solve <frame.png | board.json>` ranks the moves. `warden-cli bench --strategy-only --set w_step=0` plays 2000 runs with the strategy alone on the tuned weights and on the changed ones, and prints the Chromatics per run of each and the difference paired by run. `--hold guillotine` starts every run holding that instrument, `--rerolls 1` gives every run one instrument re-roll, and `--save file` on one build with `--against file` on another prints the paired difference between the two builds. The strategy tests compare 20 games and the solver's rankings in them with snapshots in `tests/fixtures`; after a deliberate strategy change, rerun `WARDEN_RECORD=1 cargo test --profile fast-test --test decide --test solve` to re-record them and review the fixture diff. The reader tests that need game screenshots look for them in `trainingdata/s16` and skip when it is missing; the screenshots are not in the repository.
 
 ## How it works
 

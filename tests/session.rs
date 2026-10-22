@@ -266,6 +266,17 @@ fn watch_mark_read_suppresses() {
     assert_eq!((0..SETTLE + 3).filter(|_| w.sample(print(90, 0))).count(), 1);
 }
 
+/// The sample after `read_next` is read whatever it shows, once.
+#[test]
+fn watch_read_next_reads_once() {
+    let mut w = Watch::default();
+    w.mark_read(print(80, 0));
+    assert!(!w.sample(print(80, 0)));
+    w.read_next();
+    assert!(w.sample(print(80, 0)));
+    assert!((0..SETTLE + 3).all(|_| !w.sample(print(80, 0))));
+}
+
 /// A print of all `gray`, with `n` blocks at 255 starting at block `from`.
 fn noisy(gray: u8, from: usize, n: usize) -> Vec<u8> {
     let mut p = vec![gray; 64 * 36];
@@ -1028,7 +1039,8 @@ fn chain_then_board(board: &str) -> Option<(Session, Reading)> {
 }
 
 /// A board read with an empty instrument panel right after a Consume target
-/// screen is kept once; a second such read in a row is taken.
+/// screen is kept once; a second such read in a row is taken, the held
+/// instruments kept.
 #[test]
 fn fading_board_after_a_chain_is_kept_once() {
     let Some((mut s, chain)) = chain_then_board("_rec3-t161.png") else { return };
@@ -1042,7 +1054,95 @@ fn fading_board_after_a_chain_is_kept_once() {
     let r = s.reading.clone().unwrap();
     assert_eq!(r.screen, Screen::Patrol);
     assert!(r.kept_lines().is_empty(), "{:?}", r.warnings);
-    assert!(s.tools.is_empty());
+    assert_eq!(s.tools, [Tool::Longchain, Tool::Saw]);
+}
+
+/// An instrument panel read empty while instruments are held (rec1-t087's
+/// panel shows the Coin) is a misread: the held list stays.
+#[test]
+fn empty_panel_read_keeps_the_held_instruments() {
+    let Some(s) = read_all(vec![Tool::Coin], &["_rec1-t087.png"]) else { return };
+    assert_eq!(s.reading.as_ref().unwrap().screen, Screen::Patrol);
+    assert_eq!(s.tools, [Tool::Coin]);
+}
+
+/// The day-16 manage board rec1-t143 read, and the frame with cell 3's
+/// portrait painted over (a board on the same screen and day that reads
+/// another model).
+fn blip() -> Option<(Session, Rgba)> {
+    let s = read_all(Vec::new(), &["rec1-t143.png"])?;
+    let mut img = frame("rec1-t143.png");
+    for y in 90..190 {
+        for x in 815..925 {
+            let i = (y * img.w + x) * 4;
+            img.data[i..i + 3].fill(0);
+        }
+    }
+    Some((s, img))
+}
+
+/// An opened screenshot of a changed board is taken at once.
+#[test]
+fn changed_board_from_a_file_is_taken_at_once() {
+    let Some((mut s, changed)) = blip() else { return };
+    let before = s.reading.clone().unwrap();
+    s.read_in_background(changed);
+    s.wait();
+    let r = s.reading.clone().unwrap();
+    assert_eq!(r.screen, Screen::Manage);
+    assert_ne!(r.model, before.model);
+    assert!(!s.wants_reread());
+}
+
+/// A live read of a changed board on the same screen and day is held, with
+/// no line on show, and asks for one more read.
+#[test]
+fn changed_board_is_held_for_one_more_read() {
+    let Some((mut s, changed)) = blip() else { return };
+    let before = s.reading.clone().unwrap();
+    s.read_live(changed);
+    s.wait();
+    let r = s.reading.clone().unwrap();
+    assert_eq!((&r.model, r.at), (&before.model, before.at));
+    assert!(r.kept_lines().is_empty(), "{:?}", r.warnings);
+    assert!(s.wants_reread());
+    assert!(!s.wants_reread());
+}
+
+/// A blip (the old board read again after a held read) keeps the reading
+/// and the corrections made before it.
+#[test]
+fn blip_keeps_the_corrections() {
+    let Some((mut s, changed)) = blip() else { return };
+    let model = s.reading.clone().unwrap().model;
+    let n = model.cells.iter().enumerate().position(|(i, c)| i != 2 && matches!(c, CellModel::Sealed { .. } | CellModel::Inmate { .. })).expect("a cell to edit");
+    s.edit_cell(n as u8 + 1, CellEdit::Inmate { beast: Beast::Wolf, tier: 2 }).unwrap();
+    let edited = s.reading.clone().unwrap().model;
+    assert_ne!(edited, model);
+    s.read_live(changed);
+    s.wait();
+    assert!(s.wants_reread());
+    s.read_live(frame("rec1-t143.png"));
+    s.wait();
+    assert_eq!(s.reading.clone().unwrap().model, edited);
+    assert!(!s.wants_reread());
+}
+
+/// A changed board read again after it was held is taken.
+#[test]
+fn confirmed_change_is_taken() {
+    let Some((mut s, changed)) = blip() else { return };
+    let mut direct = read_all(Vec::new(), &["rec1-t143.png"]).unwrap();
+    direct.read_in_background(changed.clone());
+    direct.wait();
+    let want = direct.reading.clone().unwrap().model;
+    s.read_live(changed.clone());
+    s.wait();
+    assert!(s.wants_reread());
+    s.read_live(changed);
+    s.wait();
+    assert_eq!(s.reading.clone().unwrap().model, want);
+    assert!(!s.wants_reread());
 }
 
 /// A board whose panel reads the held instruments is taken at once after a

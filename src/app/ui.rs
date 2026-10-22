@@ -230,7 +230,7 @@ impl WardenApp {
     fn read_now(&mut self) {
         match self.watcher.as_ref().and_then(Watcher::read_latest).map_or_else(|| capture(&self.settings.window_title), Ok) {
             Ok(frame) => {
-                self.session.read_in_background(frame);
+                self.session.read_live(frame);
                 self.path.clear();
                 self.error = None;
             }
@@ -530,7 +530,7 @@ impl eframe::App for WardenApp {
         while let Some(event) = self.watcher.as_ref().and_then(Watcher::event) {
             match event {
                 Event::Frame(frame) => {
-                    self.session.read_in_background(frame);
+                    self.session.read_live(frame);
                     self.path.clear();
                 }
                 Event::Status(status) => {
@@ -546,6 +546,12 @@ impl eframe::App for WardenApp {
             }
         }
         self.session.poll();
+        if self.session.wants_reread() {
+            match &self.watcher {
+                Some(w) => w.read_next(),
+                None => self.read_now(),
+            }
+        }
         self.poll_upload();
         let warned = self.session.reading.as_ref().map_or(0, |r| r.warnings.iter().filter(|w| w.cell.is_some()).count() + r.kept_lines().len());
         if self.warned == 0 && warned > 0 {

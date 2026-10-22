@@ -448,6 +448,11 @@ impl Watcher {
     pub fn adopt_next(&self) {
         lock(&self.shared).watch.adopt_next();
     }
+
+    /// Reads the next sample whatever it shows: a held read asks for one more.
+    pub fn read_next(&self) {
+        lock(&self.shared).watch.read_next();
+    }
 }
 
 impl Drop for Watcher {

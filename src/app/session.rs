@@ -297,6 +297,8 @@ const FADING: &str = "The board is still coming in: showing the last reading.";
 const THEME_READ: &str = "The run's theme: ";
 /// The line for a read kept between runs, see [`Session::install`].
 const RUN_OVER_WAIT: &str = "The run is over: waiting for the next run.";
+/// The line logged for a changed board read held for one more read, see [`Session::install`].
+const CHANGED: &str = "The board changed: reading it again to confirm.";
 
 /// Cells in which a board read with a hidden counter on the run's last day
 /// must differ from the board on show to be taken as a screen after the run
@@ -441,6 +443,8 @@ pub struct Watch {
     since: usize,
     /// The next sample counts as read: a screenshot is on show.
     adopt: bool,
+    /// The next sample is read whatever it shows: a held read asks for one more.
+    reread: bool,
 }
 
 impl Watch {
@@ -454,6 +458,10 @@ impl Watch {
         if std::mem::take(&mut self.adopt) {
             self.mark_read(print);
             return false;
+        }
+        if std::mem::take(&mut self.reread) {
+            self.mark_read(print);
+            return true;
         }
         self.since += 1;
         let n = self.read.as_ref().filter(|r| r.len() == print.len()).map(|r| changed(r, &print));
@@ -484,6 +492,12 @@ impl Watch {
     /// until the game's screen changes.
     pub fn adopt_next(&mut self) {
         self.adopt = true;
+    }
+
+    /// Reads the next sample whatever it shows, so a held read (see
+    /// [`Session::read_live`]) gets the one more read that confirms it.
+    pub fn read_next(&mut self) {
+        self.reread = true;
     }
 }
 
@@ -586,8 +600,16 @@ pub struct Session {
     rx: Option<Receiver<Progress>>,
     /// A frame the reader is working on, off the UI thread.
     scan: Option<Receiver<Scanned>>,
-    /// The newest frame that arrived while `scan` ran; read when it ends.
-    queued: Option<Rgba>,
+    /// The newest frame that arrived while `scan` ran, and whether it came
+    /// from the game; read when it ends.
+    queued: Option<(Rgba, bool)>,
+    /// The frame `scan` reads came from the game, see [`Session::read_live`].
+    live: bool,
+    /// The last read was held as a changed board: the next one is taken
+    /// whatever it shows.
+    confirming: bool,
+    /// A read was held and waits for one more, see [`Session::wants_reread`].
+    reread: bool,
     notify: Option<Arc<dyn Fn() + Send + Sync>>,
     /// The run log the session writes its reads, advice and corrections to; none by default.
     pub log: Option<RunLog>,
@@ -636,6 +658,9 @@ impl Session {
             rx: None,
             scan: None,
             queued: None,
+            live: false,
+            confirming: false,
+            reread: false,
             notify: None,
             log: None,
         }
@@ -656,16 +681,32 @@ impl Session {
     /// that arrives while a read runs waits for it; only the newest waiting
     /// one is read next.
     pub fn read_in_background(&mut self, frame: Rgba) {
-        if self.scan.is_some() {
-            self.queued = Some(frame);
-            return;
-        }
-        self.start_scan(frame);
+        self.read(frame, false);
     }
 
-    fn start_scan(&mut self, frame: Rgba) {
+    /// [`Session::read_in_background`] for a frame captured from the game: a
+    /// changed board read is held for one more read, see [`Session::install`].
+    pub fn read_live(&mut self, frame: Rgba) {
+        self.read(frame, true);
+    }
+
+    fn read(&mut self, frame: Rgba, live: bool) {
+        if self.scan.is_some() {
+            self.queued = Some((frame, live));
+            return;
+        }
+        self.start_scan(frame, live);
+    }
+
+    /// True once after a read was held: the UI reads the game again.
+    pub fn wants_reread(&mut self) -> bool {
+        std::mem::take(&mut self.reread)
+    }
+
+    fn start_scan(&mut self, frame: Rgba, live: bool) {
         let (tx, rx) = channel();
         self.scan = Some(rx);
+        self.live = live;
         let (notify, keep, hint) = (self.notify.clone(), self.log.is_some(), self.ui_scale);
         std::thread::spawn(move || {
             if tx.send(scan(frame, keep, hint)).is_ok()
@@ -709,6 +750,11 @@ impl Session {
     /// A low-confidence cell read warns until it has given the same read on
     /// [`STEADY_READS`] reads in a row; a new run warns again.
     ///
+    /// A frame from the game (see [`Session::read_live`]) whose board differs
+    /// from the last read's on the same screen and day is held, with no line
+    /// on show, and the next read is taken whatever it shows: a blip that
+    /// shows the old board again keeps the corrections and the running solve.
+    ///
     /// The run log gets the reading and, when it shows another screen or
     /// board than the last frame saved, the frame. A read that keeps the last
     /// reading (or, with none on show, sets [`Session::missed`]) is logged as
@@ -734,6 +780,7 @@ impl Session {
 
     /// [`Session::install`] without the log.
     fn take_read(&mut self, scene: Scene, mut panels: Panels, size: (usize, usize)) -> Taken {
+        let (live, confirming) = (self.live, std::mem::take(&mut self.confirming));
         self.scan = None;
         self.size = size;
         let shape = shape_line(size);
@@ -799,6 +846,22 @@ impl Session {
                 return Taken::Skipped;
             }
         }
+        // One read in about ten same-screen board changes is a blip that
+        // shows the old board again within a second: a live read that
+        // changes the board is held until one more read confirms it.
+        if live
+            && !confirming
+            && matches!(panels.screen, Screen::Patrol | Screen::Manage | Screen::CellPick | Screen::Interrogation)
+            && panels.days.is_some()
+            && let Some((last, last_panels, _)) = &self.scene
+            && (last_panels.screen, last_panels.days) == (panels.screen, panels.days)
+            && to_model(&scene, &panels, &self.tools, self.board.as_ref(), self.run_days()).0
+                != to_model(last, last_panels, &self.tools, self.board.as_ref(), self.run_days()).0
+        {
+            self.confirming = true;
+            self.reread = true;
+            return Taken::Kept(CHANGED.to_string());
+        }
         self.run_over = None;
         if self.reading.as_ref().is_some_and(|r| r.screen == Screen::ChainTarget) {
             self.meal = self.meal_picked();
@@ -863,20 +926,18 @@ impl Session {
         }
         // A sure read of the instrument panel names the held list, unless the
         // player set it while the panel read the same and the session has not
-        // changed it since.
+        // changed it since. A new run cleared the list above and a run loses
+        // no instrument, so an empty panel read over a held list is a misread.
         if let Some(held) = &panels.held
+            && !(held.is_empty() && !self.tools.is_empty())
             && self.held_edit.as_ref() != Some(&panels.held)
         {
             self.held_edit = None;
             if *held != self.tools {
                 self.tools = held.clone();
                 held_changed = true;
-                notes.push(if held.is_empty() {
-                    format!("The {} panel shows none.", data().instrument_name)
-                } else {
-                    let names: Vec<&str> = held.iter().map(|&t| data().tool_names[t as usize].as_str()).collect();
-                    format!("The {} panel shows: {}.", data().instrument_name, names.join(", "))
-                });
+                let names: Vec<&str> = held.iter().map(|&t| data().tool_names[t as usize].as_str()).collect();
+                notes.push(format!("The {} panel shows: {}.", data().instrument_name, names.join(", ")));
             }
         }
         // The board shown over an open treasure's pick: a flicker while View
@@ -1472,8 +1533,8 @@ impl Session {
 
     /// Starts a read of the frame that waited for the last one, if any.
     fn read_queued(&mut self) {
-        if let Some(frame) = self.queued.take() {
-            self.start_scan(frame);
+        if let Some((frame, live)) = self.queued.take() {
+            self.start_scan(frame, live);
         }
     }
 

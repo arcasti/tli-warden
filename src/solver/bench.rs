@@ -101,7 +101,6 @@ pub struct Solo {
 /// `held`, with `rerolls` instrument rerolls for the run.
 pub fn play_strategy(seed: u32, k: u32, held: &[Tool], rerolls: u8, p: &Params) -> Solo {
     let (mut st, mut rng) = start(seed, k, held);
-    st.params.rerolls = rerolls;
     st.rerolls = rerolls;
     playout(&mut st, p, &mut rng);
     Solo { chromatics: st.vault.len(), loot: st.loot(), stats: st.stats, objective: st.objective.is_some_and(|o| o.done) }

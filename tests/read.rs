@@ -126,7 +126,7 @@ fn rerolls_read() {
         assert_eq!(model.choice.rerolls, rerolls, "{name}");
         let (st, problems) = build_state(&model, 1);
         assert!(problems.is_empty(), "{name}: {problems:?}");
-        assert_eq!(u32::from(st.rerolls), rerolls, "{name}");
+        assert_eq!(st.rerolls, rerolls, "{name}");
         let options = solve(&st, 20, 1, &TUNED);
         assert_eq!(options.iter().any(|o| o.label == "Re-roll"), rerolls > 0, "{name}");
     }

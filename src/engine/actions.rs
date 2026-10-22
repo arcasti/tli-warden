@@ -299,6 +299,5 @@ pub fn reroll(s: &mut State) -> Outcome {
     if let Some(Pending::Tool { options, .. }) = s.pending.first_mut() {
         *options = fresh;
     }
-    s.pending.retain(|p| !p.is_empty());
     Outcome::Ok
 }

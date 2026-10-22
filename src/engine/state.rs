@@ -44,17 +44,13 @@ pub struct Params {
     /// show; the JS engine allowed it, and its traces leave the field out.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub markers_avoid_warden: bool,
-    /// Instrument rerolls the run starts with (0 to 2 in the game). The JS
-    /// engine has none, and its traces leave the field out.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub rerolls: u8,
 }
 
 fn rises() -> bool {
     true
 }
 
-fn is_zero(n: &u8) -> bool {
+pub(crate) fn is_zero(n: &u8) -> bool {
     *n == 0
 }
 
@@ -87,7 +83,6 @@ impl Default for Params {
             maiden: true,
             hidden_incidents: true,
             markers_avoid_warden: true,
-            rerolls: 0,
         }
     }
 }

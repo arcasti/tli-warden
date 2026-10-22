@@ -87,7 +87,7 @@ pub struct Panels {
     pub instruments: Vec<Tool>,
     /// The re-rolls left on an instrument pick ("Remaining attempts N" over
     /// the Re-roll button); 0 without the button and on every other screen.
-    pub rerolls: u32,
+    pub rerolls: u8,
     /// Filled Chromatic Prisoner slots.
     pub vault: Vec<VaultSlot>,
     /// The Torture Instrument panel shows at least one icon.
@@ -127,11 +127,7 @@ const BANNER: (Rect, f32) = (Rect::new(760, 400, 400, 130), 2.0);
 /// Ravenous Chains"); the hovered card is raised, its name at about y 435-470.
 /// The descriptions start below about y 550.
 const NAMES: (Rect, f32) = (Rect::new(0, 420, 1918, 125), 1.0);
-/// "Remaining attempts N" over the Re-roll button of the instrument pick, at
-/// x 693-892, y 893-915 (reroll-2000x837, a 3440 x 1440 frame). Read from the
-/// title layout, whose zone over it keeps to the bottom centre as Confirm
-/// does, while the destination cards' text above and beside it keeps to the
-/// centre.
+/// "Remaining attempts N" over the Re-roll button; read from the title layout (see layout's TITLE_ZONES).
 const REROLLS: (Rect, f32) = (Rect::new(640, 880, 320, 45), 2.0);
 // The game's dialogs: "Tip" over "Network request timeout", and the title
 // of a Prison Incident popup.
@@ -301,13 +297,13 @@ fn completed_tail(text: &str) -> bool {
 /// OCR can glue the count to the word and read its 1 as an l
 /// ("Remaining attemptsl"). The game shows the text only with re-rolls left,
 /// so a text whose count does not read gives 1; no text gives 0.
-fn rerolls(lines: &[Line]) -> u32 {
+fn rerolls(lines: &[Line]) -> u8 {
     lines
         .iter()
         .find_map(|l| {
             let text: String = l.text.chars().filter(|c| !c.is_whitespace()).collect();
             let words = text.trim_end_matches(|c: char| c.is_ascii_digit() || matches!(c, 'O' | 'o' | 'I' | 'l' | '|' | 'i'));
-            (similarity(words, "Remaining attempts") >= 0.75).then(|| number(&text[words.len()..]).filter(|&n| n > 0).unwrap_or(1))
+            (similarity(words, "Remaining attempts") >= 0.75).then(|| number(&text[words.len()..]).filter(|&n| n > 0).map_or(1, |n| u8::try_from(n).unwrap_or(u8::MAX)))
         })
         .unwrap_or(0)
 }

@@ -302,7 +302,6 @@ pub fn new_game_with(seed: &str, params: Params) -> State {
     let d = data();
     let seed: String = seed.trim().to_uppercase().chars().take(40).collect();
     let scenario = "empty".to_string();
-    let rerolls = params.rerolls;
     let mut s = State {
         v: VERSION,
         rng: hash_seed(&format!("{seed}|{scenario}")),
@@ -323,7 +322,7 @@ pub fn new_game_with(seed: &str, params: Params) -> State {
         vault: Vec::new(),
         cache: 0,
         tools: Vec::new(),
-        rerolls,
+        rerolls: 0,
         pending: Vec::new(),
         objective: None,
         theme: None,
@@ -635,8 +634,8 @@ mod tests {
     #[test]
     fn reroll_redraws_the_offer_and_spends_one() {
         use crate::engine::actions::{Action, apply};
-        let mut s = new_game_with("REROLL", Params { rerolls: 2, ..Params::default() });
-        assert_eq!(s.rerolls, 2);
+        let mut s = new_game_with("REROLL", Params::default());
+        s.rerolls = 2;
         for left in [1, 0] {
             let (before, reason) = offer(&s);
             let expected = draw_tools(&mut s.clone(), before.len());
@@ -652,7 +651,8 @@ mod tests {
     #[test]
     fn reroll_needs_an_instrument_pick() {
         use crate::engine::actions::{Action, apply};
-        let mut s = new_game_with("REROLL", Params { rerolls: 1, ..Params::default() });
+        let mut s = new_game_with("REROLL", Params::default());
+        s.rerolls = 1;
         s.pending.clear();
         assert!(!apply(&mut s, &Action::Reroll).is_ok());
         assert_eq!(s.rerolls, 1);

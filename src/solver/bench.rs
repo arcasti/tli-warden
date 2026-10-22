@@ -46,11 +46,13 @@ pub struct Game {
     pub overruled: usize,
 }
 
-/// Plays game `k` both ways; the advice runs `rollouts` playouts per option.
-pub fn play(seed: u32, k: u32, rollouts: usize) -> Game {
-    let Solo { chromatics: strategy, loot: strategy_loot, .. } = play_strategy(seed, k, &[], 0, &TUNED);
+/// Plays game `k` both ways, with `rerolls` instrument rerolls for the run;
+/// the advice runs `rollouts` playouts per option.
+pub fn play(seed: u32, k: u32, rollouts: usize, rerolls: u8) -> Game {
+    let Solo { chromatics: strategy, loot: strategy_loot, .. } = play_strategy(seed, k, &[], rerolls, &TUNED);
 
     let (mut st, mut rng) = start(seed, k, &[]);
+    st.rerolls = rerolls;
     let (mut decisions, mut overruled) = (0, 0);
     for step in 0..GUARD {
         if st.phase == Phase::Ended {
@@ -80,9 +82,10 @@ pub fn play(seed: u32, k: u32, rollouts: usize) -> Game {
     Game { strategy, advice: st.vault.len(), strategy_loot, advice_loot: st.loot(), decisions, overruled }
 }
 
-/// Games 0..`games` of `seed` on `threads` threads, in game order.
-pub fn bench(games: u32, rollouts: usize, seed: u32, threads: usize) -> Vec<Game> {
-    each_game(games, threads, |k| play(seed, k, rollouts))
+/// Games 0..`games` of `seed` with `rerolls` rerolls each, on `threads`
+/// threads, in game order.
+pub fn bench(games: u32, rollouts: usize, seed: u32, threads: usize, rerolls: u8) -> Vec<Game> {
+    each_game(games, threads, |k| play(seed, k, rollouts, rerolls))
 }
 
 /// A run played by the strategy alone.
@@ -213,7 +216,7 @@ mod tests {
 
     #[test]
     fn the_strategy_player_replays_plain_games() {
-        let games = bench(2, 20, 1, 2);
+        let games = bench(2, 20, 1, 2, 0);
         assert_eq!(games.len(), 2);
         for (k, g) in games.iter().enumerate() {
             let (mut st, mut rng) = start(1, k as u32, &[]);

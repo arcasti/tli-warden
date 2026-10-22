@@ -5,7 +5,7 @@
 //!   warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id]
 //!   warden-cli read <frame.png> [--tools id,id]
 //!   warden-cli capture [--frames N] <title text> <out.png>
-//!   warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T]
+//!   warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N]
 //!   warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T]
 //!   warden-cli --version
 
@@ -27,7 +27,7 @@ macro_rules! out {
     }};
 }
 
-const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] | warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T] | warden-cli --version";
+const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] | warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T] | warden-cli --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -131,8 +131,8 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
             _ => return Err(format!("unexpected argument {arg}; {USAGE}")),
         }
     }
-    if !strategy_only && (changed.is_some() || !held.is_empty() || rerolls > 0 || save.is_some() || against.is_some()) {
-        return Err(format!("--set, --hold, --rerolls, --save and --against need --strategy-only; {USAGE}"));
+    if !strategy_only && (changed.is_some() || !held.is_empty() || save.is_some() || against.is_some()) {
+        return Err(format!("--set, --hold, --save and --against need --strategy-only; {USAGE}"));
     }
     let games = games.unwrap_or(if strategy_only { 2000 } else { 100 });
     if games == 0 || rollouts == 0 || threads == 0 {
@@ -142,7 +142,7 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
         return run_strategy_bench(games, seed, threads, (&held, rerolls), changed.as_ref(), save, against);
     }
     let clock = std::time::Instant::now();
-    let s = summarize(&bench(games, rollouts, seed, threads));
+    let s = summarize(&bench(games, rollouts, seed, threads, rerolls));
     let secs = clock.elapsed().as_secs_f64();
     out!(
         "strategy  {:.3} +- {:.3} Chromatics, {:.3} +- {:.3} loot per run",
@@ -154,7 +154,7 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
     out!("advice    {:.3} +- {:.3}, {:.3} +- {:.3}", s.advice.0, s.advice.1, s.advice_loot.0, s.advice_loot.1);
     out!("advice - strategy  {:+.3} +- {:.3} loot (paired)", s.gain.0, s.gain.1);
     out!("advice overruled the strategy at {} of {} decisions with 2+ options", s.overruled, s.decisions);
-    out!("{games} games, {rollouts} playouts per option, seed {seed}, {threads} threads, {secs:.1} s");
+    out!("{games} games, {rollouts} playouts per option, seed {seed}, {threads} threads, {rerolls} rerolls, {secs:.1} s");
     Ok(ExitCode::SUCCESS)
 }
 

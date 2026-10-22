@@ -70,22 +70,22 @@ pub fn also_good(ranking: &[SolveOption], advised: Option<usize>) -> Vec<usize> 
 /// The line under the board for the advice. On a named pick (treasure, card,
 /// instrument) where every option ties, it says the others score the same;
 /// on a treasure pick, it names the treasures that change nothing on the
-/// board. The advised move itself is always named, ties included.
+/// board.
 pub fn why_shown(st: &State, ranking: &[SolveOption], advice: &Advice) -> String {
     let others = also_good(ranking, advice.option);
     let tie = ranking.len() >= 2 && others.len() == ranking.len() - 1;
     let alike = "The playouts can't tell it from the others.";
     match st.pending.first() {
         Some(Pending::Gift { options, .. }) => {
-            let noops: Vec<Gift> = options.iter().copied().filter(|&g| changes_nothing(st, g)).collect();
             if tie {
+                let noops: Vec<Gift> = options.iter().copied().filter(|&g| changes_nothing(st, g)).collect();
                 return match noops.len() {
                     0 => alike.to_string(),
                     n if n == options.len() => "No treasure changes anything on this board.".to_string(),
                     n => format!("{alike} {} {} nothing on this board.", names(&noops), change(n)),
                 };
             }
-            match advice.option.filter(|&k| gift_at(options, ranking, k).is_some_and(|g| noops.contains(&g))) {
+            match advice.option.filter(|&k| gift_at(options, ranking, k).is_some_and(|g| changes_nothing(st, g))) {
                 Some(k) => {
                     let idle = idle_tied(st, options, ranking, k);
                     format!("{} {} nothing on this board, and the other treasures score lower.", names(&idle), change(idle.len()))

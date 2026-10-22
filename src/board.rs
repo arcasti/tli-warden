@@ -95,6 +95,14 @@ pub enum ChoiceKind {
 pub struct Choice {
     pub kind: ChoiceKind,
     pub options: Vec<Tool>,
+    /// The re-rolls left this run, as an instrument pick shows them
+    /// ("Remaining attempts N"); 0 when it shows no Re-roll button.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub rerolls: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 /// The analyzer's board model. Deserializing goes through `normalize`, so
@@ -153,7 +161,7 @@ impl Model {
             swap_used: false,
             hunt_used: false,
             event_kind: EventKindModel::Chain,
-            choice: Choice { kind: ChoiceKind::Tool, options: Vec::new() },
+            choice: Choice { kind: ChoiceKind::Tool, options: Vec::new(), rerolls: 0 },
             chain_armed: false,
             tools: Vec::new(),
             vault: Vec::new(),
@@ -301,6 +309,7 @@ fn normalize(v: &Value) -> Model {
             _ => {}
         }
         m.choice.options = strings(choice.get("options")).filter_map(Tool::from_key).collect();
+        m.choice.rerolls = to_int(choice.get("rerolls"), 0).clamp(0, i64::from(u32::MAX)) as u32;
     }
     m.chain_armed = truthy(o.get("chainArmed"));
     m.tools = strings(o.get("tools")).filter_map(Tool::from_key).collect();
@@ -467,6 +476,7 @@ pub fn build_state(m: &Model, seed: u32) -> (State, Vec<String>) {
                             options.push(t);
                         }
                     }
+                    st.rerolls = u8::try_from(m.choice.rerolls).unwrap_or(u8::MAX);
                     Pending::Tool { options, reason: ToolReason::Start }
                 }
             };

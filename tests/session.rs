@@ -1624,3 +1624,55 @@ fn hunt_pick_keeps_manage_read() {
     let label = &s.pick.as_ref().expect("a pick").label;
     assert!(label.starts_with(&format!("{}: mark", warden::engine::data::data().hunt_name)) && label.contains(" in 04 "), "{label}");
 }
+
+/// The labels of the session's ranking.
+fn labels(s: &Session) -> Vec<&str> {
+    s.ranking.iter().map(|o| o.label.as_str()).collect()
+}
+
+/// An advised Re-roll keeps the pick on show: the board after it holds no
+/// instrument, not even one advised on that pick before (the panel's reads
+/// unsure). reroll-2000x837 shows one re-roll left; its playouts advise an
+/// instrument, so the ranking is changed to put the Re-roll first.
+#[test]
+fn advised_reroll_is_not_held() {
+    let Some(mut s) = read_all(Vec::new(), &["~rec1-t087.png", "reroll-2000x837.png"]) else { return };
+    let r = s.reading.clone().unwrap();
+    assert_eq!((r.screen, r.model.choice.rerolls), (Screen::InstrumentPick, 1));
+    assert!(matches!(s.advice().map(|a| a.action), Some(Action::Choose { .. })), "{:?}", s.advice());
+    let k = s.ranking.iter().position(|o| o.action == Action::Reroll).unwrap_or_else(|| panic!("{:?}", labels(&s)));
+    let mut reroll = s.ranking.remove(k);
+    reroll.mean = s.ranking[0].mean + 100.0;
+    s.ranking.insert(0, reroll);
+    for o in &mut s.ranking {
+        o.gap_se = 0.0;
+    }
+    s.wait();
+    assert_eq!(s.advice().map(|a| a.action), Some(Action::Reroll));
+    s.read_in_background(frame("~rec1-t087.png"));
+    s.wait();
+    assert_eq!(s.tools, Vec::new());
+}
+
+/// A re-roll's new offer at the same pick is solved anew: reroll-2000x837
+/// (one re-roll left) then rec1-t031 (none left, another offer). The board
+/// after it holds the instrument advised on the new offer.
+#[test]
+fn new_offer_at_the_pick_is_solved_anew() {
+    let Some(mut s) = read_all(Vec::new(), &["~rec1-t087.png", "reroll-2000x837.png", "rec1-t031.png"]) else { return };
+    let r = s.reading.clone().unwrap();
+    assert_eq!((r.screen, r.model.choice.rerolls), (Screen::InstrumentPick, 0));
+    let offers = r.model.choice.options.clone();
+    assert_eq!(offers, [Tool::Chains, Tool::Scapegoat, Tool::Coin]);
+    assert!(!s.ranking.is_empty());
+    assert!(
+        s.ranking.iter().all(|o| matches!(&o.action, Action::Choose { id: ChoiceId::Name(k) } if Tool::from_key(k).is_some_and(|t| offers.contains(&t)))),
+        "{:?}",
+        labels(&s)
+    );
+    let Some(Action::Choose { id: ChoiceId::Name(key) }) = s.advice().map(|a| a.action) else { panic!("{:?}", s.advice()) };
+    let t = Tool::from_key(&key).expect("an instrument");
+    s.read_in_background(frame("~rec1-t087.png"));
+    s.wait();
+    assert_eq!(s.tools, vec![t]);
+}

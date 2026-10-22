@@ -7,9 +7,9 @@ use serde_json::Value;
 use std::path::Path;
 use warden::board::{ChoiceKind, build_state};
 use warden::engine::data::{Tool, data};
-use warden::reader::load_png;
+use warden::reader::{load_png, read_model};
 use warden::reader::model::{RUN_DAYS, to_model};
-use warden::reader::panels::read_panels;
+use warden::reader::panels::{Screen, read_panels};
 use warden::reader::scene::read_scene;
 use warden::solver::TUNED;
 use warden::solver::solve::solve;
@@ -101,4 +101,33 @@ fn panels_against_labels() {
     assert_eq!(tally[7].ok, tally[7].total, "doors on board frames");
     assert!(tally[0].pct() >= 95.0, "screen {:.1}%", tally[0].pct());
     assert!(solved > 0);
+}
+
+/// The instrument pick's "Remaining attempts N": reroll-2000x837 (a player's
+/// 3440 x 1440 frame scaled down) offers three instruments with one re-roll
+/// left, and the solve weighs a Re-roll; rec1-t031 shows no Re-roll button.
+/// Skips a missing frame.
+#[test]
+fn rerolls_read() {
+    for (name, rerolls, offers) in [
+        ("reroll-2000x837.png", 1, ["Felon's Dog Tag", "Searing Branding Iron", "Executioner's Blacklist"]),
+        ("rec1-t031.png", 0, ["Ferocious Beast's Ravenous Chains", "Scapegoat's Guillotine", "Kin's Coin of Fate"]),
+    ] {
+        let path = common::frames().join(name);
+        if !path.is_file() {
+            println!("skipped: {} is missing", path.display());
+            continue;
+        }
+        let p = read_panels(&load_png(&path).unwrap());
+        assert_eq!(p.screen, Screen::InstrumentPick, "{name}");
+        let (model, _) = read_model(&path, &[]).unwrap();
+        let read: Vec<&str> = model.choice.options.iter().map(|&t| data().tool_names[t as usize].as_str()).collect();
+        assert_eq!(read, offers, "{name}");
+        assert_eq!(model.choice.rerolls, rerolls, "{name}");
+        let (st, problems) = build_state(&model, 1);
+        assert!(problems.is_empty(), "{name}: {problems:?}");
+        assert_eq!(u32::from(st.rerolls), rerolls, "{name}");
+        let options = solve(&st, 20, 1, &TUNED);
+        assert_eq!(options.iter().any(|o| o.label == "Re-roll"), rerolls > 0, "{name}");
+    }
 }

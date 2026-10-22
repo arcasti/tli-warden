@@ -84,14 +84,19 @@ const ZONES: [Zone; 8] = [
     Zone { at: (-3.6, -7.3), ..zone(70, 340, 190, 100, Start, Start) },
 ];
 
-/// The zones the title layout adds over [`ZONES`], both kept to the top
-/// centre, while the board's top rows under them keep to the centre: a strip
+/// The zones the title layout adds over [`ZONES`], the first two kept to the
+/// top centre, while the board's top rows under them keep to the centre: a strip
 /// over the panels reader's TITLE and RIOT regions (y 70-175) with the pick
 /// titles and the riot title, and one over its INCIDENT region with the
 /// Prison Incident popup's title (the popup's title, at the smallest
 /// setting, sits at y 149 of 1084 where centre-anchoring would put it above
-/// the frame: f_049, Sewer Ratway).
-const TITLE_ZONES: [Zone; 2] = [zone(400, 70, 1140, 105, Centre, Start), zone(1100, 190, 700, 70, Centre, Start)];
+/// the frame: f_049, Sewer Ratway). A third, kept to the bottom centre as
+/// Confirm is, covers the panels reader's REROLLS region: "Remaining attempts
+/// N" over the instrument pick's Re-roll button (x 693-892, y 893-915 on
+/// reroll-2000x837). In the board layout that strip keeps to the centre,
+/// where the destination cards' text reaches down to y 906 (rec3-t058).
+const TITLE_ZONES: [Zone; 3] =
+    [zone(400, 70, 1140, 105, Centre, Start), zone(1100, 190, 700, 70, Centre, Start), zone(640, 880, 320, 45, Centre, End)];
 
 /// Whether a `w` x `h` frame is 16:9 within 1%.
 pub fn is_16_9(w: usize, h: usize) -> bool {

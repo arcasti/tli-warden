@@ -1351,10 +1351,13 @@ impl Session {
         if !self.pick_named
             && self.reading.as_ref().is_some_and(|r| r.screen == Screen::InstrumentPick)
             && let Some(advice) = self.advice()
-            && let Action::Choose { id: ChoiceId::Name(key) } = &advice.action
-            && let Some(t) = Tool::from_key(key)
         {
-            self.advised_tool = Some(t);
+            // An advised Re-roll keeps the pick on show with a new offer:
+            // nothing is held from it.
+            self.advised_tool = match &advice.action {
+                Action::Choose { id: ChoiceId::Name(key) } => Tool::from_key(key),
+                _ => None,
+            };
         }
     }
 

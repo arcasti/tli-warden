@@ -121,6 +121,7 @@ pub fn to_model(scene: &Scene, panels: &Panels, held_tools: &[Tool], under: Opti
             m.step = Step::Choice;
             m.choice.kind = ChoiceKind::Tool;
             m.choice.options = panels.instruments.clone();
+            m.choice.rerolls = panels.rerolls;
             if panels.instruments.len() != 3 {
                 warn.push(Warning::read(format!("Read {} of the 3 {}s on offer.", panels.instruments.len(), d.instrument_name)));
             }

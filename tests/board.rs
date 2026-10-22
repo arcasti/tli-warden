@@ -950,3 +950,26 @@ fn the_advice_prefers_a_tied_treasure_that_changes_something() {
     assert_eq!(a.action, ranking[1].action);
     assert_eq!(why_shown(&st, &ranking, &a), why);
 }
+
+/// An instrument pick with a re-roll left: the count goes to the state, the
+/// solve weighs a Re-roll, and the model writes it back; at 0 the model
+/// writes no count, so the fixtures stay as they are.
+#[test]
+fn reroll_count_builds() {
+    let mut raw = common::raw("choice.json");
+    let plain: Model = serde_json::from_value(raw.clone()).unwrap();
+    assert_eq!(plain.choice.rerolls, 0);
+    assert!(serde_json::to_value(&plain).unwrap()["choice"].get("rerolls").is_none());
+    raw["choice"]["rerolls"] = 1.into();
+    let model: Model = serde_json::from_value(raw).unwrap();
+    assert_eq!(model.choice.rerolls, 1);
+    assert_eq!(serde_json::to_value(&model).unwrap()["choice"]["rerolls"], 1);
+    let (st, problems) = build_state(&model, 1);
+    assert!(problems.is_empty(), "{problems:?}");
+    assert_eq!(st.rerolls, 1);
+    let options = warden::solver::solve::solve(&st, 20, 1, &TUNED);
+    assert!(options.iter().any(|o| o.label == "Re-roll" && o.action == Action::Reroll), "{:?}", options.iter().map(|o| &o.label).collect::<Vec<_>>());
+    let (st, _) = build_state(&plain, 1);
+    assert_eq!(st.rerolls, 0);
+    assert!(warden::solver::solve::solve(&st, 20, 1, &TUNED).iter().all(|o| o.action != Action::Reroll));
+}

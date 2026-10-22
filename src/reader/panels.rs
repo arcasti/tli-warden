@@ -85,6 +85,9 @@ pub struct Panels {
     pub decision: Vec<&'static str>,
     /// The instruments on an instrument pick, in card order.
     pub instruments: Vec<Tool>,
+    /// The re-rolls left on an instrument pick ("Remaining attempts N" over
+    /// the Re-roll button); 0 without the button and on every other screen.
+    pub rerolls: u32,
     /// Filled Chromatic Prisoner slots.
     pub vault: Vec<VaultSlot>,
     /// The Torture Instrument panel shows at least one icon.
@@ -124,6 +127,12 @@ const BANNER: (Rect, f32) = (Rect::new(760, 400, 400, 130), 2.0);
 /// Ravenous Chains"); the hovered card is raised, its name at about y 435-470.
 /// The descriptions start below about y 550.
 const NAMES: (Rect, f32) = (Rect::new(0, 420, 1918, 125), 1.0);
+/// "Remaining attempts N" over the Re-roll button of the instrument pick, at
+/// x 693-892, y 893-915 (reroll-2000x837, a 3440 x 1440 frame). Read from the
+/// title layout, whose zone over it keeps to the bottom centre as Confirm
+/// does, while the destination cards' text above and beside it keeps to the
+/// centre.
+const REROLLS: (Rect, f32) = (Rect::new(640, 880, 320, 45), 2.0);
 // The game's dialogs: "Tip" over "Network request timeout", and the title
 // of a Prison Incident popup.
 const DIALOG: (Rect, f32) = (Rect::new(560, 340, 800, 260), 1.0);
@@ -288,6 +297,21 @@ fn completed_tail(text: &str) -> bool {
     })
 }
 
+/// The re-rolls left on an instrument pick: the N of "Remaining attempts N".
+/// OCR can glue the count to the word and read its 1 as an l
+/// ("Remaining attemptsl"). The game shows the text only with re-rolls left,
+/// so a text whose count does not read gives 1; no text gives 0.
+fn rerolls(lines: &[Line]) -> u32 {
+    lines
+        .iter()
+        .find_map(|l| {
+            let text: String = l.text.chars().filter(|c| !c.is_whitespace()).collect();
+            let words = text.trim_end_matches(|c: char| c.is_ascii_digit() || matches!(c, 'O' | 'o' | 'I' | 'l' | '|' | 'i'));
+            (similarity(words, "Remaining attempts") >= 0.75).then(|| number(&text[words.len()..]).filter(|&n| n > 0).unwrap_or(1))
+        })
+        .unwrap_or(0)
+}
+
 /// One destination card's text: "Go to Cell N" or "Go to Interrogation Room".
 fn door(text: &str) -> Option<u8> {
     let s = squash(text);
@@ -412,7 +436,7 @@ pub fn read_panels(img: &Rgba) -> Panels {
 }
 
 /// The panels of `img`, a frame in the board layout, with [`TITLE`],
-/// [`INCIDENT`] and [`RIOT`] read from `title`, the same frame in the title layout (see
+/// [`INCIDENT`], [`RIOT`] and [`REROLLS`] read from `title`, the same frame in the title layout (see
 /// [`super::layout::lay_out_scaled`]).
 pub fn read_panels_titled(img: &Rgba, title: &Rgba) -> Panels {
     let d = data();
@@ -422,6 +446,7 @@ pub fn read_panels_titled(img: &Rgba, title: &Rgba) -> Panels {
     for i in [1, 8, 12] {
         imgs[i] = title;
     }
+    let title_img = title;
     let [days_lines, title, heading, cards, target, cancel, banner, dialog, incident, theme_lines, objective_lines, status, riot, name_lines] =
         ocr_all(imgs, &REGIONS);
     let mut p = Panels {
@@ -430,6 +455,7 @@ pub fn read_panels_titled(img: &Rgba, title: &Rgba) -> Panels {
         doors: Vec::new(),
         decision: Vec::new(),
         instruments: Vec::new(),
+        rerolls: 0,
         vault: Vec::new(),
         tool_icons: icon_score(img) >= ICON_SPREAD,
         theme: None,
@@ -440,6 +466,8 @@ pub fn read_panels_titled(img: &Rgba, title: &Rgba) -> Panels {
         p.screen = Screen::InstrumentPick;
         let names: Vec<String> = d.tool_ids.iter().map(|&t| d.tool_names[t as usize].clone()).collect();
         p.instruments = offers(&name_lines, &names).into_iter().map(|i| d.tool_ids[i]).collect();
+        // Read on this screen alone, so no other screen pays for the region.
+        p.rerolls = rerolls(&ocr(title_img, REROLLS.0, REROLLS.1));
     } else if has(&title, "Warden's Treasure", 0.75) || title.iter().any(|l| squash(&l.text).contains("treasure")) {
         p.screen = Screen::TreasurePick;
     } else if has(&status, "Return to Selection", 0.75) {
@@ -562,6 +590,20 @@ mod tests {
         assert!(interrogation(&[line("lnstigate", 738), line("Bestaw", 1090)]));
         assert!(!interrogation(&[line("Instigate", 738)]));
         assert!(!interrogation(&[line("Consume", 600), line("Replace", 900), line("End", 1200)]));
+    }
+
+    #[test]
+    fn reroll_count() {
+        let read = |text: &str| rerolls(&[Line { text: text.to_string(), rect: Rect::new(693, 893, 199, 22) }]);
+        // As Windows OCR read reroll-2000x837.
+        assert_eq!(read("Remaining attemptsl"), 1);
+        assert_eq!(read("Remaining attempts1"), 1);
+        assert_eq!(read("Remaining attempts 2"), 2);
+        assert_eq!(read("Remainingattempts2"), 2);
+        // The text shows only with re-rolls left.
+        assert_eq!(read("Remaining attempts"), 1);
+        assert_eq!(read("Confirm"), 0);
+        assert_eq!(rerolls(&[]), 0);
     }
 
     #[test]

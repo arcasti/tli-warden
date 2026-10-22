@@ -6,7 +6,8 @@ use super::solve::SolveOption;
 use crate::engine::data::Gift;
 use crate::engine::state::{Pending, State};
 use crate::engine::text::tool_name;
-use crate::engine::{Action, ChoiceId, apply};
+use crate::engine::gifts::apply_gift;
+use crate::engine::{Action, ChoiceId};
 
 /// The strategy's own pick and why, before any playout.
 #[derive(Clone, Debug, PartialEq)]
@@ -84,7 +85,7 @@ pub fn shown(st: &State, ranking: &[SolveOption], advice: &Advice) -> Shown {
     let plain = Shown { headline: None, why: advice.why.clone() };
     match st.pending.first() {
         Some(Pending::Gift { options, .. }) => {
-            let (noops, rest): (Vec<&Gift>, Vec<&Gift>) = options.iter().partition(|g| changes_nothing(st, g.key()));
+            let (noops, rest): (Vec<&Gift>, Vec<&Gift>) = options.iter().partition(|&&g| changes_nothing(st, g));
             let names = |gs: &[&Gift]| join(&gs.iter().map(|g| tool_name(g.key())).collect::<Vec<_>>());
             if tie {
                 let why = match (noops.len(), rest.len()) {
@@ -100,11 +101,16 @@ pub fn shown(st: &State, ranking: &[SolveOption], advice: &Advice) -> Shown {
                 };
                 return Shown { headline: Some("Take any treasure".to_string()), why };
             }
-            match &advice.action {
-                Action::Choose { id: ChoiceId::Name(key) } if noops.iter().any(|g| g.key() == key.as_str()) => Shown {
-                    headline: None,
-                    why: format!("{} changes nothing on this board, and the other treasures score lower.", tool_name(key)),
-                },
+            match advice.option.and_then(|k| gift_at(options, ranking, k)) {
+                Some(advised) if noops.contains(&&advised) => {
+                    // The advised treasure and the no-op ones tied with it.
+                    let mut idle: Vec<(usize, Gift)> = others.iter().filter_map(|&k| gift_at(options, ranking, k).map(|g| (k, g))).filter(|(_, g)| noops.contains(&g)).collect();
+                    idle.extend(advice.option.map(|k| (k, advised)));
+                    idle.sort_unstable_by_key(|&(k, _)| k);
+                    let gifts: Vec<&Gift> = idle.iter().map(|(_, g)| g).collect();
+                    let verb = if gifts.len() == 1 { "changes" } else { "change" };
+                    Shown { headline: None, why: format!("{} {verb} nothing on this board, and the other treasures score lower.", names(&gifts)) }
+                }
                 _ => plain,
             }
         }
@@ -114,15 +120,50 @@ pub fn shown(st: &State, ranking: &[SolveOption], advice: &Advice) -> Shown {
     }
 }
 
-/// Whether taking the treasure `key` leaves the cells and the vault as they
-/// are, over three dice.
-fn changes_nothing(st: &State, key: &str) -> bool {
+/// On a treasure pick, when the advised treasure changes nothing and a tied
+/// one changes something, the best-ranked such one, since the playouts can't
+/// rank them apart; otherwise the advice as it is.
+pub fn prefer_change(st: &State, ranking: &[SolveOption], advice: Advice) -> Advice {
+    let Some(Pending::Gift { options, .. }) = st.pending.first() else { return advice };
+    let idle = |k: usize| gift_at(options, ranking, k).filter(|&g| changes_nothing(st, g));
+    let Some(advised) = advice.option.and_then(idle) else { return advice };
+    let others = also_good(ranking, advice.option);
+    let acts = |k: usize| gift_at(options, ranking, k).is_some_and(|g| !changes_nothing(st, g));
+    let Some(&best) = others.iter().find(|&&k| acts(k)) else { return advice };
+    let mut tied: Vec<(usize, Gift)> = others.iter().filter_map(|&k| idle(k).map(|g| (k, g))).collect();
+    tied.extend(advice.option.map(|k| (k, advised)));
+    tied.sort_unstable_by_key(|&(k, _)| k);
+    let names: Vec<String> = tied.iter().map(|(_, g)| tool_name(g.key())).collect();
+    let row = &ranking[best];
+    Advice {
+        action: row.action.clone(),
+        label: row.label.clone(),
+        why: format!(
+            "The playouts can't tell it from {}, which {} nothing on this board.",
+            join(&names),
+            if names.len() == 1 { "changes" } else { "change" },
+        ),
+        option: Some(best),
+    }
+}
+
+/// The treasure that ranking row `k` takes, if it is one of `options`.
+fn gift_at(options: &[Gift], ranking: &[SolveOption], k: usize) -> Option<Gift> {
+    match &ranking.get(k)?.action {
+        Action::Choose { id: ChoiceId::Name(key) } => options.iter().copied().find(|g| g.key() == key.as_str()),
+        _ => None,
+    }
+}
+
+/// Whether the treasure's own effect leaves the cells and the vault as they
+/// are, over three dice. The pick's full action carries the game on past it
+/// (new incident markers spawn), so only the effect is tried.
+fn changes_nothing(st: &State, gift: Gift) -> bool {
     [0x9e37_79b9u32, 0x85eb_ca6b, 0xc2b2_ae35].iter().all(|&rng| {
         let mut trial = st.clone();
         trial.rng = rng;
-        apply(&mut trial, &Action::Choose { id: ChoiceId::Name(key.to_string()) }).is_ok()
-            && trial.cells == st.cells
-            && trial.vault == st.vault
+        apply_gift(&mut trial, gift);
+        trial.cells == st.cells && trial.vault == st.vault
     })
 }
 

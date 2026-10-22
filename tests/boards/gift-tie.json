@@ -1,0 +1,27 @@
+{
+  "v": 1, "day": 18, "maxDays": 20, "step": "choice", "warden": 6,
+  "choice": { "kind": "gift", "options": [] },
+  "tools": ["muzzle", "saw"],
+  "vault": ["wolf","wolf","wolf","rat","mammoth"],
+  "objective": { "id": 1, "progress": 1 },
+  "eventKind": "chain", "chainArmed": false, "dest": [],
+  "devourUsed": true, "huntUsed": true, "swapUsed": true,
+  "cells": [
+    { "kind": "office" },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "scratch", "tier": 1, "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "inmate", "beast": "lion", "tier": 3, "event": null, "ivory": false, "prey": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "scratch", "tier": 1, "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "scratch", "tier": 1, "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "inmate", "beast": "rat", "tier": 1, "event": null, "ivory": false, "prey": null },
+    { "kind": "sealed", "event": null },
+    { "kind": "scratch", "tier": 1, "event": null },
+    { "kind": "scratch", "tier": 1, "event": null }
+  ]
+}

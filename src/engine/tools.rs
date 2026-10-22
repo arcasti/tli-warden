@@ -56,9 +56,11 @@ pub fn after_opening(s: &mut State, n: usize, id: u32) {
     {
         promote(s, i, d.tool(Tool::Dogtag).tiers.unwrap_or(0), false);
     }
-    // Executioner's Blacklist: with few unopened cells left, random inmates rise.
+    // Executioner's Blacklist: with few unopened cells left, random inmates
+    // rise. The game counts the doors locked before this one opens, so it
+    // fires once fewer than `max_sealed` stay locked after it.
     let blacklist = d.tool(Tool::Blacklist);
-    if s.has(Tool::Blacklist) && s.sealed_cells().len() <= blacklist.max_sealed.unwrap_or(0) {
+    if s.has(Tool::Blacklist) && s.sealed_cells().len() < blacklist.max_sealed.unwrap_or(0) {
         let mut picks = board_inmates(s);
         shuffle(&mut s.rng, &mut picks);
         picks.truncate(blacklist.count.unwrap_or(0));

@@ -18,7 +18,7 @@ use warden::solver::chain::{Meal, bite, chain_odds, devour_delta, replace_odds, 
 use warden::solver::scores::{patrol_scores, swap_gain_here};
 use warden::solver::values::swap_value;
 use warden::solver::solve::{SolveOption, reason};
-use warden::solver::advise::{Advice, shown};
+use warden::solver::advise::{Advice, prefer_change, shown};
 use warden::engine::text::tool_name;
 use warden::solver::bench::start;
 use warden::solver::{Rng32, TUNED, decide};
@@ -647,6 +647,31 @@ fn the_ring_of_keys_prices_the_sealed_doors_beside_a_patrolled_one() {
 }
 
 #[test]
+fn the_blacklist_fires_once_fewer_than_its_cells_stay_locked() {
+    // Run logs: the game raises inmates only when at most 4 doors stay
+    // locked after the open, one fewer than the instrument text's 5.
+    let black = data().tool(Tool::Blacklist);
+    let (max, count, tiers) = (black.max_sealed.unwrap_or(0), black.count.unwrap_or(0), black.tiers.unwrap_or(0));
+    assert_eq!(max, 5);
+    let rises = |left: usize| {
+        let mut st = duel(serde_json::json!(["blacklist"]), (Beast::Wolf, 1), 0);
+        while st.sealed_cells().len() > left + 1 {
+            let n = st.sealed_cells()[0];
+            st.cells[n].sealed = false;
+            st.cells[n].inmate = None;
+        }
+        let door = st.sealed_cells()[0];
+        let before: Vec<i32> = st.cells.iter().map(|c| c.inmate.map_or(0, |i| i.tier)).collect();
+        warden::engine::rules::open_cell(&mut st, door, warden::engine::rules::How::Patrol, Some((Beast::Wolf, 0)));
+        assert_eq!(st.sealed_cells().len(), left);
+        st.cells.iter().zip(&before).map(|(c, &t)| c.inmate.map_or(0, |i| i.tier) - t).filter(|&d| d != 0).collect::<Vec<_>>()
+    };
+    assert_eq!(rises(max), Vec::<i32>::new());
+    // The opened inmate is on the board too, so it may be one of the picks.
+    assert_eq!(rises(max - 1), vec![tiers; count]);
+}
+
+#[test]
 fn the_short_shackles_price_a_short_move_only() {
     let mut st = duel(serde_json::json!([]), (Beast::Wolf, 2), 2);
     let short = data().tool(Tool::Shortchain);
@@ -868,5 +893,47 @@ fn shown_names_the_gifts_that_change_nothing() {
     let behind = ranking(9.0);
     let s = shown(&st, &behind, &advice(&behind));
     assert_eq!(s.headline, None);
-    assert_eq!(s.why, "Brass Horn of Strife changes nothing on this board, and the other treasures score lower.");
+    // Vintage and Brand sit level with the Horn, inside its margin.
+    assert_eq!(
+        s.why,
+        "Brass Horn of Strife, Crimson Vintage and Brand of Original Sin change nothing on this board, and the other treasures score lower."
+    );
+}
+
+/// On a treasure pick where the advised treasure changes nothing and a tied
+/// one acts, the advice takes the one that acts.
+#[test]
+fn the_advice_prefers_a_tied_treasure_that_changes_something() {
+    let (st, problems) = build("gift-tie.json");
+    assert!(problems.is_empty(), "{problems:?}");
+    let Some(Pending::Gift { options, .. }) = st.pending.first() else { panic!("no gift pick: {:?}", st.pending) };
+    let key = |name: &str| options.iter().map(|g| g.key()).find(|&k| tool_name(k) == name).unwrap_or_else(|| panic!("no {name}"));
+    let row = |name: &str, mean: f64, gap_se: f64| SolveOption {
+        label: format!("Take {name}"),
+        action: Action::Choose { id: ChoiceId::Name(key(name).to_string()) },
+        mean,
+        se: 0.01,
+        gap_se,
+        n: 400,
+        best: 0.0,
+        policy: false,
+    };
+    let ranking = vec![
+        row("Brass Horn of Strife", 5.492, 0.0),
+        row("Crimson Vintage", 5.478, 0.034),
+        row("Brand of Original Sin", 5.475, 0.030),
+        row("Three-Headed Thumb Ring", 5.333, 0.034),
+    ];
+    let advice = Advice {
+        action: ranking[0].action.clone(),
+        label: ranking[0].label.clone(),
+        why: "The playouts found a better move than the strategy's pick (Take Three-Headed Thumb Ring).".to_string(),
+        option: Some(0),
+    };
+    let why = "The playouts can't tell it from Brass Horn of Strife and Brand of Original Sin, which change nothing on this board.";
+    let a = prefer_change(&st, &ranking, advice);
+    assert_eq!((a.label.as_str(), a.option, a.why.as_str()), ("Take Crimson Vintage", Some(1), why));
+    assert_eq!(a.action, ranking[1].action);
+    let s = shown(&st, &ranking, &a);
+    assert_eq!((s.headline, s.why.as_str()), (None, why));
 }

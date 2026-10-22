@@ -13,7 +13,7 @@ use crate::reader::layout::{is_16_9, lay_out_scaled};
 use crate::reader::{REF_H, REF_W, Rgba};
 use crate::solver::TUNED;
 use super::runlog::{RunLog, timestamp};
-use crate::solver::advise::{Advice, Pick, Shown, advise, also_good, shown};
+use crate::solver::advise::{Advice, Pick, Shown, advise, also_good, prefer_change, shown};
 use serde_json::json;
 use crate::engine::{Action, ChoiceId};
 use crate::engine::state::{Pending, State};
@@ -942,7 +942,9 @@ impl Session {
         }
         // The board shown over an open treasure's pick: a flicker while View
         // Prison Status opens when its cells are the pick's, else the pick's
-        // effect, the board the next pick covers while picks are left.
+        // effect, the board the next pick covers while picks are left, and
+        // the one a new treasure pick (as a Chromatic gives) covers after.
+        let mut picked = false;
         let mut after_pick = false;
         if panels.screen == Screen::Unknown
             && self.days_read.is_some()
@@ -953,6 +955,7 @@ impl Session {
             if to_model(&scene, &panels, &self.tools, self.board.as_ref(), self.run_days()).0.cells == r.model.cells {
                 return Taken::Skipped;
             }
+            picked = true;
             after_pick = taken + 1 < treasure_picks(self.theme);
             self.treasure = after_pick.then_some(taken + 1);
         }
@@ -964,17 +967,21 @@ impl Session {
             _ => {}
         }
         // View Prison Status shows the real board under a pick, and so does
-        // the board after a treasure's pick with picks left: it becomes the
-        // last board read, in place of any board inferred after the consume,
-        // and the pick stays on show, solved on that board.
-        let (scene, panels) = match (panels.screen, self.scene.take()) {
-            (Screen::PrisonStatus | Screen::Unknown, Some((pick, mut over, _)))
-                if after_pick || (panels.screen == Screen::PrisonStatus && matches!(over.screen, Screen::TreasurePick | Screen::InstrumentPick)) =>
-            {
-                self.board = Some(to_model(&scene, &panels, &self.tools, self.board.as_ref(), self.run_days()).0);
-                self.consume = None;
-                self.meal = None;
-                self.chained = false;
+        // the board after a treasure's pick: it becomes the last board read,
+        // in place of any board inferred after the consume. With picks left,
+        // or under View Prison Status, the pick stays on show, solved on that
+        // board; after the last pick the scene becomes this read.
+        let keep_pick = after_pick
+            || (panels.screen == Screen::PrisonStatus
+                && self.scene.as_ref().is_some_and(|(_, over, _)| matches!(over.screen, Screen::TreasurePick | Screen::InstrumentPick)));
+        if picked || keep_pick {
+            self.board = Some(to_model(&scene, &panels, &self.tools, self.board.as_ref(), self.run_days()).0);
+            self.consume = None;
+            self.meal = None;
+            self.chained = false;
+        }
+        let (scene, panels) = match self.scene.take() {
+            Some((pick, mut over, _)) if keep_pick => {
                 over.days = panels.days;
                 (pick, over)
             }
@@ -1323,7 +1330,11 @@ impl Session {
 
     /// What the window recommends now; see [`advise`].
     pub fn advice(&self) -> Option<Advice> {
-        advise(self.pick.as_ref(), &self.ranking, !self.solving || self.rounds >= LIVE_MIN)
+        let a = advise(self.pick.as_ref(), &self.ranking, !self.solving || self.rounds >= LIVE_MIN)?;
+        Some(match &self.state {
+            Some(st) => prefer_change(st, &self.ranking, a),
+            None => a,
+        })
     }
 
     /// How the window shows the advice `a`; see [`shown`].

@@ -1537,6 +1537,21 @@ fn a_treasure_without_a_theme_has_one_pick() {
 }
 
 #[test]
+fn a_second_treasure_pick_covers_the_board_after_the_first() {
+    // A Chromatic after the first pick's effect gives another treasure pick
+    // at once: it is solved on the board read after the first pick.
+    if !have(&OPULENCE_FLOW) {
+        return;
+    }
+    let Some(mut s) = read_all(Vec::new(), &OPULENCE_FLOW[..2]) else { return };
+    assert_eq!(read_next(&mut s, "rec6-t225.png").screen, Screen::Unknown);
+    let r = read_next(&mut s, "rec6-t191.png");
+    assert_eq!(r.screen, Screen::TreasurePick);
+    let after = read_all(Vec::new(), &["rec6-t225.png"]).unwrap().reading.unwrap();
+    assert_eq!(r.model.cells, after.model.cells);
+}
+
+#[test]
 fn rollouts_same_on_any_thread_count() {
     let (st, problems) = common::build("ratway.json");
     assert!(problems.is_empty(), "{problems:?}");

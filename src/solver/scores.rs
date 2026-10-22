@@ -312,8 +312,10 @@ fn held_terms(ctx: &Ctx, h: &Held, n: usize, steps: usize, opened: Option<&Dist>
     if let Some(dist) = opened {
         // Executioner's Blacklist: with few doors left after this one (counted
         // before the Iron, Keys and Forged Key open theirs), random inmates rise.
+        // The game counts the doors locked before this one opens, so it fires
+        // once fewer than `max_sealed` stay locked after it.
         let black = d.tool(Tool::Blacklist);
-        if st.has(Tool::Blacklist) && left <= black.max_sealed.unwrap_or(0) {
+        if st.has(Tool::Blacklist) && left < black.max_sealed.unwrap_or(0) {
             let picks = black.count.unwrap_or(0).min(board);
             gain += picks as f64 / board as f64 * rises(black.tiers.unwrap_or(0));
         }

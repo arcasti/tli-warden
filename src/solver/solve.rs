@@ -39,7 +39,9 @@ pub fn hide_future(st: &mut State, seed: u32) {
         if st.cells[n].event.is_none() || marker_seen(st) {
             continue;
         }
-        st.cells[n].event = draw_incident(st, &[n]);
+        if let Some(id) = draw_incident(st, &[n]) {
+            st.cells[n].event = Some(id);
+        }
     }
     for c in &mut st.cells {
         if !c.sealed || c.known >= 2 {

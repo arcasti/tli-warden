@@ -67,53 +67,34 @@ pub fn also_good(ranking: &[SolveOption], advised: Option<usize>) -> Vec<usize> 
         .collect()
 }
 
-/// What the window shows for the advice: a headline replacing the move's name, and the line under the board.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Shown {
-    pub headline: Option<String>,
-    pub why: String,
-}
-
-/// The advice as the window shows it. On a named pick (treasure, card,
-/// instrument) where every option ties, the headline says so instead of
-/// naming one; on a treasure pick, the why names the treasures that change
-/// nothing on the board.
-pub fn shown(st: &State, ranking: &[SolveOption], advice: &Advice) -> Shown {
+/// The line under the board for the advice. On a named pick (treasure, card,
+/// instrument) where every option ties, it says the others score the same;
+/// on a treasure pick, it names the treasures that change nothing on the
+/// board. The advised move itself is always named, ties included.
+pub fn why_shown(st: &State, ranking: &[SolveOption], advice: &Advice) -> String {
     let others = also_good(ranking, advice.option);
     let tie = ranking.len() >= 2 && others.len() == ranking.len() - 1;
-    let alike = "The playouts can't tell them apart.";
-    let plain = Shown { headline: None, why: advice.why.clone() };
+    let alike = "The playouts can't tell it from the others.";
     match st.pending.first() {
         Some(Pending::Gift { options, .. }) => {
-            let (noops, rest): (Vec<Gift>, Vec<Gift>) = options.iter().partition(|&&g| changes_nothing(st, g));
+            let noops: Vec<Gift> = options.iter().copied().filter(|&g| changes_nothing(st, g)).collect();
             if tie {
-                let why = match (noops.len(), rest.len()) {
-                    (0, _) => alike.to_string(),
-                    (_, 0) => "No treasure changes anything on this board.".to_string(),
-                    (n, r) => format!(
-                        "{} {} nothing on this board. {} {} no better.",
-                        names(&noops),
-                        change(n),
-                        names(&rest),
-                        if r == 1 { "scores" } else { "score" },
-                    ),
+                return match noops.len() {
+                    0 => alike.to_string(),
+                    n if n == options.len() => "No treasure changes anything on this board.".to_string(),
+                    n => format!("{alike} {} {} nothing on this board.", names(&noops), change(n)),
                 };
-                return Shown { headline: Some("Take any treasure".to_string()), why };
             }
             match advice.option.filter(|&k| gift_at(options, ranking, k).is_some_and(|g| noops.contains(&g))) {
                 Some(k) => {
                     let idle = idle_tied(st, options, ranking, k);
-                    Shown {
-                        headline: None,
-                        why: format!("{} {} nothing on this board, and the other treasures score lower.", names(&idle), change(idle.len())),
-                    }
+                    format!("{} {} nothing on this board, and the other treasures score lower.", names(&idle), change(idle.len()))
                 }
-                None => plain,
+                None => advice.why.clone(),
             }
         }
-        Some(Pending::Interrogation { .. }) if tie => Shown { headline: Some("Take either card".to_string()), why: alike.to_string() },
-        Some(Pending::Tool { .. }) if tie => Shown { headline: Some("Take any instrument".to_string()), why: alike.to_string() },
-        _ => plain,
+        Some(Pending::Interrogation { .. } | Pending::Tool { .. }) if tie => alike.to_string(),
+        _ => advice.why.clone(),
     }
 }
 
@@ -218,5 +199,16 @@ mod tests {
         // The move stays the first row; only the why changes.
         assert_eq!((a.action, a.option), (Action::Patrol { cell: 7 }, Some(0)));
         assert_eq!(a.why, "The playouts rate it as good as the strategy's pick (Go to cell 8).");
+    }
+
+    #[test]
+    fn a_tied_card_pick_still_names_one_card() {
+        let mut st = crate::engine::rules::new_game("tie");
+        st.pending = vec![Pending::Interrogation { options: Vec::new() }];
+        let tie = [option(7, 4.0, 0.0, false), option(8, 4.0, 0.05, false)];
+        let a = advise(None, &tie, true).unwrap();
+        assert_eq!((a.label.as_str(), why_shown(&st, &tie, &a).as_str()), ("Go to cell 7", "The playouts can't tell it from the others."));
+        let led = [option(7, 4.5, 0.0, false), option(8, 4.0, 0.05, false)];
+        assert_eq!(why_shown(&st, &led, &advise(None, &led, true).unwrap()), "The playouts rate it best.");
     }
 }

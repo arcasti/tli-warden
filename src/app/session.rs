@@ -13,7 +13,7 @@ use crate::reader::layout::{is_16_9, lay_out_scaled};
 use crate::reader::{REF_H, REF_W, Rgba};
 use crate::solver::TUNED;
 use super::runlog::{RunLog, timestamp};
-use crate::solver::advise::{Advice, Pick, Shown, advise, also_good, prefer_change, shown};
+use crate::solver::advise::{Advice, Pick, advise, also_good, prefer_change, why_shown};
 use serde_json::json;
 use crate::engine::{Action, ChoiceId};
 use crate::engine::state::{Pending, State};
@@ -1338,11 +1338,11 @@ impl Session {
         })
     }
 
-    /// How the window shows the advice `a`; see [`shown`].
-    pub fn shown(&self, a: &Advice) -> Shown {
+    /// The line the window shows under the advice `a`; see [`why_shown`].
+    pub fn why_shown(&self, a: &Advice) -> String {
         match &self.state {
-            Some(st) => shown(st, &self.ranking, a),
-            None => Shown { headline: None, why: a.why.clone() },
+            Some(st) => why_shown(st, &self.ranking, a),
+            None => a.why.clone(),
         }
     }
 

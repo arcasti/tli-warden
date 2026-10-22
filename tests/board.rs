@@ -18,7 +18,7 @@ use warden::solver::chain::{Meal, bite, chain_odds, devour_delta, replace_odds, 
 use warden::solver::scores::{patrol_scores, swap_gain_here};
 use warden::solver::values::swap_value;
 use warden::solver::solve::{SolveOption, reason};
-use warden::solver::advise::{Advice, prefer_change, shown};
+use warden::solver::advise::{Advice, prefer_change, why_shown};
 use warden::engine::text::tool_name;
 use warden::solver::bench::start;
 use warden::solver::{Rng32, TUNED, decide};
@@ -850,9 +850,9 @@ fn eater_mask_matches_bites() {
     }
 }
 
-/// On a treasure pick where the treasures tie, the window says so and names
-/// the ones that change nothing; with the Ring behind, the Horn's why says it
-/// changes nothing.
+/// On a treasure pick where the treasures tie, the advice names the Ring, the
+/// one that acts, and the why names the ones that change nothing; with the
+/// Ring behind, the Horn's why says it changes nothing.
 #[test]
 fn shown_names_the_gifts_that_change_nothing() {
     let (st, problems) = build("gift-noop.json");
@@ -884,18 +884,16 @@ fn shown_names_the_gifts_that_change_nothing() {
         option: Some(0),
     };
     let tied = ranking(9.162);
-    let s = shown(&st, &tied, &advice(&tied));
-    assert_eq!(s.headline.as_deref(), Some("Take any treasure"));
+    let a = prefer_change(&st, &tied, advice(&tied));
+    assert_eq!(a.label, "Take Three-Headed Thumb Ring");
     assert_eq!(
-        s.why,
-        "Brass Horn of Strife, Crimson Vintage and Brand of Original Sin change nothing on this board. Three-Headed Thumb Ring scores no better."
+        why_shown(&st, &tied, &a),
+        "The playouts can't tell it from Brass Horn of Strife, Crimson Vintage and Brand of Original Sin, which change nothing on this board."
     );
     let behind = ranking(9.0);
-    let s = shown(&st, &behind, &advice(&behind));
-    assert_eq!(s.headline, None);
     // Vintage and Brand sit level with the Horn, inside its margin.
     assert_eq!(
-        s.why,
+        why_shown(&st, &behind, &advice(&behind)),
         "Brass Horn of Strife, Crimson Vintage and Brand of Original Sin change nothing on this board, and the other treasures score lower."
     );
 }
@@ -934,6 +932,5 @@ fn the_advice_prefers_a_tied_treasure_that_changes_something() {
     let a = prefer_change(&st, &ranking, advice);
     assert_eq!((a.label.as_str(), a.option, a.why.as_str()), ("Take Crimson Vintage", Some(1), why));
     assert_eq!(a.action, ranking[1].action);
-    let s = shown(&st, &ranking, &a);
-    assert_eq!((s.headline, s.why.as_str()), (None, why));
+    assert_eq!(why_shown(&st, &ranking, &a), why);
 }

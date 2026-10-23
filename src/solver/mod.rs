@@ -414,11 +414,8 @@ pub fn decide(st: &State, p: &Params, roll: &mut Rng32) -> Option<Action> {
     if let Some(choice) = st.pending.first() {
         return match choice {
             Pending::Chain { from, options, .. } => {
-                // A Lion in the warden's cell with the Trap's Hunt unused ends
-                // the chain: the Hunt after it is worth more than another bite.
-                let cell = &st.cells[st.position];
-                let lion = !cell.sealed && cell.inmate.is_some_and(|i| i.beast == Beast::Lion);
-                if lion && st.has(Tool::Trap) && st.used.hunt == 0 {
+                // A Hunt still open ends the chain: it is worth more than another bite.
+                if !hunt_targets(st).is_empty() {
                     return Some(Action::EndChain);
                 }
                 let bites = devour_options(st, *from).into_iter().filter(|o| options.contains(&o.cell)).collect();

@@ -4,7 +4,7 @@
 use super::chain::{best_meal, coin_of_fate, devour_delta, replace_odds};
 use super::values::{activation, execution_value, fresh_value, stair_delta, swap_value};
 use super::{Comp, Ctx, Dist, Params, Rng32, TOP, beasts, composition, dist_worth, door_dist, seen_door, tier_values, worth};
-use crate::engine::data::{Beast, Card, ObjectiveKind, RAINBOW, Tool, data};
+use crate::engine::data::{Beast, Card, ObjectiveKind, RAINBOW, TYRANNY, Tool, data};
 use crate::engine::devour::{Bite, eater_mask, sure_gain};
 use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATWAY};
 use crate::engine::rules::{clockwise_path, fitting_incidents, land, marker_seen, steps_between};
@@ -92,11 +92,19 @@ fn landed(st: &State, n: usize, seed: u32) -> State {
 fn landing_gain(st: &State, n: usize, action: &Action, samples: u32, &(v, r): &([f64; 6], f64)) -> f64 {
     let mut gain = 0.0;
     for k in 0..samples {
-        let mut trial = landed(st, n, sample_seed(st, n, k));
-        let before = board_value(&trial, &v, r);
-        if apply(&mut trial, action).is_ok() {
-            gain += board_value(&trial, &v, r) - before;
-        }
+        let seed = sample_seed(st, n, k);
+        let mut trial = landed(st, n, seed);
+        // Tyranny's extra Room cards run on landing, so they count as its gain.
+        let before = if n == data().room && st.theme == Some(TYRANNY) {
+            let mut plain = st.clone();
+            plain.theme = None;
+            board_value(&landed(&plain, n, seed), &v, r)
+        } else {
+            board_value(&trial, &v, r)
+        };
+        // A refused action (a Treasure gift queued first) still keeps what landing did.
+        apply(&mut trial, action);
+        gain += board_value(&trial, &v, r) - before;
     }
     gain / f64::from(samples)
 }
@@ -661,5 +669,17 @@ mod tests {
         assert_eq!(devour_scores(&mut context(&st, &p), bite())[0].1, plain + 2.0);
         st.objective = Some(ObjectiveState { id: 2, progress: 4, done: true });
         assert_eq!(devour_scores(&mut context(&st, &p), bite())[0].1, plain);
+    }
+
+    #[test]
+    fn tyrannys_extra_room_cards_count_in_the_room_landing() {
+        let mut st = bare(5);
+        st.position = 3;
+        st.cells[6].inmate = Some(Inmate { id: 900, beast: Beast::Lion, tier: RAINBOW - 1 });
+        let room = data().room;
+        let plain = patrol_scores(&mut context(&st, &TUNED), &[room])[0].1;
+        // Tyranny's extra Bestow makes the Chromatic, whose Treasure comes before the Room's card.
+        st.theme = Some(TYRANNY);
+        assert!((patrol_scores(&mut context(&st, &TUNED), &[room])[0].1 - plain).abs() < 1e-9);
     }
 }

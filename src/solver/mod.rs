@@ -58,6 +58,9 @@ pub struct Params {
     /// With a Re-roll left, an instrument offer is re-rolled when its best
     /// instrument sits at this TOOL_RANK index or lower down.
     pub reroll_rank: f64,
+    /// The Room's landing weight factor under Tyranny, whose extra Instigates
+    /// place markers the Bestow gain does not count.
+    pub room_tyranny: f64,
 }
 
 impl Params {
@@ -79,6 +82,7 @@ impl Params {
             "w_goal" => &mut self.w_goal,
             "w_incident" => &mut self.w_incident,
             "reroll_rank" => &mut self.reroll_rank,
+            "room_tyranny" => &mut self.room_tyranny,
             _ => return None,
         })
     }
@@ -100,6 +104,7 @@ pub static TUNED: Params = Params {
     w_goal: 0.0,
     w_incident: 64.0,
     reroll_rank: 8.0,
+    room_tyranny: 4.0,
 };
 
 /// mulberry32 (rng32), for the solver's own dice (never the game's).

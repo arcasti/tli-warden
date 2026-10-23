@@ -196,7 +196,8 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
             score += p.w_event * landing_gain(st, n, &Action::Event, samples, &tiers);
         } else if n == data().room {
             let bestow = Action::Choose { id: ChoiceId::Name(Card::Bestow.key().to_string()) };
-            score += p.w_event * landing_gain(st, n, &bestow, 3, &tiers);
+            let t = if st.theme == Some(TYRANNY) { p.room_tyranny } else { 1.0 };
+            score += t * p.w_event * landing_gain(st, n, &bestow, 3, &tiers);
         }
         // The sealed doors left after this landing's own openings.
         let (mut left, mut left_worth) = held.as_ref().map_or((0, 0.0), |h| (h.sealed, h.side));
@@ -676,10 +677,10 @@ mod tests {
         let mut st = bare(5);
         st.position = 3;
         st.cells[6].inmate = Some(Inmate { id: 900, beast: Beast::Lion, tier: RAINBOW - 1 });
-        let room = data().room;
-        let plain = patrol_scores(&mut context(&st, &TUNED), &[room])[0].1;
+        let (room, p) = (data().room, Params { room_tyranny: 1.0, ..TUNED.clone() });
+        let plain = patrol_scores(&mut context(&st, &p), &[room])[0].1;
         // Tyranny's extra Bestow makes the Chromatic, whose Treasure comes before the Room's card.
         st.theme = Some(TYRANNY);
-        assert!((patrol_scores(&mut context(&st, &TUNED), &[room])[0].1 - plain).abs() < 1e-9);
+        assert!((patrol_scores(&mut context(&st, &p), &[room])[0].1 - plain).abs() < 1e-9);
     }
 }

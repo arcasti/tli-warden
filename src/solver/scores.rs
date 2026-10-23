@@ -629,7 +629,7 @@ pub fn best_by_board<'k>(ctx: &Ctx, options: &[&'k str], gift: bool, roll: &mut 
 mod tests {
     use super::*;
     use crate::engine::new_game;
-    use crate::engine::state::ObjectiveState;
+    use crate::engine::state::{ObjectiveState, Pending, Phase};
     use crate::solver::{TUNED, context};
 
     /// A block with every cell open and empty, the warden in cell 0, and the
@@ -643,6 +643,19 @@ mod tests {
         (st.position, st.chain) = (0, false);
         st.objective = Some(ObjectiveState { id, progress: 0, done: false });
         st
+    }
+
+    #[test]
+    fn a_lion_with_the_trap_ends_the_chain_for_its_hunt() {
+        let mut st = bare(5);
+        (st.phase, st.position) = (Phase::Manage, 3);
+        st.cells[3].inmate = Some(Inmate { id: 900, beast: Beast::Lion, tier: 2 });
+        st.cells[4].inmate = Some(Inmate { id: 901, beast: Beast::Rat, tier: 2 });
+        st.pending = vec![Pending::Chain { from: 3, eater_id: 900, options: vec![4] }];
+        let pick = |st: &State| crate::solver::decide(st, &TUNED, &mut crate::solver::Rng32::new(1));
+        assert_eq!(pick(&st), Some(Action::Chain { to: 4 }));
+        st.tools.push(Tool::Trap);
+        assert_eq!(pick(&st), Some(Action::EndChain));
     }
 
     #[test]

@@ -69,10 +69,10 @@ unsafe extern "system" fn visit(hwnd: HWND, lparam: LPARAM) -> BOOL {
     if title.is_empty() || !unsafe { IsWindowVisible(hwnd) }.as_bool() {
         return BOOL(1);
     }
-    let pid = window_pid(hwnd);
-    if own_or_console(hwnd, pid) {
+    if own_or_console(hwnd) {
         return BOOL(1);
     }
+    let pid = window_pid(hwnd);
     if process_file(pid).is_some_and(|f| f.eq_ignore_ascii_case(GAME_EXE)) {
         search.game = Some(hwnd);
         return BOOL(0);
@@ -94,12 +94,15 @@ fn window_pid(hwnd: HWND) -> u32 {
 }
 
 /// Whether the window belongs to this process or is a console host.
-fn own_or_console(hwnd: HWND, pid: u32) -> bool {
+fn own_or_console(hwnd: HWND) -> bool {
+    if ours(hwnd) {
+        return true;
+    }
     let mut class = [0u16; 64];
     // SAFETY: hwnd comes from EnumWindows; class is a valid buffer.
-    let (len, own) = unsafe { (GetClassNameW(hwnd, &mut class), pid == GetCurrentProcessId()) };
+    let len = unsafe { GetClassNameW(hwnd, &mut class) };
     let class = String::from_utf16_lossy(&class[..len.max(0) as usize]);
-    own || CONSOLE_CLASSES.contains(&class.as_str())
+    CONSOLE_CLASSES.contains(&class.as_str())
 }
 
 /// The file name of process `pid`'s executable, such as "notepad.exe";

@@ -63,16 +63,7 @@ mod tests {
     use super::*;
     use crate::engine::data::Tool;
     use crate::reader::panels::{Panels, read_panels_titled};
-    use std::path::{Path, PathBuf};
-
-    /// trainingdata/s16, None (and a note) when it is missing.
-    fn frames() -> Option<PathBuf> {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("trainingdata/s16");
-        dir.is_dir().then_some(dir.clone()).or_else(|| {
-            println!("skipped: {} is missing", dir.display());
-            None
-        })
-    }
+    use std::path::Path;
 
     fn read(dir: &Path, name: &str) -> Panels {
         let (board, title) = super::super::load_layouts(&dir.join(name)).unwrap();
@@ -89,7 +80,7 @@ mod tests {
 
     #[test]
     fn board_cells_on_target_and_cell_picks() {
-        let Some(dir) = frames() else { return };
+        let Some(dir) = super::super::training("s16") else { return };
         let chain = read(&dir, "rec1-t057.png");
         assert_eq!(chain.screen, Screen::ChainTarget);
         for to in 0..16 {
@@ -111,7 +102,7 @@ mod tests {
     /// three 330 px cards centred 345 apart in y 750-920 (rec1-t049).
     #[test]
     fn doors_and_buttons() {
-        let Some(dir) = frames() else { return };
+        let Some(dir) = super::super::training("s16") else { return };
         let patrol = read(&dir, "rec1-t049.png");
         assert_eq!(patrol.doors, [Some(3), Some(6), Some(7)]);
         for (i, door) in [3usize, 6, 7].into_iter().enumerate() {
@@ -133,7 +124,7 @@ mod tests {
     /// button sits at x 760-970, y 715-770 of reroll-2000x837.
     #[test]
     fn instrument_cards_and_reroll() {
-        let Some(dir) = frames() else { return };
+        let Some(dir) = super::super::training("s16") else { return };
         let pick = read(&dir, "rec1-t031.png");
         assert_eq!(pick.screen, Screen::InstrumentPick);
         assert_eq!(pick.instruments.len(), 3);

@@ -401,43 +401,43 @@ fn reread(img: &Rgba, x: i32) -> Option<u8> {
 }
 
 /// The Interrogation Room's cards: both titles, Instigate left of Bestow,
-/// as the centres of the two titles.
-fn interrogation(lines: &[Line]) -> Option<[(i32, i32); 2]> {
-    let at = |name: &str| lines.iter().find(|l| similarity(&l.text, name) >= 0.75).map(|l| l.rect.centre());
+/// as the centre x of the two titles.
+fn interrogation(lines: &[Line]) -> Option<[i32; 2]> {
+    let at = |name: &str| lines.iter().find(|l| similarity(&l.text, name) >= 0.75).map(|l| l.rect.centre().0);
     match (at("Instigate"), at("Bestow")) {
-        (Some(a), Some(b)) if a.0 < b.0 => Some([a, b]),
+        (Some(a), Some(b)) if a < b => Some([a, b]),
         _ => None,
     }
 }
 
 /// The decision buttons left to right, each with its name's centre.
 fn buttons(lines: &[Line]) -> Vec<(&'static str, (i32, i32))> {
-    let mut found: Vec<(i32, &'static str, (i32, i32))> = Vec::new();
+    let mut found: Vec<(&'static str, (i32, i32))> = Vec::new();
     for l in lines {
         if let Some((i, _)) = best_match(&l.text, &["Consume", "Replace", "Hunt", "End"], 0.65) {
             let name = ["Consume", "Replace", "Hunt", "End"][i];
-            if !found.iter().any(|f| f.1 == name) {
-                found.push((l.rect.x, name, l.rect.centre()));
+            if !found.iter().any(|f| f.0 == name) {
+                found.push((name, l.rect.centre()));
             }
         }
     }
-    found.sort_by_key(|f| f.0);
-    found.into_iter().map(|f| (f.1, f.2)).collect()
+    found.sort_by_key(|f| f.1.0);
+    found
 }
 
 /// Card names on a pick screen: lines that match a name, left to right,
 /// each with the centre x of its line.
 fn offers(lines: &[Line], names: &[String]) -> Vec<(usize, i32)> {
-    let mut found: Vec<(i32, usize, i32)> = Vec::new();
+    let mut found: Vec<(usize, i32)> = Vec::new();
     for l in lines {
         if let Some((i, _)) = best_match(&l.text, names, 0.75)
-            && !found.iter().any(|f| f.1 == i)
+            && !found.iter().any(|f| f.0 == i)
         {
-            found.push((l.rect.x, i, l.rect.centre().0));
+            found.push((i, l.rect.centre().0));
         }
     }
-    found.sort_by_key(|f| f.0);
-    found.into_iter().map(|f| (f.1, f.2)).collect()
+    found.sort_by_key(|f| f.1);
+    found
 }
 
 pub(crate) fn luma_stats(img: &Rgba, (cx, cy): (i32, i32), half: i32) -> (f32, f32) {
@@ -537,7 +537,7 @@ pub fn read_panels_titled(img: &Rgba, title: &Rgba) -> Panels {
             // Its heading is "Make Your Decision", as on the manage step.
             p.screen = Screen::Interrogation;
             p.decision.clear();
-            for (key, (x, _)) in [("instigate", instigate), ("bestow", bestow)] {
+            for (key, x) in [("instigate", instigate), ("bestow", bestow)] {
                 p.spots.push((Spot::Card(key.to_string()), Layout::Board, (x, DOOR_Y)));
             }
         } else if has(&heading, "Select a Destination", 0.75) || (!doors.is_empty() && p.days.is_some()) {

@@ -245,10 +245,11 @@ impl WardenApp {
     /// again every 50 ms while the session has a ring, shown or not, so a
     /// window move, a click or the game coming back in front is seen.
     fn highlight(&mut self, ctx: &egui::Context) {
-        if self.settings.highlight && self.session.ring().is_some() {
+        let spot = self.settings.highlight.then(|| self.session.ring()).flatten();
+        if spot.is_some() {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
-        match self.settings.highlight.then(|| self.ring_spot()).flatten() {
+        match spot.and_then(|spot| self.ring_spot(spot)) {
             Some((x, y, r, stroke)) => {
                 if self.ring.is_none() {
                     self.ring = Ring::new();
@@ -266,11 +267,11 @@ impl WardenApp {
     }
 
     /// The ring in physical screen px (centre, radius, stroke): the
-    /// session's (see [`Session::ring`]) while the game or this window is in
-    /// front and the player has not clicked in the game since the read.
-    fn ring_spot(&mut self) -> Option<(f32, f32, f32, f32)> {
+    /// session's `(x, y, r)` (see [`Session::ring`]) while the game or this
+    /// window is in front and the player has not clicked in the game since
+    /// the read.
+    fn ring_spot(&mut self, (x, y, r): (f32, f32, f32)) -> Option<(f32, f32, f32, f32)> {
         let at = self.session.reading.as_ref()?.at;
-        let (x, y, r) = self.session.ring()?;
         let title = &self.settings.window_title;
         if self.clicked == Some(at) || !game_in_front(title) {
             return None;
@@ -945,7 +946,6 @@ impl WardenApp {
         let hover = "Draws a ring on the game around the cell, card or button to click for the advised move. Clicks go through it to the game";
         if ui.checkbox(&mut highlight, "Highlight where to click").on_hover_text(hover).changed() {
             self.settings.highlight = highlight;
-            self.ring = None;
             self.save();
         }
         let mut open = false;

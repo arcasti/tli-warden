@@ -158,3 +158,15 @@ pub fn read_model(path: &Path, held_tools: &[crate::engine::data::Tool]) -> Resu
     let run_days = if panels.days.is_some_and(|left| i64::from(left) > model::RUN_DAYS) { model::iron_law_days() } else { model::RUN_DAYS };
     Ok(model::to_model(&scene::read_scene(&img), &panels, &held, None, run_days))
 }
+
+/// The training frames folder `trainingdata/<rel>`, None (and a note) when
+/// it is missing.
+#[cfg(test)]
+fn training(rel: &str) -> Option<std::path::PathBuf> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("trainingdata").join(rel);
+    if !dir.is_dir() {
+        println!("skipped: {} is missing", dir.display());
+        return None;
+    }
+    Some(dir)
+}

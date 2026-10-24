@@ -210,11 +210,7 @@ mod tests {
     #[test]
     fn held_frames_read() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let dir = root.join("trainingdata/s16/held");
-        if !dir.exists() {
-            eprintln!("skipped: {} is missing", dir.display());
-            return;
-        }
+        let Some(dir) = super::super::training("s16/held") else { return };
         let v: Value = serde_json::from_str(&std::fs::read_to_string(root.join("data/held-truth-s16.json")).unwrap()).unwrap();
         let truth: Vec<(String, Vec<Tool>)> =
             v.as_object().unwrap().iter().filter(|(k, _)| k.ends_with(".png")).map(|(k, t)| (k.clone(), labels(t))).collect();
@@ -225,11 +221,7 @@ mod tests {
     #[test]
     fn labeled_board_frames_read() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let dir = root.join("trainingdata/s16");
-        if !dir.exists() {
-            eprintln!("skipped: {} is missing", dir.display());
-            return;
-        }
+        let Some(dir) = super::super::training("s16") else { return };
         let v: Value = serde_json::from_str(&std::fs::read_to_string(root.join("data/scan-truth-s16.json")).unwrap()).unwrap();
         let truth: Vec<(String, Vec<Tool>)> = v
             .as_object()

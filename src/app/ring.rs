@@ -136,7 +136,7 @@ fn paint(side: usize, cx: f32, cy: f32, r: f32, stroke: f32) -> Vec<u8> {
     let edge = EDGE * stroke / STROKE;
     let (outer, inner) = (r + stroke / 2.0, r - stroke / 2.0);
     // How much of a pixel at distance d lies in the band from a to b.
-    let band = |d: f32, a: f32, b: f32| ((d - a + 0.5).clamp(0.0, 1.0) * (b - d + 0.5).clamp(0.0, 1.0)).max(0.0);
+    let band = |d: f32, a: f32, b: f32| (d - a + 0.5).clamp(0.0, 1.0) * (b - d + 0.5).clamp(0.0, 1.0);
     let mut out = vec![0u8; side * side * 4];
     for (i, px) in out.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         let (x, y) = ((i % side) as f32 + 0.5 - cx, (i / side) as f32 + 0.5 - cy);

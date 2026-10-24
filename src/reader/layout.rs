@@ -578,11 +578,7 @@ mod tests {
     /// The reference frame rec1-t087 at its own size, None (and a note)
     /// when trainingdata/s16 is missing.
     fn reference() -> Option<Rgba> {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("trainingdata/s16");
-        if !dir.is_dir() {
-            println!("skipped: {} is missing", dir.display());
-            return None;
-        }
+        let dir = super::super::training("s16")?;
         Some(super::super::decode_png_raw(&std::fs::read(dir.join("rec1-t087.png")).unwrap()).unwrap())
     }
 

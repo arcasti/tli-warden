@@ -107,11 +107,14 @@ fn run_start(screen: Screen, under: Option<&Model>) -> bool {
 /// is not the count in use.
 fn kept_days(read: Option<u32>, left: Option<u32>) -> Option<Warning> {
     let left = left.filter(|&n| read != Some(n))?;
-    let text = match read {
-        Some(r) => format!("The days counter read {r}, more than the last count: {left} day(s) until Riot kept until {r} reads again."),
-        None => format!("The days counter is hidden: {left} day(s) until Riot kept from the last read."),
-    };
-    Some(Warning { cell: None, kind: WarningKind::Read, text })
+    Some(match read {
+        Some(r) => Warning {
+            cell: None,
+            kind: WarningKind::Read,
+            text: format!("The days counter read {r}, more than the last count: {left} day(s) until Riot kept until {r} reads again."),
+        },
+        None => Warning { cell: None, kind: WarningKind::Note, text: format!("The days counter is hidden: {left} day(s) until Riot kept from the last read.") },
+    })
 }
 
 /// The board under a treasure pick after a consume, and the eater's model
@@ -810,7 +813,9 @@ impl Session {
         if let Some(line) = kept {
             if let Some(r) = &mut self.reading {
                 r.warnings.retain(|w| !kept_line(&w.text));
-                r.warnings.insert(0, Warning { cell: None, kind: WarningKind::Read, text: line.clone() });
+                // Only a window of the wrong shape is the player's to fix.
+                let kind = if shape.is_some() { WarningKind::Read } else { WarningKind::Note };
+                r.warnings.insert(0, Warning { cell: None, kind, text: line.clone() });
             } else {
                 self.missed = Some(match panels.screen {
                     _ if shape.is_some() || panels.screen == Screen::Theme => line.clone(),
@@ -1286,7 +1291,7 @@ impl Session {
         if panels.screen != Screen::ChainTarget && !assumed_days {
             warnings.extend(kept_days(self.days_read, panels.days));
         }
-        warnings.extend(self.notes.iter().map(|text| Warning { cell: None, kind: WarningKind::Read, text: text.clone() }));
+        warnings.extend(self.notes.iter().map(|text| Warning { cell: None, kind: WarningKind::Note, text: text.clone() }));
         for (&cell, edit) in &self.edits {
             let n = cell as usize - 1;
             // A correction keeps the cell's incident marker and Tusk.

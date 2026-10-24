@@ -134,8 +134,8 @@ pub struct WardenApp {
     last_height: f32,
     /// The tab on show.
     tab: Tab,
-    /// The cell warnings of the last reading, so the Board tab opens when
-    /// a reading brings the first.
+    /// The warnings of the last reading, notes left out, so the Board tab
+    /// opens when a reading brings the first.
     warned: usize,
     /// This exe; None when Windows can't tell, which hides install and update.
     current: Option<PathBuf>,
@@ -590,7 +590,7 @@ impl eframe::App for WardenApp {
             }
         }
         self.poll_upload();
-        let warned = self.session.reading.as_ref().map_or(0, |r| r.warnings.iter().filter(|w| w.cell.is_some()).count() + r.kept_lines().len());
+        let warned = self.session.reading.as_ref().map_or(0, |r| r.warnings.iter().filter(|w| w.kind != WarningKind::Note).count());
         if self.warned == 0 && warned > 0 {
             self.tab = Tab::Board;
         }
@@ -710,12 +710,12 @@ impl WardenApp {
         for p in &s.problems {
             ui.label(RichText::new(p).small().color(Color32::LIGHT_RED));
         }
-        for w in reading.warnings.iter().filter(|w| w.cell.is_none()) {
+        for w in reading.warnings.iter().filter(|w| w.cell.is_none() && w.kind != WarningKind::Note) {
             let text = match w.kind {
                 WarningKind::HeldToolsUnknown => {
                     format!("The {} panel shows icons the reader can't name: add them in the Run tab.", data().instrument_name)
                 }
-                WarningKind::Read => w.text.clone(),
+                WarningKind::Read | WarningKind::Note => w.text.clone(),
             };
             ui.label(RichText::new(text).small().color(Color32::YELLOW));
         }
@@ -737,8 +737,12 @@ impl WardenApp {
         }
         let pick = advice.as_ref().map(|a| move_name(&a.action, short(&a.label)));
         courtyard(ui, court, &day, pick.as_deref(), s.solving);
+        let mut hover: Vec<String> = advice.iter().map(|a| format!("{}\n{}", a.label, a.why)).collect();
+        hover.extend(reading.warnings.iter().filter(|w| w.kind == WarningKind::Note).map(|w| w.text.clone()));
+        if !hover.is_empty() {
+            ui.interact(court, egui::Id::unique("warden-courtyard"), Sense::hover()).on_hover_text(hover.join("\n\n"));
+        }
         if let Some(a) = &advice {
-            ui.interact(court, egui::Id::unique("warden-courtyard"), Sense::hover()).on_hover_text(format!("{}\n{}", a.label, a.why));
             ui.add(egui::Label::new(RichText::new(s.why_shown(a)).small().weak()).wrap());
         }
         self.moves(ui, advice.as_ref().and_then(|a| a.option));

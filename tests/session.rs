@@ -811,6 +811,7 @@ fn popup_keeps_the_last_reading() {
     let after = s.reading.clone().unwrap();
     assert_eq!((&after.model, after.screen, after.at), (&before.model, before.screen, before.at));
     assert_eq!(after.warnings[0].text, "A popup covers the game: showing the last reading.");
+    assert_eq!(after.warnings[0].kind, WarningKind::Note);
     assert_eq!(after.warnings[1..], before.warnings[..]);
     assert_eq!(after.kept_lines(), ["A popup covers the game: showing the last reading."]);
     assert!(before.kept_lines().is_empty());

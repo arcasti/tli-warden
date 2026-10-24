@@ -45,11 +45,18 @@ pub enum WarningKind {
     Read,
     /// The held instruments show as icons only, so the player has to name them.
     HeldToolsUnknown,
+    /// A routine line on what was read or kept, such as a pick over the
+    /// board or a hidden days counter: nothing to check.
+    Note,
 }
 
 impl Warning {
     fn read(text: String) -> Warning {
         Warning { cell: None, kind: WarningKind::Read, text }
+    }
+
+    fn note(text: String) -> Warning {
+        Warning { cell: None, kind: WarningKind::Note, text }
     }
 
     fn cell(cell: usize, text: String) -> Warning {
@@ -77,7 +84,7 @@ pub fn to_model(scene: &Scene, panels: &Panels, held_tools: &[Tool], under: Opti
     let covered = matches!(panels.screen, Screen::InstrumentPick | Screen::TreasurePick);
     let mut m = match under.filter(|_| covered) {
         Some(board) => {
-            warn.push(Warning::read(format!("The pick covers the board: the cells are from the last board read (day {}).", board.day)));
+            warn.push(Warning::note(format!("The pick covers the board: the cells are from the last board read (day {}).", board.day)));
             board.clone()
         }
         None if covered => {
@@ -157,7 +164,7 @@ pub fn to_model(scene: &Scene, panels: &Panels, held_tools: &[Tool], under: Opti
         }
         Screen::DayBanner => {
             m.step = Step::Manage;
-            warn.push(Warning::read("This screen (the day banner) can't be solved: the board is read as the manage step.".to_string()));
+            warn.push(Warning::note("This screen (the day banner) can't be solved: the board is read as the manage step.".to_string()));
         }
         Screen::Popup => {
             m.step = Step::Patrol;
@@ -166,11 +173,11 @@ pub fn to_model(scene: &Scene, panels: &Panels, held_tools: &[Tool], under: Opti
         Screen::Theme => {
             m.step = Step::Patrol;
             let name = d.theme_name(panels.theme).unwrap_or("unknown");
-            warn.push(Warning::read(format!("The run's theme: {name}. Nothing to solve on this screen.")));
+            warn.push(Warning::note(format!("The run's theme: {name}. Nothing to solve on this screen.")));
         }
         Screen::RunEnd => {
             m.step = Step::Patrol;
-            warn.push(Warning::read("The riot screen: the run is over, nothing to solve.".to_string()));
+            warn.push(Warning::note("The riot screen: the run is over, nothing to solve.".to_string()));
         }
         Screen::Unknown => {
             m.step = Step::Patrol;
@@ -255,7 +262,7 @@ fn read_board(scene: &Scene, under: Option<&Model>, m: &mut Model, warn: &mut Ve
         };
     }
     if let Some((last, rest)) = kept.split_last() {
-        warn.push(Warning::read(match rest {
+        warn.push(Warning::note(match rest {
             [] => format!("A tooltip covers cell {last}: it is kept from the last board read."),
             _ => format!("A tooltip covers cells {} and {last}: they are kept from the last board read.", rest.join(", ")),
         }));

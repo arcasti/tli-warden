@@ -3,6 +3,7 @@
 //! Windows OCR engine (`ocr`, `panels`), and `model` joins them into a board
 //! model.
 
+pub mod click;
 pub mod instruments;
 pub mod layout;
 pub mod model;

@@ -98,6 +98,40 @@ const ZONES: [Zone; 8] = [
 const TITLE_ZONES: [Zone; 3] =
     [zone(400, 70, 1140, 105, Centre, Start), zone(1100, 190, 700, 70, Centre, Start), zone(640, 880, 320, 45, Centre, End)];
 
+/// The layout a reference point was read from: the board layout, or the
+/// title layout with [`TITLE_ZONES`] over it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Layout {
+    Board,
+    Title,
+}
+
+/// The frame pixel that reference pixel `p` is read from in `layout` on a
+/// `w` x `h` frame at interface scale `u`, as [`lay_out`] and
+/// [`lay_out_title`] sample it, and the frame px per reference px there. The
+/// zone is the last one painted over `p`.
+pub fn frame_point(p: (f32, f32), layout: Layout, w: usize, h: usize, u: f32) -> ((f32, f32), f32) {
+    if u == 1.0 && is_16_9(w, h) {
+        let (sx, sy) = (w as f32 / REF_W as f32, h as f32 / REF_H as f32);
+        return (((p.0 + 0.5) * sx - 0.5, (p.1 + 0.5) * sy - 0.5), sy);
+    }
+    let full = zone(0, 0, REF_W as i32, REF_H as i32, Centre, Centre);
+    let inside = |z: &&Zone| {
+        let r = z.rect;
+        (r.x as f32..(r.x + r.w) as f32).contains(&p.0.floor()) && (r.y as f32..(r.y + r.h) as f32).contains(&p.1.floor())
+    };
+    let titled = if layout == Layout::Title { TITLE_ZONES.iter().rev().find(inside) } else { None };
+    let z = titled.or_else(|| ZONES.iter().rev().find(inside)).unwrap_or(&full);
+    let k = h as f32 / REF_H as f32;
+    ((source(p.0, REF_W, z.x, z.at.0, u, k, w), source(p.1, REF_H, z.y, z.at.1, u, k, h)), k * u)
+}
+
+/// The source coordinate reference pixel `i` samples on one axis; see [`taps`].
+fn source(i: f32, len: usize, a: Anchor, off: f32, u: f32, k: f32, src: usize) -> f32 {
+    let (at_ref, at_src) = (a.at(len as f32) + off, a.at(src as f32 / k) + off);
+    (at_src + (i + 0.5 - at_ref) * u) * k - 0.5
+}
+
 /// Whether a `w` x `h` frame is 16:9 within 1%.
 pub fn is_16_9(w: usize, h: usize) -> bool {
     (w * 9).abs_diff(h * 16) * 100 <= h * 16
@@ -112,9 +146,8 @@ type Taps = Vec<Option<(usize, usize, u32)>>;
 /// anchor `a` moved by `off` reference px, sampled from a source axis `src`
 /// px long at `k` source px per reference px and scale `u`.
 fn taps(span: Range<usize>, len: usize, a: Anchor, off: f32, u: f32, k: f32, src: usize) -> Taps {
-    let (at_ref, at_src) = (a.at(len as f32) + off, a.at(src as f32 / k) + off);
     span.map(|i| {
-        let c = (at_src + (i as f32 + 0.5 - at_ref) * u) * k - 0.5;
+        let c = source(i as f32, len, a, off, u, k, src);
         (c > -1.0 && c < src as f32).then(|| {
             let c = c.clamp(0.0, (src - 1) as f32);
             let c0 = c as usize;
@@ -478,6 +511,57 @@ mod tests {
             assert_eq!(board.rgb(*x, *y), [255, 255, 255], "({x}, {y}) {what}");
         }
         assert_eq!(board.rgb(959, 120), [0, 0, 0], "the title point keeps to the centre on the board");
+    }
+
+    /// A reference point's frame pixel at unit scale: the identity at 1920 x
+    /// 1080 within 1.5 px, a plain scale at 2560 x 1440, and on a 3440 x 1440
+    /// ultrawide the board moved right by its centring offset while Cancel
+    /// keeps to the right edge.
+    #[test]
+    fn frame_point_at_unit_scale() {
+        let near = |a: (f32, f32), b: (f32, f32)| (a.0 - b.0).abs() < 0.01 && (a.1 - b.1).abs() < 0.01;
+        let ((x, y), s) = frame_point((959.0, 539.0), Layout::Board, 1920, 1080, 1.0);
+        assert!((x - 959.0).abs() <= 1.5 && (y - 539.0).abs() <= 1.5 && (s - 1.0).abs() < 0.01, "({x}, {y}) {s}");
+        let k = 1440.0 / REF_H as f32;
+        let (p, s) = frame_point((500.0, 300.0), Layout::Board, 2560, 1440, 1.0);
+        assert!(near(p, (500.5 * 2560.0 / REF_W as f32 - 0.5, 300.5 * k - 0.5)) && s == k, "{p:?} {s}");
+        // The 3440 px frame is 2575 reference px wide: the board sits about 328.6 px further right.
+        let ((x, _), s) = frame_point((959.0, 539.0), Layout::Board, 3440, 1440, 1.0);
+        let offset = (3440.0 / k - REF_W as f32) / 2.0;
+        assert!((offset - 328.6).abs() < 0.1 && ((x + 0.5) / k - 959.5 - offset).abs() < 0.01 && s == k, "{x} {s}");
+        let ((x, y), _) = frame_point((1724.0, 803.0), Layout::Board, 3440, 1440, 1.0);
+        assert!(((3440.0 - x - 0.5) / k - (REF_W as f32 - 1724.5)).abs() < 0.01, "{x}");
+        assert!(((y + 0.5) / k - 803.5).abs() < 0.01, "{y}");
+    }
+
+    /// For a pixel of each zone that no later zone of its layout paints
+    /// over, `frame_point` gives the source pixel `taps` samples for it.
+    #[test]
+    fn frame_point_matches_taps() {
+        let full = zone(0, 0, REF_W as i32, REF_H as i32, Centre, Centre);
+        let zones: Vec<(&Zone, Layout)> =
+            std::iter::once(&full).chain(&ZONES).map(|z| (z, Layout::Board)).chain(TITLE_ZONES.iter().map(|z| (z, Layout::Title))).collect();
+        let covers = |z: &Zone, x: i32, y: i32| (z.rect.x..z.rect.x + z.rect.w).contains(&x) && (z.rect.y..z.rect.y + z.rect.h).contains(&y);
+        for (w, h, u) in [(1920, 1084, 0.645), (3440, 1440, 0.8), (2000, 837, 1.0)] {
+            let k = h as f32 / REF_H as f32;
+            for (n, &(z, layout)) in zones.iter().enumerate() {
+                let r = z.rect;
+                let painted_over = |x: i32, y: i32| zones[n + 1..].iter().any(|&(l, at)| (at == Layout::Board || layout == Layout::Title) && covers(l, x, y));
+                let (x, y) = (r.y + 2..r.y + r.h)
+                    .step_by(5)
+                    .flat_map(|y| (r.x + 2..r.x + r.w).step_by(5).map(move |x| (x, y)))
+                    .find(|&(x, y)| !painted_over(x, y))
+                    .expect("a pixel of the zone");
+                let tap = |i: i32, len: usize, a: Anchor, off: f32, src: usize| {
+                    let (c0, _, wt) = taps(i as usize..i as usize + 1, len, a, off, u, k, src)[0].expect("inside the frame");
+                    c0 as f32 + wt as f32 / 256.0
+                };
+                let want = (tap(x, REF_W, z.x, z.at.0, w), tap(y, REF_H, z.y, z.at.1, h));
+                let (got, s) = frame_point((x as f32, y as f32), layout, w, h, u);
+                assert!((got.0 - want.0).abs() < 0.01 && (got.1 - want.1).abs() < 0.01, "{w}x{h} zone {n} at ({x}, {y}): {got:?} against {want:?}");
+                assert_eq!(s, k * u);
+            }
+        }
     }
 
     /// Near the right u, or far from it, a hint gives the full search's u.

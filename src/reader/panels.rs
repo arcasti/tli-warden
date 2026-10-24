@@ -7,6 +7,7 @@
 use super::instruments::read_held;
 use super::ocr::{Line, ocr, ocr_all};
 use super::scene::{beast_at, pick_shown};
+use super::layout::Layout;
 use super::{Rect, Rgba};
 use crate::engine::data::{Beast, Tool, data};
 
@@ -100,6 +101,22 @@ pub struct Panels {
     /// The instruments the panel icons name; None off the board screens or
     /// when an icon is unsure.
     pub held: Option<Vec<Tool>>,
+    /// What can be clicked on this screen, with the layout it was read from
+    /// and its centre on the reference frame. The board cells are not here:
+    /// see [`super::scene::portrait`].
+    pub spots: Vec<(Spot, Layout, (i32, i32))>,
+}
+
+/// Something the player clicks on a decision screen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Spot {
+    /// A destination card by the screen cell its door leads to (1 = the
+    /// Interrogation Room).
+    Door(u8),
+    /// "Consume", "Replace", "Hunt", "End", "Cancel" or "Re-roll".
+    Button(&'static str),
+    /// A pick card by its key: an instrument's, "instigate" or "bestow".
+    Card(String),
 }
 
 impl Panels {
@@ -145,6 +162,19 @@ const STATUS: (Rect, f32) = (Rect::new(1540, 115, 300, 40), 2.0);
 const RIOT: (Rect, f32) = (Rect::new(400, 95, 1120, 80), 1.0);
 /// Distance between the centres of two destination cards.
 const CARD_PITCH: i32 = 345;
+/// The middle of the destination cards' row, which spans y 750-920 with the
+/// text at y 880 (rec1-t049).
+const DOOR_Y: i32 = 835;
+/// How far above its name a decision button's icon and name centre (the
+/// names at y 880, the icons at y 810 on rec1-t055).
+const BUTTON_ABOVE: i32 = 35;
+/// The middle of the Select a Torture Instrument cards, y 187-870 with the
+/// names at about y 500 (reroll-2000x837).
+const PICK_Y: i32 = 528;
+/// The Consume target pick's round Cancel button (rec1-t057).
+const CANCEL_AT: (i32, i32) = (1724, 803);
+/// The Re-roll button under "Remaining attempts N" (reroll-2000x837).
+const REROLL_AT: (i32, i32) = (787, 959);
 
 /// Chromatic Prisoner slots in fill order: two columns, top to bottom.
 const SLOT_X: [i32; 2] = [1720, 1805];
@@ -330,8 +360,9 @@ fn door(text: &str) -> Option<u8> {
 /// Stake): lines whose centres are within half a card pitch are one card. OCR
 /// can drop "Go" or put junk before it and garble "Cell" ("eGo to Cell 11",
 /// "to celgl"), so "to" and "cel" also mark card text. A card whose text
-/// doesn't parse goes to `reread` with its centre.
-fn doors(lines: &[Line], reread: impl Fn(i32) -> Option<u8>) -> Vec<Option<u8>> {
+/// doesn't parse goes to `reread` with its centre. Each card comes with the
+/// centre of its first line.
+fn doors(lines: &[Line], reread: impl Fn(i32) -> Option<u8>) -> Vec<(Option<u8>, i32)> {
     let mut sorted: Vec<&Line> = lines
         .iter()
         .filter(|l| {
@@ -351,7 +382,8 @@ fn doors(lines: &[Line], reread: impl Fn(i32) -> Option<u8>) -> Vec<Option<u8>> 
         .into_iter()
         .map(|mut card| {
             card.sort_by_key(|l| l.rect.y);
-            door(&joined(card.iter().copied())).or_else(|| reread(card[0].rect.centre().0))
+            let x = card[0].rect.centre().0;
+            (door(&joined(card.iter().copied())).or_else(|| reread(x)), x)
         })
         .collect()
 }
@@ -368,38 +400,44 @@ fn reread(img: &Rgba, x: i32) -> Option<u8> {
     [2.5, 3.0].iter().find_map(|&scale| door(&joined(&ocr(img, rect, scale))))
 }
 
-/// The Interrogation Room's cards: both titles, Instigate left of Bestow.
-fn interrogation(lines: &[Line]) -> bool {
-    let at = |name: &str| lines.iter().find(|l| similarity(&l.text, name) >= 0.75).map(|l| l.rect.x);
-    matches!((at("Instigate"), at("Bestow")), (Some(a), Some(b)) if a < b)
+/// The Interrogation Room's cards: both titles, Instigate left of Bestow,
+/// as the centres of the two titles.
+fn interrogation(lines: &[Line]) -> Option<[(i32, i32); 2]> {
+    let at = |name: &str| lines.iter().find(|l| similarity(&l.text, name) >= 0.75).map(|l| l.rect.centre());
+    match (at("Instigate"), at("Bestow")) {
+        (Some(a), Some(b)) if a.0 < b.0 => Some([a, b]),
+        _ => None,
+    }
 }
 
-fn buttons(lines: &[Line]) -> Vec<&'static str> {
-    let mut found: Vec<(i32, &'static str)> = Vec::new();
+/// The decision buttons left to right, each with its name's centre.
+fn buttons(lines: &[Line]) -> Vec<(&'static str, (i32, i32))> {
+    let mut found: Vec<(i32, &'static str, (i32, i32))> = Vec::new();
     for l in lines {
         if let Some((i, _)) = best_match(&l.text, &["Consume", "Replace", "Hunt", "End"], 0.65) {
             let name = ["Consume", "Replace", "Hunt", "End"][i];
             if !found.iter().any(|f| f.1 == name) {
-                found.push((l.rect.x, name));
+                found.push((l.rect.x, name, l.rect.centre()));
             }
         }
     }
     found.sort_by_key(|f| f.0);
-    found.into_iter().map(|f| f.1).collect()
+    found.into_iter().map(|f| (f.1, f.2)).collect()
 }
 
-/// Card names on a pick screen: lines that match a name, left to right.
-fn offers(lines: &[Line], names: &[String]) -> Vec<usize> {
-    let mut found: Vec<(i32, usize)> = Vec::new();
+/// Card names on a pick screen: lines that match a name, left to right,
+/// each with the centre x of its line.
+fn offers(lines: &[Line], names: &[String]) -> Vec<(usize, i32)> {
+    let mut found: Vec<(i32, usize, i32)> = Vec::new();
     for l in lines {
         if let Some((i, _)) = best_match(&l.text, names, 0.75)
             && !found.iter().any(|f| f.1 == i)
         {
-            found.push((l.rect.x, i));
+            found.push((l.rect.x, i, l.rect.centre().0));
         }
     }
     found.sort_by_key(|f| f.0);
-    found.into_iter().map(|f| f.1).collect()
+    found.into_iter().map(|f| (f.1, f.2)).collect()
 }
 
 pub(crate) fn luma_stats(img: &Rgba, (cx, cy): (i32, i32), half: i32) -> (f32, f32) {
@@ -457,13 +495,21 @@ pub fn read_panels_titled(img: &Rgba, title: &Rgba) -> Panels {
         theme: None,
         objective: None,
         held: None,
+        spots: Vec::new(),
     };
     if has(&title, "Select a Torture Instrument", 0.75) {
         p.screen = Screen::InstrumentPick;
         let names: Vec<String> = d.tool_ids.iter().map(|&t| d.tool_names[t as usize].clone()).collect();
-        p.instruments = offers(&name_lines, &names).into_iter().map(|i| d.tool_ids[i]).collect();
+        for (i, x) in offers(&name_lines, &names) {
+            let tool = d.tool_ids[i];
+            p.instruments.push(tool);
+            p.spots.push((Spot::Card(tool.key().to_string()), Layout::Board, (x, PICK_Y)));
+        }
         // Read on this screen alone, so no other screen pays for the region.
         p.rerolls = rerolls(&ocr(title_img, REROLLS.0, REROLLS.1));
+        if p.rerolls > 0 {
+            p.spots.push((Spot::Button("Re-roll"), Layout::Title, REROLL_AT));
+        }
     } else if has(&title, "Warden's Treasure", 0.75) || title.iter().any(|l| squash(&l.text).contains("treasure")) {
         p.screen = Screen::TreasurePick;
     } else if has(&status, "Return to Selection", 0.75) {
@@ -471,13 +517,15 @@ pub fn read_panels_titled(img: &Rgba, title: &Rgba) -> Panels {
     } else if has(&target, "Select an Inmate to Consume", 0.75) || has(&cancel, "Cancel", 0.8) {
         p.screen = Screen::ChainTarget;
         p.decision = vec!["Cancel"];
+        p.spots.push((Spot::Button("Cancel"), Layout::Board, CANCEL_AT));
     } else if let Some(id) = theme(&theme_lines) {
         p.screen = Screen::Theme;
         p.theme = Some(id);
     } else if popup(&dialog, &incident) {
         p.screen = Screen::Popup;
     } else {
-        p.decision = buttons(&cards);
+        let found = buttons(&cards);
+        p.decision = found.iter().map(|b| b.0).collect();
         let doors = doors(&cards, |x| reread(img, x));
         if has(&heading, "Select an Objective", 0.75) {
             // Without brackets or a target glow nothing is picked: the board
@@ -485,19 +533,24 @@ pub fn read_panels_titled(img: &Rgba, title: &Rgba) -> Panels {
             if pick_shown(img) {
                 p.screen = Screen::CellPick;
             }
-        } else if interrogation(&cards) {
+        } else if let Some([instigate, bestow]) = interrogation(&cards) {
             // Its heading is "Make Your Decision", as on the manage step.
             p.screen = Screen::Interrogation;
             p.decision.clear();
+            for (key, (x, _)) in [("instigate", instigate), ("bestow", bestow)] {
+                p.spots.push((Spot::Card(key.to_string()), Layout::Board, (x, DOOR_Y)));
+            }
         } else if has(&heading, "Select a Destination", 0.75) || (!doors.is_empty() && p.days.is_some()) {
             // Door cards or decision buttons alone need the days counter:
             // text on the lobby's objective dialog or any other game screen
             // can read as one.
             p.screen = Screen::Patrol;
-            p.doors = doors;
+            p.doors = doors.iter().map(|d| d.0).collect();
+            p.spots = doors.iter().filter_map(|&(door, x)| Some((Spot::Door(door?), Layout::Board, (x, DOOR_Y)))).collect();
             p.decision.clear();
         } else if has(&heading, "Make Your Decision", 0.75) || (!p.decision.is_empty() && p.days.is_some()) {
             p.screen = Screen::Manage;
+            p.spots = found.into_iter().map(|(name, (x, y))| (Spot::Button(name), Layout::Board, (x, y - BUTTON_ABOVE))).collect();
         } else if banner.iter().any(|l| squash(&l.text).starts_with("day")) {
             p.screen = Screen::DayBanner;
         } else if has(&riot, "A Riot has broken out in Tartarus", 0.75) {
@@ -562,30 +615,34 @@ mod tests {
         assert_eq!(progress("3/2", 2), None);
     }
 
+    fn numbers(cards: Vec<(Option<u8>, i32)>) -> Vec<Option<u8>> {
+        cards.into_iter().map(|c| c.0).collect()
+    }
+
     #[test]
     fn cards_by_position() {
         let line = |text: &str, x: i32, y: i32| Line { text: text.to_string(), rect: Rect::new(x, y, 160, 30) };
         // Three cards, the room on two lines.
         let three = [line("Go to Cell 7", 535, 860), line("Go to Interrogation", 880, 845), line("Room", 920, 875), line("Go to Cell 12", 1225, 860)];
-        assert_eq!(doors(&three, |_| None), [Some(7), Some(1), Some(12)]);
+        assert_eq!(numbers(doors(&three, |_| None)), [Some(7), Some(1), Some(12)]);
         // Two cards centred between the three-card columns (Burning Stake).
         let two = [line("Go to Cell 5", 1060, 860), line("Go to Cell 2", 710, 860)];
-        assert_eq!(doors(&two, |_| None), [Some(2), Some(5)]);
+        assert_eq!(numbers(doors(&two, |_| None)), [Some(2), Some(5)]);
         // OCR of a live frame at the reader's scale: junk before "Go", 11 read as IL.
         let live = [line("so to Cell 6", 710, 869), line("eGo to Cell IL", 1057, 869)];
-        assert_eq!(doors(&live, |_| None), [Some(6), Some(11)]);
+        assert_eq!(numbers(doors(&live, |_| None)), [Some(6), Some(11)]);
         // The card under the mouse: "Go" dropped and "Cell 11" garbled; it is read again.
         let hovered = [line("to Cell 8", 588, 869), line("to celgl", 927, 869), line("Go to Cell 13", 1234, 869)];
-        assert_eq!(doors(&hovered, |x| (x == 1007).then_some(11)), [Some(8), Some(11), Some(13)]);
+        assert_eq!(numbers(doors(&hovered, |x| (x == 1007).then_some(11))), [Some(8), Some(11), Some(13)]);
     }
 
     #[test]
     fn interrogation_cards() {
         let line = |text: &str, x: i32| Line { text: text.to_string(), rect: Rect::new(x, 862, 110, 30) };
-        assert!(interrogation(&[line("Instigate", 738), line("Bestow", 1090)]));
-        assert!(interrogation(&[line("lnstigate", 738), line("Bestaw", 1090)]));
-        assert!(!interrogation(&[line("Instigate", 738)]));
-        assert!(!interrogation(&[line("Consume", 600), line("Replace", 900), line("End", 1200)]));
+        assert!(interrogation(&[line("Instigate", 738), line("Bestow", 1090)]).is_some());
+        assert!(interrogation(&[line("lnstigate", 738), line("Bestaw", 1090)]).is_some());
+        assert!(interrogation(&[line("Instigate", 738)]).is_none());
+        assert!(interrogation(&[line("Consume", 600), line("Replace", 900), line("End", 1200)]).is_none());
     }
 
     #[test]

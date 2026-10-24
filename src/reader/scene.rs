@@ -59,7 +59,9 @@ fn event_spot(cell: u8) -> (i32, i32) {
     }
 }
 
-fn portrait(cell: u8) -> (i32, i32) {
+/// The portrait centre of screen cell `cell` (1-16), where the player clicks
+/// the cell.
+pub fn portrait(cell: u8) -> (i32, i32) {
     PORTRAIT[cell as usize - 1]
 }
 

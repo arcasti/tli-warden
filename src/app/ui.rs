@@ -3,7 +3,7 @@
 //! by the Auto button or the auto read hotkey). It has three tabs. Board shows
 //! the screen's ring of cells (click a cell to correct it) with the pick and
 //! the other good picks marked on their cells, the pick written in the
-//! courtyard inside the ring, and under it every move the playouts rated.
+//! courtyard inside the ring, and under it the three moves the playouts rated best.
 //! Run holds the held instruments and the run theme, and Settings the keys
 //! and options. The window moves itself to the empty area
 //! under the game's instrument panel once, when the game is first found.
@@ -693,10 +693,7 @@ impl WardenApp {
                     ui.label(RichText::new(problem).small().color(Color32::YELLOW));
                 }
                 if let Some(missed) = &s.missed {
-                    ui.label(RichText::new(missed).small().color(Color32::YELLOW));
-                }
-                if let Some(w) = &self.watching {
-                    ui.label(RichText::new(format!("Auto read watches {w}")).small().weak());
+                    ui.label(RichText::new(missed).small().weak());
                 }
             }
             return;
@@ -750,19 +747,23 @@ impl WardenApp {
         }
     }
 
-    /// Every rated move with its mean as a bar, the advised one first in
-    /// colour.
+    /// The three best rated moves with their means as bars, the advised one
+    /// in colour and in the third row when it ranks lower. Blank rows stand
+    /// in while fewer moves are rated, so the window keeps its size.
     fn moves(&self, ui: &mut egui::Ui, advised: Option<usize>) {
+        const ROWS: usize = 3;
         let s = &self.session;
-        if s.ranking.is_empty() {
-            return;
-        }
         ui.add_space(4.0);
-        ui.small(RichText::new("Moves, in loot per run (Chromatic = 1)").weak());
+        let mut shown: Vec<usize> = (0..s.ranking.len().min(ROWS)).collect();
+        if let Some(a) = advised.filter(|&a| a >= ROWS) {
+            shown[ROWS - 1] = a;
+        }
         let near = also_good(&s.ranking, advised);
         let (min, max) = s.ranking.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), o| (lo.min(o.mean), hi.max(o.mean)));
         let spacing = ui.spacing().item_spacing.x;
-        for (k, o) in s.ranking.iter().enumerate() {
+        let blanks = shown.len()..ROWS;
+        for k in shown {
+            let o = &s.ranking[k];
             let chosen = advised == Some(k);
             let (label, number) = (RichText::new(move_name(&o.action, short(&o.label))), RichText::new(format!("{:.2}", o.mean)));
             let (bar, label, number) = if chosen {
@@ -784,8 +785,14 @@ impl WardenApp {
                 let fill = Rect::from_min_size(rect.min, Vec2::new((64.0 * share).max(4.0), 6.0));
                 ui.painter().rect_filled(fill, 3.0, bar);
                 ui.allocate_ui_with_layout(Vec2::new(30.0, h), Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(number);
+                    ui.label(number).on_hover_text("Loot per run: a Chromatic counts 1, an Ultimate 0.2, a Legendary 0.05");
                 });
+            });
+        }
+        for row in blanks {
+            let blank = if row == 0 { RichText::new(" ").size(15.0) } else { RichText::new(" ") };
+            ui.horizontal(|ui| {
+                ui.add_sized([14.0, ui.spacing().interact_size.y], egui::Label::new(blank));
             });
         }
     }

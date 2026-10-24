@@ -107,14 +107,11 @@ fn run_start(screen: Screen, under: Option<&Model>) -> bool {
 /// is not the count in use.
 fn kept_days(read: Option<u32>, left: Option<u32>) -> Option<Warning> {
     let left = left.filter(|&n| read != Some(n))?;
-    Some(match read {
-        Some(r) => Warning {
-            cell: None,
-            kind: WarningKind::Read,
-            text: format!("The days counter read {r}, more than the last count: {left} day(s) until Riot kept until {r} reads again."),
-        },
-        None => Warning { cell: None, kind: WarningKind::Note, text: format!("The days counter is hidden: {left} day(s) until Riot kept from the last read.") },
-    })
+    let (kind, text) = match read {
+        Some(r) => (WarningKind::Read, format!("The days counter read {r}, more than the last count: {left} day(s) until Riot kept until {r} reads again.")),
+        None => (WarningKind::Note, format!("The days counter is hidden: {left} day(s) until Riot kept from the last read.")),
+    };
+    Some(Warning { cell: None, kind, text })
 }
 
 /// The board under a treasure pick after a consume, and the eater's model
@@ -1291,7 +1288,7 @@ impl Session {
         if panels.screen != Screen::ChainTarget && !assumed_days {
             warnings.extend(kept_days(self.days_read, panels.days));
         }
-        warnings.extend(self.notes.iter().map(|text| Warning { cell: None, kind: WarningKind::Note, text: text.clone() }));
+        warnings.extend(self.notes.iter().map(|text| Warning::note(text.clone())));
         for (&cell, edit) in &self.edits {
             let n = cell as usize - 1;
             // A correction keeps the cell's incident marker and Tusk.

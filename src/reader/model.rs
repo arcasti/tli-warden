@@ -55,7 +55,7 @@ impl Warning {
         Warning { cell: None, kind: WarningKind::Read, text }
     }
 
-    fn note(text: String) -> Warning {
+    pub(crate) fn note(text: String) -> Warning {
         Warning { cell: None, kind: WarningKind::Note, text }
     }
 

@@ -715,7 +715,7 @@ impl WardenApp {
                 WarningKind::HeldToolsUnknown => {
                     format!("The {} panel shows icons the reader can't name: add them in the Run tab.", data().instrument_name)
                 }
-                WarningKind::Read | WarningKind::Note => w.text.clone(),
+                _ => w.text.clone(),
             };
             ui.label(RichText::new(text).small().color(Color32::YELLOW));
         }

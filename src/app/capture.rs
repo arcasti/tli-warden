@@ -24,7 +24,7 @@ use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAtt
 use windows::Win32::Graphics::Dxgi::IDXGIDevice;
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC,
-    DeleteObject, GetDC, GetDIBits, ReleaseDC, SRCCOPY, SelectObject,
+    DeleteObject, GetDC, GetDIBits, MONITOR_DEFAULTTONULL, MonitorFromPoint, ReleaseDC, SRCCOPY, SelectObject,
 };
 use windows::Win32::System::Threading::{
     GetCurrentProcessId, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
@@ -178,6 +178,12 @@ pub fn game_rect(title: &str) -> Result<[i32; 4], String> {
     let hwnd = find_window(title)?;
     let r = dpi_aware(|| client_rect(hwnd))?;
     Ok([r.left, r.top, r.right - r.left, r.bottom - r.top])
+}
+
+/// Whether a point in physical screen pixels is on a monitor.
+pub fn on_screen(x: i32, y: i32) -> bool {
+    // SAFETY: a plain Win32 call on a point.
+    dpi_aware(|| unsafe { !MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONULL).is_invalid() })
 }
 
 fn capture_window(hwnd: HWND) -> Result<Rgba, String> {

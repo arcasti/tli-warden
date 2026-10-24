@@ -1,9 +1,9 @@
 //! The window: reads on the read hotkey, the Read button, a saved screenshot
 //! or by itself when the game's screen changes (auto read, turned on and off
-//! by the Auto button or the auto read hotkey). It has four tabs. Board shows
+//! by the Auto button or the auto read hotkey). It has three tabs. Board shows
 //! the screen's ring of cells (click a cell to correct it) with the pick and
-//! the other good picks marked on their cells, and the pick written in the
-//! courtyard inside the ring. Moves lists every move the playouts rated.
+//! the other good picks marked on their cells, the pick written in the
+//! courtyard inside the ring, and under it every move the playouts rated.
 //! Run holds the held instruments and the run theme, and Settings the keys
 //! and options. The window moves itself to the empty area
 //! under the game's instrument panel once, when the game is first found.
@@ -11,7 +11,7 @@
 //! asks once whether to share run logs, and offers to update once installed,
 //! when GitHub has a newer release.
 
-use super::capture::{Event, Watcher, capture, game_rect};
+use super::capture::{Event, Watcher, capture, game_rect, on_screen};
 use super::hotkey::{Hotkey, parse};
 use super::session::{CellEdit, Session};
 use crate::solver::advise::also_good;
@@ -27,7 +27,6 @@ use crate::engine::{Action, ChoiceId};
 use crate::reader::load_png;
 use crate::reader::model::WarningKind;
 use crate::reader::ocr;
-use crate::reader::panels::Screen;
 use eframe::egui::{self, Align, Align2, Color32, FontId, Layout, Pos2, Rect, RichText, Sense, Shape, Stroke, StrokeKind, Vec2};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -43,14 +42,14 @@ const LEADER: Color32 = Color32::from_rgb(110, 200, 120);
 const DARK_GREEN: Color32 = Color32::from_rgb(44, 74, 51);
 const PALE_GREEN: Color32 = Color32::from_rgb(191, 232, 197);
 /// The top left of the empty area under the game's Objective and instrument
-/// panels, in a 1920x1080 client area.
-const PLACE: (f32, f32) = (15.0, 470.0);
+/// panels, in a 1920x1080 client area, low enough to leave room for the
+/// instruments' tooltips.
+const PLACE: (f32, f32) = (15.0, 560.0);
 
 /// The window's tabs.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Board,
-    Moves,
     Run,
     Settings,
 }
@@ -117,9 +116,15 @@ pub struct WardenApp {
     watching: Option<String>,
     /// Why Windows OCR can't read the game (no English OCR language).
     ocr_problem: Option<String>,
-    /// The window was moved to the game once, or placement is off; it is
-    /// never moved again, so a window the player drags stays put.
+    /// The window was moved to its saved place or to the game once, or the
+    /// player moved it first; it is never moved again, so a window the
+    /// player drags stays put.
     placed: bool,
+    /// Where `place` put the window, in physical pixels.
+    placed_at: Option<[i32; 2]>,
+    /// The window's outer top left last frame, in physical pixels, to tell
+    /// the player's move.
+    last_pos: Option<[i32; 2]>,
     /// The window height the player last left it at; the Board tab grows
     /// the window past it to fit and shrinks back to it.
     chosen_height: f32,
@@ -178,6 +183,8 @@ impl WardenApp {
             watching: None,
             ocr_problem: ocr::problem(),
             placed: false,
+            placed_at: None,
+            last_pos: None,
             chosen_height: 0.0,
             fitted_height: None,
             last_height: 0.0,
@@ -331,21 +338,50 @@ impl WardenApp {
         }
     }
 
-    /// Moves the window to the top left of the empty area under the game's
+    /// Moves the window where the player last left it while that is on a
+    /// monitor, or else to the top left of the empty area under the game's
     /// instrument panel the first time the game window is found.
     fn place(&mut self, ctx: &egui::Context) {
-        if self.placed || !self.settings.auto_place {
+        if self.placed {
             return;
         }
-        let Ok([left, top, width, height]) = game_rect(&self.settings.window_title) else {
-            ctx.request_repaint_after(Duration::from_secs(1));
-            return;
+        // A point in the title bar: the outer top left of a window against a
+        // screen edge sits off screen, in the invisible resize border.
+        let at = match self.settings.window_pos.filter(|&[x, y]| on_screen(x + 20, y + 20)) {
+            Some(at) => at,
+            None if !self.settings.auto_place => return,
+            None => {
+                let Ok([left, top, width, height]) = game_rect(&self.settings.window_title) else {
+                    ctx.request_repaint_after(Duration::from_secs(1));
+                    return;
+                };
+                let (x, y) = PLACE;
+                [left + (x * width as f32 / 1920.0) as i32, top + (y * height as f32 / 1080.0) as i32]
+            }
         };
-        let (x, y) = PLACE;
-        let at = Pos2::new(left as f32 + x * width as f32 / 1920.0, top as f32 + y * height as f32 / 1080.0);
         let ppp = ctx.input(|i| i.viewport().native_pixels_per_point.unwrap_or(i.pixels_per_point));
-        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(at / ppp));
-        self.placed = true;
+        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(Pos2::new(at[0] as f32, at[1] as f32) / ppp));
+        (self.placed, self.placed_at) = (true, Some(at));
+    }
+
+    /// Saves where the player moves the window: any move but the window
+    /// arriving where `place` put it. A window moved before the game is
+    /// found is not placed after.
+    fn remember_position(&mut self, ctx: &egui::Context) {
+        let (rect, minimized, ppp) = ctx.input(|i| {
+            let v = i.viewport();
+            (v.outer_rect, v.minimized, v.native_pixels_per_point.unwrap_or(i.pixels_per_point))
+        });
+        let Some(rect) = rect.filter(|_| minimized != Some(true)) else { return };
+        let at = [(rect.min.x * ppp).round() as i32, (rect.min.y * ppp).round() as i32];
+        let near = |a: [i32; 2], b: [i32; 2]| (a[0] - b[0]).abs() <= 2 && (a[1] - b[1]).abs() <= 2;
+        let moved = self.last_pos.is_some_and(|l| !near(l, at)) && self.placed_at.is_none_or(|p| !near(p, at));
+        self.last_pos = Some(at);
+        if moved {
+            self.placed = true;
+            self.settings.window_pos = Some(at);
+            self.save();
+        }
     }
 
     fn set_tools(&mut self, tools: Vec<Tool>) {
@@ -520,6 +556,7 @@ impl eframe::App for WardenApp {
     /// the game covers the window but still calls this on a repaint request.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.place(ctx);
+        self.remember_position(ctx);
         self.poll_update(ctx);
         if self.keys[Which::Read as usize].pressed.swap(false, Ordering::SeqCst) {
             self.read_now();
@@ -585,7 +622,6 @@ impl eframe::App for WardenApp {
             }
             let out = egui::ScrollArea::vertical().show(ui, |ui| match self.tab {
                 Tab::Board => self.board_tab(ui),
-                Tab::Moves => self.moves_tab(ui),
                 Tab::Run => self.instruments(ui),
                 Tab::Settings => self.settings_section(ui),
             });
@@ -610,7 +646,6 @@ impl WardenApp {
             } else {
                 ui.selectable_value(&mut self.tab, Tab::Board, "Board");
             }
-            ui.selectable_value(&mut self.tab, Tab::Moves, "Moves");
             ui.selectable_value(&mut self.tab, Tab::Run, "Run");
             if sliders_tab(ui, self.tab == Tab::Settings).on_hover_text("Settings").clicked() {
                 self.tab = Tab::Settings;
@@ -676,11 +711,17 @@ impl WardenApp {
             near: near.into_iter().filter_map(|k| action_cell(&s.ranking[k].action, warden)).filter(|&c| Some(c) != pick).collect(),
         };
         let kept = reading.kept_lines();
-        for line in &kept {
-            ui.label(RichText::new(*line).small().color(Color32::YELLOW));
-        }
         for p in &s.problems {
             ui.label(RichText::new(p).small().color(Color32::LIGHT_RED));
+        }
+        for w in reading.warnings.iter().filter(|w| w.cell.is_none()) {
+            let text = match w.kind {
+                WarningKind::HeldToolsUnknown => {
+                    format!("The {} panel shows icons the reader can't name: add them in the Run tab.", data().instrument_name)
+                }
+                WarningKind::Read => w.text.clone(),
+            };
+            ui.label(RichText::new(text).small().color(Color32::YELLOW));
         }
         let warned: Vec<(usize, &str)> = reading.warnings.iter().filter_map(|w| Some((w.cell?, w.text.as_str()))).collect();
         let (clicked, court) = board(ui, &reading.model, &warned, &marks);
@@ -704,51 +745,27 @@ impl WardenApp {
             ui.interact(court, egui::Id::unique("warden-courtyard"), Sense::hover()).on_hover_text(format!("{}\n{}", a.label, a.why));
             ui.add(egui::Label::new(RichText::new(s.why_shown(a)).small().weak()).wrap());
         }
+        self.moves(ui, advice.as_ref().and_then(|a| a.option));
         if clicked.is_some() {
             self.editing = clicked;
         }
     }
 
-    /// The problems and the warnings of no cell, then every rated move with
-    /// its mean as a bar; the advised one with why.
-    fn moves_tab(&mut self, ui: &mut egui::Ui) {
+    /// Every rated move with its mean as a bar, the advised one first in
+    /// colour.
+    fn moves(&self, ui: &mut egui::Ui, advised: Option<usize>) {
         let s = &self.session;
-        ui.horizontal(|ui| {
-            if let Some(r) = &s.reading {
-                ui.small(RichText::new(format!("{} \u{b7} {}", riot(r.model.day, r.days_left), screen_name(r.screen))).weak());
-            }
-            if s.solving {
-                ui.spinner();
-            }
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.small(RichText::new("Loot per run (Chromatic = 1)").weak());
-            });
-        });
-        for p in &s.problems {
-            ui.label(RichText::new(p).small().color(Color32::LIGHT_RED));
-        }
-        for w in s.reading.iter().flat_map(|r| &r.warnings).filter(|w| w.cell.is_none()) {
-            let text = match w.kind {
-                WarningKind::HeldToolsUnknown => {
-                    format!("The {} panel shows icons the reader can't name: add them in the Run tab.", data().instrument_name)
-                }
-                WarningKind::Read => w.text.clone(),
-            };
-            ui.label(RichText::new(text).small().color(Color32::YELLOW));
-        }
         if s.ranking.is_empty() {
-            ui.label(if s.solving { "Solving..." } else { "No moves yet." });
             return;
         }
-        let advice = s.advice();
-        let why = advice.as_ref().map(|a| s.why_shown(a));
-        let advised = advice.as_ref().and_then(|a| a.option);
+        ui.add_space(4.0);
+        ui.small(RichText::new("Moves, in loot per run (Chromatic = 1)").weak());
         let near = also_good(&s.ranking, advised);
         let (min, max) = s.ranking.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), o| (lo.min(o.mean), hi.max(o.mean)));
         let spacing = ui.spacing().item_spacing.x;
         for (k, o) in s.ranking.iter().enumerate() {
             let chosen = advised == Some(k);
-            let (label, number) = (RichText::new(move_name(&o.action, &o.label)), RichText::new(format!("{:.2}", o.mean)));
+            let (label, number) = (RichText::new(move_name(&o.action, short(&o.label))), RichText::new(format!("{:.2}", o.mean)));
             let (bar, label, number) = if chosen {
                 (LEADER, label.strong().size(15.0).color(LEADER), number.color(LEADER))
             } else {
@@ -761,7 +778,7 @@ impl WardenApp {
                 let width = (ui.available_width() - 64.0 - 30.0 - 2.0 * spacing).max(20.0);
                 ui.allocate_ui_with_layout(Vec2::new(width, h), Layout::left_to_right(Align::Center), |ui| {
                     ui.set_min_width(width);
-                    ui.add(egui::Label::new(label).truncate());
+                    ui.add(egui::Label::new(label).truncate()).on_hover_text(&o.label);
                 });
                 let share = if max > min { ((o.mean - min) / (max - min)) as f32 } else { 1.0 };
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(64.0, 6.0), Sense::hover());
@@ -771,14 +788,6 @@ impl WardenApp {
                     ui.label(number);
                 });
             });
-            if chosen && let Some(why) = &why {
-                ui.horizontal(|ui| {
-                    ui.add_space(14.0);
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(why).small().weak());
-                    });
-                });
-            }
         }
     }
 
@@ -859,9 +868,12 @@ impl WardenApp {
             ui.end_row();
         });
         let mut place = self.settings.auto_place;
-        let hover = "Move this window under the game's instrument panel when the game is first found";
+        let hover = "Move this window under the game's instrument panel when the game is first found, until you move it yourself; Warden then opens where you left it. Turning this on forgets that place";
         if ui.checkbox(&mut place, "Place by the game panels").on_hover_text(hover).changed() {
             self.settings.auto_place = place;
+            if place {
+                self.settings.window_pos = None;
+            }
             self.save();
         }
         let mut open = false;
@@ -981,25 +993,6 @@ fn riot(day: i64, days_left: Option<u32>) -> String {
     match days_left {
         Some(n) => format!("Day {day} \u{b7} {n} to Riot"),
         None => format!("Day {day} \u{b7} Riot not read"),
-    }
-}
-
-/// The screen the reading shows, as the Moves tab names it.
-fn screen_name(screen: Screen) -> &'static str {
-    match screen {
-        Screen::Patrol => "patrol",
-        Screen::Manage => "manage",
-        Screen::ChainTarget => "Consume target pick",
-        Screen::InstrumentPick => "instrument pick",
-        Screen::TreasurePick => "treasure pick",
-        Screen::PrisonStatus => "prison status",
-        Screen::Interrogation => "Interrogation Room",
-        Screen::CellPick => "Sewer Ratway cell pick",
-        Screen::DayBanner => "day banner",
-        Screen::Theme => "run theme",
-        Screen::Popup => "popup",
-        Screen::RunEnd => "run over",
-        Screen::Unknown => "no decision on screen",
     }
 }
 

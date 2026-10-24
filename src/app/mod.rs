@@ -43,7 +43,7 @@ pub fn run(preload: Option<&std::path::Path>) -> Result<(), String> {
         viewport: egui::ViewportBuilder::default()
             .with_title("Warden")
             .with_icon(eframe::icon_data::from_png_bytes(include_bytes!("../../assets/icon.png")).expect("assets/icon.png is a PNG"))
-            .with_inner_size([296.0, 210.0])
+            .with_inner_size([296.0, 300.0])
             .with_always_on_top()
             .with_resizable(true),
         ..Default::default()

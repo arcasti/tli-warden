@@ -26,6 +26,10 @@ pub struct Settings {
     /// Move the window over the empty area under the game's instrument panel
     /// when the game is first found.
     pub auto_place: bool,
+    /// Where the player last moved the window: its outer top left in
+    /// physical screen pixels. Used instead of `auto_place` while it is on a
+    /// monitor; None until the player moves the window.
+    pub window_pos: Option<[i32; 2]>,
     /// Keep a log of each run's reads, advice and corrections, with the
     /// frames read, in %APPDATA%\warden\runs (the newest 10 runs), see
     /// [`super::runlog`].
@@ -61,6 +65,7 @@ impl Default for Settings {
             theme: None,
             auto_read: true,
             auto_place: true,
+            window_pos: None,
             run_log: true,
             check_updates: true,
             offer_install: true,

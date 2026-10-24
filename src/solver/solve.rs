@@ -312,7 +312,7 @@ impl<'a> Rollouts<'a> {
     /// priority.
     pub fn run_on(&mut self, rounds: usize, threads: usize) -> usize {
         let mut ran = 0;
-        while ran < rounds && self.live.iter().filter(|&&on| on).count() >= 2 {
+        while ran < rounds && self.running().len() >= 2 {
             // A call stops at each racing checkpoint on its way.
             let checkpoint = RACE_FROM.max((self.rounds / RACE_EVERY + 1) * RACE_EVERY);
             let step = (rounds - ran).min(checkpoint - self.rounds);
@@ -325,11 +325,16 @@ impl<'a> Rollouts<'a> {
         ran
     }
 
+    /// The indices of the candidates still playing rounds.
+    fn running(&self) -> Vec<usize> {
+        (0..self.list.len()).filter(|&k| self.live[k]).collect()
+    }
+
     /// Drops the running candidates that trail the leader by more than
     /// [`RACE_Z`] paired standard errors.
     fn race(&mut self) {
         let means: Vec<f64> = self.vals.iter().map(|v| stats(v).1).collect();
-        let live: Vec<usize> = (0..self.list.len()).filter(|&k| self.live[k]).collect();
+        let live = self.running();
         let lead = live.iter().copied().fold(live[0], |lead, k| if means[k] > means[lead] { k } else { lead });
         for k in live {
             if k != lead && means[lead] - means[k] > RACE_Z * paired_se(&self.vals[lead], &self.vals[k]) {
@@ -342,7 +347,7 @@ impl<'a> Rollouts<'a> {
     /// threads.
     fn play(&mut self, rounds: usize, threads: usize) {
         let seeds: Vec<u32> = (0..rounds).map(|_| (self.random.roll() * 4294967296.0) as u32).collect();
-        let threads = threads.clamp(1, rounds.max(1));
+        let threads = threads.clamp(1, rounds);
         let results: Vec<Vec<(f64, f64)>> = if threads == 1 {
             seeds.iter().map(|&seed| self.round(seed)).collect()
         } else {
@@ -373,7 +378,7 @@ impl<'a> Rollouts<'a> {
             });
             results.into_iter().map(|r| r.expect("every round ran")).collect()
         };
-        let live: Vec<usize> = (0..self.list.len()).filter(|&k| self.live[k]).collect();
+        let live = self.running();
         for round in results {
             for (&k, (val, best)) in live.iter().zip(round) {
                 self.vals[k].push(val);
@@ -410,21 +415,14 @@ impl<'a> Rollouts<'a> {
     /// running first, so the first row has played every round.
     pub fn ranking(&self) -> Vec<SolveOption> {
         let (list, vals, best, live) = (&self.list, &self.vals, &self.best, &self.live);
-        let mut ranked: Vec<(usize, f64, f64, usize)> = vals
-            .iter()
-            .enumerate()
-            .map(|(k, v)| {
-                let (n, mean, se) = stats(v);
-                (k, mean, se, n)
-            })
-            .collect();
+        let mut ranked: Vec<(usize, (usize, f64, f64))> = vals.iter().map(|v| stats(v)).enumerate().collect();
         ranked.sort_by(|a, b| {
-            live[b.0].cmp(&live[a.0]).then(b.1.partial_cmp(&a.1).unwrap_or(Equal)).then(best[b.0].partial_cmp(&best[a.0]).unwrap_or(Equal))
+            live[b.0].cmp(&live[a.0]).then(b.1.1.partial_cmp(&a.1.1).unwrap_or(Equal)).then(best[b.0].partial_cmp(&best[a.0]).unwrap_or(Equal))
         });
         let top = ranked.first().map_or(0, |r| r.0);
         ranked
             .into_iter()
-            .map(|(k, mean, se, n)| SolveOption {
+            .map(|(k, (n, mean, se))| SolveOption {
                 label: list[k].label.clone(),
                 action: list[k].action.clone(),
                 mean,

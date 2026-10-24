@@ -8,7 +8,6 @@
 
 use serde_json::{Value, json};
 use std::time::Instant;
-use warden::board::{Model, build_state};
 use warden::engine::State;
 use warden::solver::TUNED;
 use warden::solver::solve::{Rollouts, SolveOption, candidates, instant, solve};
@@ -104,8 +103,7 @@ fn point_diff(now: &Value, was: &Value) -> Option<String> {
 /// moves stop before the leader.
 #[test]
 fn races_the_same_in_any_steps() {
-    let model: Model = serde_json::from_str(&std::fs::read_to_string("tests/boards/patrol.json").unwrap()).unwrap();
-    let (st, problems) = build_state(&model, 1);
+    let (st, problems) = common::build("patrol.json");
     assert!(problems.is_empty(), "{problems:?}");
     let mut whole = Rollouts::new(&st, 1, &TUNED);
     whole.run(1600);

@@ -8,9 +8,10 @@
 
 use serde_json::{Value, json};
 use std::time::Instant;
+use warden::board::{Model, build_state};
 use warden::engine::State;
 use warden::solver::TUNED;
-use warden::solver::solve::{SolveOption, candidates, instant, solve};
+use warden::solver::solve::{Rollouts, SolveOption, candidates, instant, solve};
 
 mod common;
 
@@ -96,6 +97,25 @@ fn point_diff(now: &Value, was: &Value) -> Option<String> {
     }
     let (o, w) = a.iter().zip(b).find(|(o, w)| !same_option(o, w))?;
     Some(format!("option: now {o} / recorded {w}"))
+}
+
+/// Racing stops moves at fixed round counts, so 1600 rounds in one call and
+/// in steps of 50 on 3 threads rank the same, and the patrol board's trailing
+/// moves stop before the leader.
+#[test]
+fn races_the_same_in_any_steps() {
+    let model: Model = serde_json::from_str(&std::fs::read_to_string("tests/boards/patrol.json").unwrap()).unwrap();
+    let (st, problems) = build_state(&model, 1);
+    assert!(problems.is_empty(), "{problems:?}");
+    let mut whole = Rollouts::new(&st, 1, &TUNED);
+    whole.run(1600);
+    let mut steps = Rollouts::new(&st, 1, &TUNED);
+    while steps.run_on(50, 3) > 0 {}
+    assert_eq!(whole.ranking(), steps.ranking());
+    let ranking = whole.ranking();
+    assert!(whole.rounds() < 1600, "the solve ended early, with one move left");
+    assert_eq!(ranking[0].n, whole.rounds());
+    assert!(ranking.last().unwrap().n < ranking[0].n);
 }
 
 #[test]

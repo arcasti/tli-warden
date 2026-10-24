@@ -5,7 +5,7 @@
 use crate::board::{CellModel, ChoiceKind, EventMark, Model, Step, build_state};
 use crate::engine::data::{Beast, Gift, IRON_LAW, RAINBOW, Tool, VAULT_CAP, data};
 use crate::engine::rules::treasure_picks;
-use crate::engine::text::{cell_label, tier_name, tool_name};
+use crate::engine::text::{cell_label, cell_list, tier_name, tool_name};
 use crate::reader::model::{RUN_DAYS, Warning, WarningKind, iron_law_days, to_model};
 use crate::reader::panels::{Panels, Screen, read_panels_titled};
 use crate::reader::scene::{CELLS, Scene, read_scene};
@@ -227,14 +227,7 @@ pub fn consume_targets(options: &[usize], jawed: &[usize], eater: usize) -> (Vec
     if jawed.is_empty() || (jawed.len() == options.len() && options.iter().all(|n| jawed.contains(n))) {
         return (options.to_vec(), None);
     }
-    let cells = |list: &[usize]| {
-        let labels: Vec<String> = list.iter().map(|&n| cell_label(n)).collect();
-        match &labels[..] {
-            [] => "none".to_string(),
-            [one] => format!("cell {one}"),
-            [rest @ .., last] => format!("cells {} and {last}", rest.join(", ")),
-        }
-    };
+    let cells = |list: &[usize]| cell_list(&list.iter().map(|&n| cell_label(n)).collect::<Vec<_>>());
     let text = format!(
         "{TARGETS_DIFFER}{} and the board read allows {}: check the eater in cell {} and those cells.",
         cells(jawed),

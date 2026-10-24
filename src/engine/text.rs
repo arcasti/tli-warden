@@ -23,6 +23,15 @@ pub fn cell_label(n: usize) -> String {
     format!("{:02}", n + 1)
 }
 
+/// "cell 04", "cells 04 and 08", "cells 04, 08 and 14", or "none".
+pub fn cell_list(labels: &[String]) -> String {
+    match labels {
+        [] => "none".to_string(),
+        [one] => format!("cell {one}"),
+        [rest @ .., last] => format!("cells {} and {last}", rest.join(", ")),
+    }
+}
+
 pub fn describe(inmate: &Inmate) -> String {
     format!("{} {}", tier_name(inmate.tier), data().beast_names[inmate.beast.index()])
 }

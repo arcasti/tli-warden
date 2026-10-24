@@ -8,7 +8,7 @@ use warden::engine::data::{Beast, data};
 use warden::engine::state::Pending;
 use warden::solver::TUNED;
 use warden::solver::solve::solve;
-use warden::reader::model::{RUN_DAYS, TIER_CONF, to_model};
+use warden::reader::model::{RUN_DAYS, TIER_CONF, Warning, to_model};
 use warden::reader::panels::{Screen, read_panels};
 use warden::reader::scene::{CELLS, FrameTruth, Scene, build_templates, load_labeled, read_scene, read_scene_with};
 use warden::reader::{Rgba, load_png, read_model};
@@ -333,6 +333,7 @@ fn glowless_portraits_keep_rarity() {
             _ => -1,
         })
     };
+    let flagged = |warnings: &[Warning]| -> Vec<usize> { warnings.iter().filter(|w| w.text.contains("shows no rarity glow")).filter_map(|w| w.cell).collect() };
     let (board, _) = read(&before, None);
     assert_eq!(tiers(&board), [2, 0, 0, -1, 3, 1]);
 
@@ -340,13 +341,11 @@ fn glowless_portraits_keep_rarity() {
     assert_eq!(tiers(&m), [2, 0, 0, 0, 3, 1]);
     let texts: Vec<&str> = warnings.iter().map(|w| w.text.as_str()).collect();
     assert!(texts.iter().any(|t| t.starts_with("The portraits in cells 04, 05, 06, 08 and 14 show no rarity glow")), "{texts:?}");
-    let flagged: Vec<usize> = warnings.iter().filter(|w| w.text.contains("shows no rarity glow")).filter_map(|w| w.cell).collect();
-    assert_eq!(flagged, [6], "only the Lion new in 7 has no rarity to keep");
+    assert_eq!(flagged(&warnings), [6], "only the Lion new in 7 has no rarity to keep");
 
     let (m, warnings) = read(&after, None);
     assert_eq!(tiers(&m), [0; 6]);
-    let flagged: Vec<usize> = warnings.iter().filter(|w| w.text.contains("shows no rarity glow")).filter_map(|w| w.cell).collect();
-    assert_eq!(flagged, [3, 4, 5, 6, 7, 13]);
+    assert_eq!(flagged(&warnings), [3, 4, 5, 6, 7, 13]);
 }
 
 /// rec4-t412: the Raging Beast's Agonizing Muzzle tooltip over the left

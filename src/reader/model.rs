@@ -9,7 +9,7 @@ use crate::board::{CellModel, ChoiceKind, EventMark, Model, ObjectiveModel, Prey
 use crate::engine::data::{Beast, IRON_LAW, Tool, data};
 use crate::engine::devour::eats;
 use crate::engine::state::Params;
-use crate::engine::text::{cell_label, tier_name};
+use crate::engine::text::{cell_label, cell_list, tier_name};
 
 /// Length of an S16 run: the counter starts at 20 days until Riot, except
 /// under the Iron Law theme, which extends the run (see [`iron_law_days`]).
@@ -210,15 +210,6 @@ pub fn to_model(scene: &Scene, panels: &Panels, held_tools: &[Tool], under: Opti
 }
 
 /// The cells and the warden from the board scene.
-/// "cell 4", "cells 4 and 8" or "cells 4, 8 and 14".
-fn cell_list(cells: &[String]) -> String {
-    match cells {
-        [one] => format!("cell {one}"),
-        [rest @ .., last] => format!("cells {} and {last}", rest.join(", ")),
-        [] => String::new(),
-    }
-}
-
 fn read_board(scene: &Scene, under: Option<&Model>, m: &mut Model, warn: &mut Vec<Warning>) {
     let d = data();
     let mut kept = Vec::new();

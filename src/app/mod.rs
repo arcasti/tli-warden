@@ -9,7 +9,7 @@ pub mod share;
 #[cfg(windows)]
 pub mod capture;
 #[cfg(windows)]
-pub mod ring;
+pub mod mark;
 #[cfg(windows)]
 pub mod hotkey;
 #[cfg(windows)]

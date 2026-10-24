@@ -12,7 +12,7 @@
 //! when GitHub has a newer release.
 
 use super::capture::{Event, Watcher, capture, game_in_front, game_rect, on_screen};
-use super::ring::{self, Ring};
+use super::mark::{self, Mark};
 use super::hotkey::{Hotkey, parse};
 use super::session::{CellEdit, Session};
 use crate::solver::advise::also_good;
@@ -157,9 +157,9 @@ pub struct WardenApp {
     /// The run log's folder last seen: a change means the run before it is
     /// finished, so it is sent.
     log_dir: Option<PathBuf>,
-    /// The ring around what to click on the game, made when first shown.
-    ring: Option<Ring>,
-    /// The read the player clicked in the game after: no ring until a newer one.
+    /// The mark on what to click on the game, made when first shown.
+    mark: Option<Mark>,
+    /// The read the player clicked in the game after: no mark until a newer one.
     clicked: Option<SystemTime>,
 }
 
@@ -207,7 +207,7 @@ impl WardenApp {
             }),
             upload_error: None,
             log_dir: None,
-            ring: None,
+            mark: None,
             clicked: None,
         };
         if app.current.is_some() && app.settings.check_updates {
@@ -240,52 +240,52 @@ impl WardenApp {
         })
     }
 
-    /// Shows the ring around what to click on the game while the setting is
-    /// on and [`WardenApp::ring_spot`] gives one; hides it otherwise. Looks
-    /// again every 50 ms while the session has a ring, shown or not, so a
+    /// Shows the mark on what to click on the game while the setting is on
+    /// and [`WardenApp::mark_spot`] gives one; hides it otherwise. Looks
+    /// again every 50 ms while the session has a mark, shown or not, so a
     /// window move, a click or the game coming back in front is seen.
     fn highlight(&mut self, ctx: &egui::Context) {
-        let spot = self.settings.highlight.then(|| self.session.ring()).flatten();
+        let spot = self.settings.highlight.then(|| self.session.mark()).flatten();
         if spot.is_some() {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
-        match spot.and_then(|spot| self.ring_spot(spot)) {
-            Some((x, y, r, stroke)) => {
-                if self.ring.is_none() {
-                    self.ring = Ring::new();
+        match spot.and_then(|spot| self.mark_spot(spot)) {
+            Some((x, y, half_w, half_h, unit)) => {
+                if self.mark.is_none() {
+                    self.mark = Mark::new();
                 }
-                if let Some(ring) = &mut self.ring {
-                    ring.show(x, y, r, stroke);
+                if let Some(mark) = &mut self.mark {
+                    mark.show(x, y, half_w, half_h, unit);
                 }
             }
             None => {
-                if let Some(ring) = &mut self.ring {
-                    ring.hide();
+                if let Some(mark) = &mut self.mark {
+                    mark.hide();
                 }
             }
         }
     }
 
-    /// The ring in physical screen px (centre, radius, stroke): the
-    /// session's `(x, y, r)` (see [`Session::ring`]) while the game or this
-    /// window is in front and the player has not clicked in the game since
-    /// the read.
-    fn ring_spot(&mut self, (x, y, r): (f32, f32, f32)) -> Option<(f32, f32, f32, f32)> {
+    /// The mark in physical screen px (centre, half width, half height, and
+    /// screen px per reference px): the session's `(x, y, half_w, half_h)`
+    /// (see [`Session::mark`]) while the game or this window is in front and
+    /// the player has not clicked in the game since the read.
+    fn mark_spot(&mut self, (x, y, half_w, half_h): (f32, f32, f32, f32)) -> Option<(f32, f32, f32, f32, f32)> {
         let at = self.session.reading.as_ref()?.at;
         let title = &self.settings.window_title;
         if self.clicked == Some(at) || !game_in_front(title) {
             return None;
         }
         let rect @ [left, top, _, height] = game_rect(title).ok()?;
-        // Clicks while no ring showed are not clicks on it.
-        if !self.ring.as_ref().is_some_and(Ring::shown) {
-            ring::forget_clicks();
+        // Clicks while no mark showed are not clicks on it.
+        if !self.mark.as_ref().is_some_and(Mark::shown) {
+            mark::forget_clicks();
         }
-        if ring::clicked_in(rect) {
+        if mark::clicked_in(rect) {
             self.clicked = Some(at);
             return None;
         }
-        Some((left as f32 + x, top as f32 + y, r, ring::STROKE * height as f32 / 1080.0))
+        Some((left as f32 + x, top as f32 + y, half_w, half_h, height as f32 / 1080.0))
     }
 
     /// Reads the watcher's newest frame, else a fresh capture.
@@ -943,7 +943,7 @@ impl WardenApp {
             self.save();
         }
         let mut highlight = self.settings.highlight;
-        let hover = "Draws a ring on the game around the cell, card or button to click for the advised move. Clicks go through it to the game";
+        let hover = "Marks on the game the cell, card or button to click for the advised move. Clicks go through it to the game";
         if ui.checkbox(&mut highlight, "Highlight where to click").on_hover_text(hover).changed() {
             self.settings.highlight = highlight;
             self.save();

@@ -51,8 +51,8 @@ pub struct Settings {
     /// of an install made before it existed; a shortcut the player deletes is
     /// not made again.
     pub desktop_shortcut: bool,
-    /// Draw a ring on the game around what to click for the advised move,
-    /// see [`super::ring`].
+    /// Mark on the game what to click for the advised move, see
+    /// [`super::mark`].
     pub highlight: bool,
 }
 

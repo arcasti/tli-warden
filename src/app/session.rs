@@ -607,7 +607,7 @@ pub struct Session {
     /// The frame `scan` reads came from the game, see [`Session::read_live`].
     live: bool,
     /// The game's screen shows the stored read: it came from the game and no
-    /// read since was kept, see [`Session::ring`].
+    /// read since was kept, see [`Session::mark`].
     on_screen: bool,
     /// The last read was held as a changed board: the next one is taken
     /// whatever it shows.
@@ -1348,11 +1348,12 @@ impl Session {
         })
     }
 
-    /// Where the player clicks for the advice: the centre and radius of a
-    /// ring in the game frame's pixels. None while a solve runs, for a
-    /// reading from an opened file, and while the game shows another screen
-    /// than the reading's (a read since was kept or ended the run).
-    pub fn ring(&self) -> Option<(f32, f32, f32)> {
+    /// Where the player clicks for the advice: the target's centre, half
+    /// width and half height in the game frame's pixels. None while a solve
+    /// runs, for a reading from an opened file, and while the game shows
+    /// another screen than the reading's (a read since was kept or ended the
+    /// run).
+    pub fn mark(&self) -> Option<(f32, f32, f32, f32)> {
         let (Some((_, panels, _)), Some(r)) = (&self.scene, &self.reading) else { return None };
         if !self.on_screen || self.solving || panels.screen != r.screen {
             return None;

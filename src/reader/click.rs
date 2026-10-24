@@ -7,55 +7,56 @@ use super::panels::{Screen, Spot};
 use super::scene::portrait;
 use crate::engine::actions::{Action, ChoiceId};
 
-/// Ring radii in reference px: a cell portrait, a destination or
-/// Interrogation card (330 x 170, rec1-t049; a ring of half its width
-/// reaches the board), an instrument card (about 457 wide, reroll-2000x837),
-/// a decision or Cancel button (about 140 across, rec1-t055 and rec1-t057)
-/// and the Re-roll button (270 x 65).
-const CELL_R: f32 = 60.0;
-const DOOR_R: f32 = 110.0;
-const PICK_R: f32 = 230.0;
-const BUTTON_R: f32 = 70.0;
-const REROLL_R: f32 = 90.0;
+/// Target boxes in reference px, width by height: a cell portrait
+/// (portraits at a 175 px pitch, scene.rs PORTRAIT), a destination or
+/// Interrogation card (rec1-t049), an instrument card (y 187-870,
+/// reroll-2000x837), a decision or round Cancel button (rec1-t055 and
+/// rec1-t057) and the Re-roll button.
+const CELL: (f32, f32) = (130.0, 130.0);
+const DOOR: (f32, f32) = (330.0, 170.0);
+const PICK: (f32, f32) = (457.0, 683.0);
+const BUTTON: (f32, f32) = (140.0, 140.0);
+const REROLL: (f32, f32) = (270.0, 65.0);
 
 /// A place to click: its centre on the reference frame, the layout it was
-/// read from, and a ring radius in reference px.
+/// read from, and its half width and half height in reference px.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Click {
     pub at: (i32, i32),
     pub layout: Layout,
-    pub radius: f32,
+    pub half: (f32, f32),
 }
 
 /// What the player clicks for `action` on `screen`, given the screen's
 /// [`super::panels::Panels::spots`]; None for a move with nothing to click
 /// on that screen or whose card or button was not read.
 pub fn target(screen: Screen, spots: &[(Spot, Layout, (i32, i32))], action: &Action) -> Option<Click> {
-    let spot = |want: Spot, radius: f32| spots.iter().find(|s| s.0 == want).map(|&(_, layout, at)| Click { at, layout, radius });
+    let half = |(w, h): (f32, f32)| (w / 2.0, h / 2.0);
+    let spot = |want: Spot, size| spots.iter().find(|s| s.0 == want).map(|&(_, layout, at)| Click { at, layout, half: half(size) });
     // Actions name model cells; the screen numbers them from 1.
-    let cell = |n: usize| (n < 16).then(|| Click { at: portrait(n as u8 + 1), layout: Layout::Board, radius: CELL_R });
-    let card = |key: &str, radius: f32| spot(Spot::Card(key.to_string()), radius);
+    let cell = |n: usize| (n < 16).then(|| Click { at: portrait(n as u8 + 1), layout: Layout::Board, half: half(CELL) });
+    let card = |key: &str, size| spot(Spot::Card(key.to_string()), size);
     match (screen, action) {
-        (Screen::Patrol, Action::Patrol { cell }) => spot(Spot::Door(u8::try_from(*cell + 1).ok()?), DOOR_R),
-        (Screen::Manage, Action::Devour { .. }) => spot(Spot::Button("Consume"), BUTTON_R),
-        (Screen::Manage, Action::Swap) => spot(Spot::Button("Replace"), BUTTON_R),
-        (Screen::Manage, Action::Hunt { .. }) => spot(Spot::Button("Hunt"), BUTTON_R),
-        (Screen::Manage, Action::End) => spot(Spot::Button("End"), BUTTON_R),
+        (Screen::Patrol, Action::Patrol { cell }) => spot(Spot::Door(u8::try_from(*cell + 1).ok()?), DOOR),
+        (Screen::Manage, Action::Devour { .. }) => spot(Spot::Button("Consume"), BUTTON),
+        (Screen::Manage, Action::Swap) => spot(Spot::Button("Replace"), BUTTON),
+        (Screen::Manage, Action::Hunt { .. }) => spot(Spot::Button("Hunt"), BUTTON),
+        (Screen::Manage, Action::End) => spot(Spot::Button("End"), BUTTON),
         (Screen::ChainTarget, Action::Devour { to } | Action::Chain { to } | Action::Choose { id: ChoiceId::Cell(to) }) => cell(*to),
-        (Screen::ChainTarget, Action::EndChain) => spot(Spot::Button("Cancel"), BUTTON_R),
+        (Screen::ChainTarget, Action::EndChain) => spot(Spot::Button("Cancel"), BUTTON),
         (Screen::CellPick, Action::Choose { id: ChoiceId::Cell(n) }) => cell(*n),
-        (Screen::InstrumentPick, Action::Choose { id: ChoiceId::Name(key) }) => card(key, PICK_R),
-        (Screen::InstrumentPick, Action::Reroll) => spot(Spot::Button("Re-roll"), REROLL_R),
-        (Screen::Interrogation, Action::Choose { id: ChoiceId::Name(key) }) => card(key, DOOR_R),
+        (Screen::InstrumentPick, Action::Choose { id: ChoiceId::Name(key) }) => card(key, PICK),
+        (Screen::InstrumentPick, Action::Reroll) => spot(Spot::Button("Re-roll"), REROLL),
+        (Screen::Interrogation, Action::Choose { id: ChoiceId::Name(key) }) => card(key, DOOR),
         _ => None,
     }
 }
 
-/// The ring for `click` on a `w` x `h` frame at interface scale `u`: its
-/// centre and radius in frame px.
-pub fn to_frame(click: &Click, w: usize, h: usize, u: f32) -> (f32, f32, f32) {
+/// Where `click` sits on a `w` x `h` frame at interface scale `u`: its
+/// centre, half width and half height in frame px.
+pub fn to_frame(click: &Click, w: usize, h: usize, u: f32) -> (f32, f32, f32, f32) {
     let ((x, y), scale) = frame_point((click.at.0 as f32, click.at.1 as f32), click.layout, w, h, u);
-    (x, y, click.radius * scale)
+    (x, y, click.half.0 * scale, click.half.1 * scale)
 }
 
 #[cfg(test)]
@@ -141,7 +142,8 @@ mod tests {
         let png = std::fs::read(dir.join("reroll-2000x837.png")).unwrap();
         let frame = super::super::decode_png_raw(&png).unwrap();
         let (_, _, u) = super::super::layout::lay_out_scaled(&frame, None);
-        let (x, y, r) = to_frame(&click, frame.w, frame.h, u);
-        assert!(inside((x as i32, y as i32), (760, 715, 970, 770)) && (60.0..80.0).contains(&r), "({x}, {y}) r {r}");
+        let (x, y, hw, hh) = to_frame(&click, frame.w, frame.h, u);
+        // The button is 210 x 55 px on this frame.
+        assert!(inside((x as i32, y as i32), (760, 715, 970, 770)) && (95.0..115.0).contains(&hw) && (22.0..30.0).contains(&hh), "({x}, {y}) half {hw} x {hh}");
     }
 }

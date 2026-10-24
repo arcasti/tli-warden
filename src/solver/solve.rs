@@ -206,7 +206,8 @@ pub struct SolveOption {
     /// The paired standard error of the margin to the leader (0 for the
     /// leader, infinite with fewer than 2 paired rounds).
     pub gap_se: f64,
-    /// Playouts that ran.
+    /// Playouts that ran: fewer than the rounds for a move the playouts
+    /// dropped early (see [`Rollouts`]) or one that could not apply.
     pub n: usize,
     /// The best rarity reached, averaged.
     pub best: f64,
@@ -217,7 +218,8 @@ pub struct SolveOption {
 /// solve: plays every candidate out `rollouts` times and ranks them by
 /// Riot loot. Each round shares its dice across candidates (common
 /// random numbers), so the differences between moves are measured, not the
-/// luck.
+/// luck. Past `RACE_FROM` rounds, moves that clearly trail stop early and
+/// the solve ends once one move is left (see [`Rollouts`]).
 pub fn solve(st: &State, rollouts: usize, seed: u32, p: &Params) -> Vec<SolveOption> {
     let mut r = Rollouts::new(st, seed, p);
     r.run(rollouts);
@@ -228,6 +230,13 @@ pub fn solve(st: &State, rollouts: usize, seed: u32, p: &Params) -> Vec<SolveOpt
 /// so a caller can show partial rankings. Running N rounds in any number of
 /// steps, on any number of threads, gives the same ranking as `solve` with N
 /// rollouts.
+///
+/// Racing: at round `RACE_FROM` and every `RACE_EVERY` rounds after, a
+/// candidate whose mean trails the leader's (the best of those still
+/// running) by more than `RACE_Z` paired standard errors plays no more
+/// rounds and keeps the values it has. The checkpoints fall on fixed round
+/// counts, so racing keeps the ranking independent of steps and threads.
+/// With one candidate left the solve is over and `run` plays nothing more.
 pub struct Rollouts<'a> {
     base: State,
     p: &'a Params,
@@ -236,7 +245,30 @@ pub struct Rollouts<'a> {
     random: Rng32,
     vals: Vec<Vec<f64>>,
     best: Vec<f64>,
+    /// The candidates still playing rounds.
+    live: Vec<bool>,
     rounds: usize,
+}
+
+/// The first round count where racing drops trailing candidates.
+const RACE_FROM: usize = 200;
+/// Rounds between racing checkpoints after [`RACE_FROM`].
+const RACE_EVERY: usize = 100;
+/// The paired standard errors a candidate may trail the leader by.
+const RACE_Z: f64 = 3.0;
+
+/// The playouts that count (NaN skipped), their mean and its standard error.
+fn stats(v: &[f64]) -> (usize, f64, f64) {
+    let (mut n, mut sum, mut sq) = (0usize, 0.0, 0.0);
+    for &x in v.iter().filter(|x| !x.is_nan()) {
+        n += 1;
+        sum += x;
+        sq += x * x;
+    }
+    let count = n as f64;
+    let mean = if n > 0 { sum / count } else { 0.0 };
+    let sd = if n > 1 { f64::max(0.0, sq / count - mean * mean).sqrt() } else { 0.0 };
+    (n, mean, if n > 1 { sd / count.sqrt() } else { 0.0 })
 }
 
 impl<'a> Rollouts<'a> {
@@ -260,7 +292,7 @@ impl<'a> Rollouts<'a> {
             None => decide(&base, p, roll),
         };
         let n = list.len();
-        Rollouts { base, p, list, pick, random: Rng32::new(seed), vals: vec![Vec::new(); n], best: vec![0.0; n], rounds: 0 }
+        Rollouts { base, p, list, pick, random: Rng32::new(seed), vals: vec![Vec::new(); n], best: vec![0.0; n], live: vec![true; n], rounds: 0 }
     }
 
     /// Rounds played so far.
@@ -269,7 +301,7 @@ impl<'a> Rollouts<'a> {
     }
 
     /// Plays up to `rounds` more rounds and returns how many ran (none with
-    /// fewer than two candidates: there is nothing to compare).
+    /// fewer than two candidates running: there is nothing to compare).
     pub fn run(&mut self, rounds: usize) -> usize {
         self.run_on(rounds, 1)
     }
@@ -279,9 +311,36 @@ impl<'a> Rollouts<'a> {
     /// the thread count. On Windows the extra threads take the caller's
     /// priority.
     pub fn run_on(&mut self, rounds: usize, threads: usize) -> usize {
-        if self.list.len() < 2 {
-            return 0;
+        let mut ran = 0;
+        while ran < rounds && self.live.iter().filter(|&&on| on).count() >= 2 {
+            // A call stops at each racing checkpoint on its way.
+            let checkpoint = RACE_FROM.max((self.rounds / RACE_EVERY + 1) * RACE_EVERY);
+            let step = (rounds - ran).min(checkpoint - self.rounds);
+            self.play(step, threads);
+            ran += step;
+            if self.rounds == checkpoint {
+                self.race();
+            }
         }
+        ran
+    }
+
+    /// Drops the running candidates that trail the leader by more than
+    /// [`RACE_Z`] paired standard errors.
+    fn race(&mut self) {
+        let means: Vec<f64> = self.vals.iter().map(|v| stats(v).1).collect();
+        let live: Vec<usize> = (0..self.list.len()).filter(|&k| self.live[k]).collect();
+        let lead = live.iter().copied().fold(live[0], |lead, k| if means[k] > means[lead] { k } else { lead });
+        for k in live {
+            if k != lead && means[lead] - means[k] > RACE_Z * paired_se(&self.vals[lead], &self.vals[k]) {
+                self.live[k] = false;
+            }
+        }
+    }
+
+    /// Plays `rounds` rounds of the running candidates on up to `threads`
+    /// threads.
+    fn play(&mut self, rounds: usize, threads: usize) {
         let seeds: Vec<u32> = (0..rounds).map(|_| (self.random.roll() * 4294967296.0) as u32).collect();
         let threads = threads.clamp(1, rounds.max(1));
         let results: Vec<Vec<(f64, f64)>> = if threads == 1 {
@@ -314,25 +373,27 @@ impl<'a> Rollouts<'a> {
             });
             results.into_iter().map(|r| r.expect("every round ran")).collect()
         };
+        let live: Vec<usize> = (0..self.list.len()).filter(|&k| self.live[k]).collect();
         for round in results {
-            for (k, (val, best)) in round.into_iter().enumerate() {
+            for (&k, (val, best)) in live.iter().zip(round) {
                 self.vals[k].push(val);
                 self.best[k] += best;
             }
             self.rounds += 1;
         }
-        rounds
     }
 
-    /// One round on `seed`: per candidate, the Riot loot (NaN when the
-    /// move does not apply) and the best rarity reached (0 then).
+    /// One round on `seed`: per running candidate, the Riot loot (NaN when
+    /// the move does not apply) and the best rarity reached (0 then).
     fn round(&self, seed: u32) -> Vec<(f64, f64)> {
         // The hidden future is the same for every candidate of the round.
         let mut hidden = self.base.clone();
         hide_future(&mut hidden, seed);
         self.list
             .iter()
-            .map(|c| {
+            .zip(&self.live)
+            .filter(|&(_, &on)| on)
+            .map(|(c, _)| {
                 let mut trial = hidden.clone();
                 if !apply(&mut trial, &c.action).is_ok() {
                     return (f64::NAN, 0.0);
@@ -345,26 +406,21 @@ impl<'a> Rollouts<'a> {
             .collect()
     }
 
-    /// The candidates ranked on the rounds played so far.
+    /// The candidates ranked on the rounds played so far: those still
+    /// running first, so the first row has played every round.
     pub fn ranking(&self) -> Vec<SolveOption> {
-        let (list, vals, best) = (&self.list, &self.vals, &self.best);
+        let (list, vals, best, live) = (&self.list, &self.vals, &self.best, &self.live);
         let mut ranked: Vec<(usize, f64, f64, usize)> = vals
             .iter()
             .enumerate()
             .map(|(k, v)| {
-                let (mut n, mut sum, mut sq) = (0usize, 0.0, 0.0);
-                for &x in v.iter().filter(|x| !x.is_nan()) {
-                    n += 1;
-                    sum += x;
-                    sq += x * x;
-                }
-                let count = n as f64;
-                let mean = if n > 0 { sum / count } else { 0.0 };
-                let sd = if n > 1 { f64::max(0.0, sq / count - mean * mean).sqrt() } else { 0.0 };
-                (k, mean, if n > 1 { sd / count.sqrt() } else { 0.0 }, n)
+                let (n, mean, se) = stats(v);
+                (k, mean, se, n)
             })
             .collect();
-        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Equal).then(best[b.0].partial_cmp(&best[a.0]).unwrap_or(Equal)));
+        ranked.sort_by(|a, b| {
+            live[b.0].cmp(&live[a.0]).then(b.1.partial_cmp(&a.1).unwrap_or(Equal)).then(best[b.0].partial_cmp(&best[a.0]).unwrap_or(Equal))
+        });
         let top = ranked.first().map_or(0, |r| r.0);
         ranked
             .into_iter()

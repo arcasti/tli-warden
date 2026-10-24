@@ -319,7 +319,7 @@ fn run_solve(args: &[String]) -> Result<ExitCode, String> {
         return Ok(ExitCode::SUCCESS);
     }
     let width = options.iter().map(|o| o.label.chars().count()).max().unwrap_or(0).max(6);
-    out!("\n{:>4}  {:<width$}  {:>6}  {:>6}  {:>5}", "rank", "option", "mean", "gap", "best");
+    out!("\n{:>4}  {:<width$}  {:>6}  {:>6}  {:>5}  {:>5}", "rank", "option", "mean", "gap", "best", "n");
     for (i, o) in options.iter().enumerate() {
         let gap = if i == 0 {
             "-".to_string()
@@ -329,8 +329,8 @@ fn run_solve(args: &[String]) -> Result<ExitCode, String> {
             "inf".to_string()
         };
         let mark = if o.policy { " *" } else { "" };
-        out!("{:>4}  {:<width$}  {:>6.3}  {:>6}  {:>5.2}{mark}", i + 1, o.label, o.mean, gap, o.best);
+        out!("{:>4}  {:<width$}  {:>6.3}  {:>6}  {:>5.2}  {:>5}{mark}", i + 1, o.label, o.mean, gap, o.best, o.n);
     }
-    out!("\n{rollouts} playouts per option; gap is the paired standard error of the margin to the leader; * is the strategy's pick.");
+    out!("\nUp to {rollouts} playouts per option, n of them played: a move that clearly trails stops early; gap is the paired standard error of the margin to the leader; * is the strategy's pick.");
     Ok(ExitCode::SUCCESS)
 }

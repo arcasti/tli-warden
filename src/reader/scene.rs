@@ -757,6 +757,9 @@ pub struct CellRead {
     pub inmate: Option<(Beast, u8)>,
     pub beast_conf: f32,
     pub tier_conf: f32,
+    /// The strength of the inmate's rarity glow: below GLOW_MIN the
+    /// portrait has none, so `inmate` reads Normal whatever the rarity.
+    pub halo: f32,
     /// The orange Prison Incident "!".
     pub event: bool,
     pub event_conf: f32,
@@ -869,8 +872,10 @@ fn glow_tier(img: &Rgba, cell: u8, lantern: bool, t: &Templates) -> (u8, f32, f3
 /// Glow strength that marks a "?" portrait with a rarity glow on a locked
 /// cell. Measured on locked cells of both recordings: plain padlocks and
 /// unglowing "?" stay at or below 0.07, glowing "?" measure 0.12
-/// (a lit cell) to 0.8.
-const GLOW_MIN: f32 = 0.1;
+/// (a lit cell) to 0.8. Also the least glow of a portrait: labeled Normal
+/// inmates measure 0.17 and up, and after a reconnect the game draws the
+/// portraits with no glow at all (0 to 0.07, 2026-10-24 recording).
+pub const GLOW_MIN: f32 = 0.1;
 
 /// Fewest gold pixels that make an arrow.
 const ARROW_MIN: u32 = 40;
@@ -897,8 +902,8 @@ pub fn read_scene_with(img: &Rgba, t: &Templates) -> Scene {
             let (k, conf) = beast_class(&faces_around(img, x, y, 4), t);
             r.beast_conf = conf;
             if let (Some(beast), false) = (CLASSES[k], r.locked) {
-                let (tier, conf, _) = glow_tier(img, c, warden == Some(c), t);
-                r.tier_conf = conf;
+                let (tier, conf, halo) = glow_tier(img, c, warden == Some(c), t);
+                (r.tier_conf, r.halo) = (conf, halo);
                 r.inmate = Some((beast, tier));
                 let (jaws, conf) = t.crown_split.decide(crown_score(img, c));
                 (r.jaws, r.jaws_conf) = (jaws, conf);

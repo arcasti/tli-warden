@@ -309,6 +309,46 @@ fn tooltip_covers_cells() {
     assert!(!texts.iter().any(|t| t.starts_with("Check cell 15") || t.starts_with("Check cell 16")), "{texts:?}");
 }
 
+/// trainingdata/reports/reconnect-{0007,0012}.png (outside s16), a player's
+/// 1080p run: the board before the game reconnected (a Rare Mammoth in 4, a
+/// Legendary Mammoth in 8, a Magic Rat in 14) and after it, when the game
+/// draws every portrait with no rarity glow. The glowless portraits keep the
+/// rarities of the board before; read alone, they are flagged. Skips when a
+/// frame is missing.
+#[test]
+fn glowless_portraits_keep_rarity() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("trainingdata/reports");
+    let (before, after) = (dir.join("reconnect-0007.png"), dir.join("reconnect-0012.png"));
+    if !before.is_file() || !after.is_file() {
+        println!("skipped: {} or {} is missing", before.display(), after.display());
+        return;
+    }
+    let read = |path: &Path, under: Option<&Model>| {
+        let img = load_png(path).unwrap();
+        to_model(&read_scene(&img), &read_panels(&img), &[], under, RUN_DAYS)
+    };
+    let tiers = |m: &Model| {
+        [4, 5, 6, 7, 8, 14].map(|c| match m.cells[c - 1] {
+            CellModel::Inmate { tier, .. } => tier,
+            _ => -1,
+        })
+    };
+    let (board, _) = read(&before, None);
+    assert_eq!(tiers(&board), [2, 0, 0, -1, 3, 1]);
+
+    let (m, warnings) = read(&after, Some(&board));
+    assert_eq!(tiers(&m), [2, 0, 0, 0, 3, 1]);
+    let texts: Vec<&str> = warnings.iter().map(|w| w.text.as_str()).collect();
+    assert!(texts.iter().any(|t| t.starts_with("The portraits in cells 04, 05, 06, 08 and 14 show no rarity glow")), "{texts:?}");
+    let flagged: Vec<usize> = warnings.iter().filter(|w| w.text.contains("shows no rarity glow")).filter_map(|w| w.cell).collect();
+    assert_eq!(flagged, [6], "only the Lion new in 7 has no rarity to keep");
+
+    let (m, warnings) = read(&after, None);
+    assert_eq!(tiers(&m), [0; 6]);
+    let flagged: Vec<usize> = warnings.iter().filter(|w| w.text.contains("shows no rarity glow")).filter_map(|w| w.cell).collect();
+    assert_eq!(flagged, [3, 4, 5, 6, 7, 13]);
+}
+
 /// rec4-t412: the Raging Beast's Agonizing Muzzle tooltip over the left
 /// column, its flat grey tinted in blocks by the recording's compression,
 /// hides the Lions of cells 15 and 16 and cell 14's portrait above its

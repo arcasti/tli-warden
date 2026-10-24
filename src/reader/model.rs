@@ -4,7 +4,7 @@
 //! warning for the player to check.
 
 use super::panels::{Panels, Screen};
-use super::scene::{CELLS, Scene};
+use super::scene::{CELLS, GLOW_MIN, Scene};
 use crate::board::{CellModel, ChoiceKind, EventMark, Model, ObjectiveModel, PreyMark, Step};
 use crate::engine::data::{Beast, IRON_LAW, Tool, data};
 use crate::engine::devour::eats;
@@ -210,9 +210,19 @@ pub fn to_model(scene: &Scene, panels: &Panels, held_tools: &[Tool], under: Opti
 }
 
 /// The cells and the warden from the board scene.
+/// "cell 4", "cells 4 and 8" or "cells 4, 8 and 14".
+fn cell_list(cells: &[String]) -> String {
+    match cells {
+        [one] => format!("cell {one}"),
+        [rest @ .., last] => format!("cells {} and {last}", rest.join(", ")),
+        [] => String::new(),
+    }
+}
+
 fn read_board(scene: &Scene, under: Option<&Model>, m: &mut Model, warn: &mut Vec<Warning>) {
     let d = data();
     let mut kept = Vec::new();
+    let mut unlit = Vec::new();
     for c in CELLS {
         let r = scene.cell(c);
         let n = index(c);
@@ -244,13 +254,30 @@ fn read_board(scene: &Scene, under: Option<&Model>, m: &mut Model, warn: &mut Ve
         } else {
             match r.inmate {
                 Some((beast, tier)) => {
-                    let name = format!("{} {}", tier_name(i32::from(tier)), d.beast_names[beast.index()]);
+                    // After a reconnect the game draws the portraits with no
+                    // rarity glow, so a portrait with none keeps the rarity
+                    // the last board read gave the same beast in this cell.
+                    let glowless = r.halo < GLOW_MIN;
+                    let before = under.and_then(|b| match b.cells[n] {
+                        CellModel::Inmate { beast: was, tier, .. } if was == beast => Some(tier),
+                        _ => None,
+                    });
+                    let tier = match before.filter(|_| glowless) {
+                        Some(t) => {
+                            unlit.push(at.clone());
+                            t
+                        }
+                        None => i64::from(tier),
+                    };
+                    let name = format!("{} {}", tier_name(tier as i32), d.beast_names[beast.index()]);
                     if r.beast_conf < CONF {
                         warn.push(Warning::cell(n, format!("Check cell {at}: beast read as {name} (confidence {:.2}).", r.beast_conf)));
-                    } else if r.tier_conf < TIER_CONF {
+                    } else if glowless && before.is_none() {
+                        warn.push(Warning::cell(n, format!("Check cell {at}: the portrait shows no rarity glow, so it is read as {name}.")));
+                    } else if !glowless && r.tier_conf < TIER_CONF {
                         warn.push(Warning::cell(n, format!("Check cell {at}: rarity read as {name} (confidence {:.2}).", r.tier_conf)));
                     }
-                    CellModel::Inmate { beast, tier: i64::from(tier), ivory: r.tusk, prey: None, event }
+                    CellModel::Inmate { beast, tier, ivory: r.tusk, prey: None, event }
                 }
                 None => {
                     if r.beast_conf < CONF {
@@ -261,11 +288,15 @@ fn read_board(scene: &Scene, under: Option<&Model>, m: &mut Model, warn: &mut Ve
             }
         };
     }
-    if let Some((last, rest)) = kept.split_last() {
-        warn.push(Warning::note(match rest {
-            [] => format!("A tooltip covers cell {last}: it is kept from the last board read."),
-            _ => format!("A tooltip covers cells {} and {last}: they are kept from the last board read.", rest.join(", ")),
-        }));
+    if !kept.is_empty() {
+        let it = if kept.len() == 1 { "it is" } else { "they are" };
+        warn.push(Warning::note(format!("A tooltip covers {}: {it} kept from the last board read.", cell_list(&kept))));
+    }
+    if !unlit.is_empty() {
+        warn.push(Warning::note(format!(
+            "The portraits in {} show no rarity glow (the game draws none after a reconnect): the rarities are kept from the last board read.",
+            cell_list(&unlit)
+        )));
     }
 
     match scene.warden {

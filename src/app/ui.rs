@@ -710,7 +710,6 @@ impl WardenApp {
             pick,
             near: near.into_iter().filter_map(|k| action_cell(&s.ranking[k].action, warden)).filter(|&c| Some(c) != pick).collect(),
         };
-        let kept = reading.kept_lines();
         for p in &s.problems {
             ui.label(RichText::new(p).small().color(Color32::LIGHT_RED));
         }
@@ -726,7 +725,7 @@ impl WardenApp {
         let warned: Vec<(usize, &str)> = reading.warnings.iter().filter_map(|w| Some((w.cell?, w.text.as_str()))).collect();
         let (clicked, court) = board(ui, &reading.model, &warned, &marks);
         let mut day = riot(reading.model.day, reading.days_left);
-        if !kept.is_empty() {
+        if !reading.kept_lines().is_empty() {
             day.push_str(" \u{b7} last reading");
         }
         if let Some(goal) = &reading.model.objective

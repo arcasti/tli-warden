@@ -13,6 +13,7 @@ use crate::engine::state::{Inmate, Pending, Phase, State};
 use crate::engine::text::{cell_label, describe, incident_name, plural, tier_name, tool_name};
 use crate::engine::{Action, ChoiceId, apply, data::data};
 use std::cmp::Ordering::Equal;
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
 /// playout: plays the run to the end with the strategy. A failed move is
 /// followed by an End Day; if that fails too, the playout stops.
@@ -287,18 +288,31 @@ impl<'a> Rollouts<'a> {
             seeds.iter().map(|&seed| self.round(seed)).collect()
         } else {
             let (this, priority) = (&*self, priority());
+            // Rounds are handed out one at a time, so no thread sits idle
+            // while another works through a long chunk.
+            let (seeds, next) = (&seeds, &AtomicUsize::new(0));
+            let mut results: Vec<Option<Vec<(f64, f64)>>> = vec![None; rounds];
             std::thread::scope(|s| {
-                let workers: Vec<_> = seeds
-                    .chunks(rounds.div_ceil(threads))
-                    .map(|chunk| {
+                let workers: Vec<_> = (0..threads)
+                    .map(|_| {
                         s.spawn(move || {
                             set_priority(priority);
-                            chunk.iter().map(|&seed| this.round(seed)).collect::<Vec<_>>()
+                            let mut done = Vec::new();
+                            loop {
+                                let i = next.fetch_add(1, Relaxed);
+                                let Some(&seed) = seeds.get(i) else { break done };
+                                done.push((i, this.round(seed)));
+                            }
                         })
                     })
                     .collect();
-                workers.into_iter().flat_map(|w| w.join().expect("a playout thread panicked")).collect()
-            })
+                for w in workers {
+                    for (i, round) in w.join().expect("a playout thread panicked") {
+                        results[i] = Some(round);
+                    }
+                }
+            });
+            results.into_iter().map(|r| r.expect("every round ran")).collect()
         };
         for round in results {
             for (k, (val, best)) in round.into_iter().enumerate() {
@@ -313,11 +327,13 @@ impl<'a> Rollouts<'a> {
     /// One round on `seed`: per candidate, the Riot loot (NaN when the
     /// move does not apply) and the best rarity reached (0 then).
     fn round(&self, seed: u32) -> Vec<(f64, f64)> {
+        // The hidden future is the same for every candidate of the round.
+        let mut hidden = self.base.clone();
+        hide_future(&mut hidden, seed);
         self.list
             .iter()
             .map(|c| {
-                let mut trial = self.base.clone();
-                hide_future(&mut trial, seed);
+                let mut trial = hidden.clone();
                 if !apply(&mut trial, &c.action).is_ok() {
                     return (f64::NAN, 0.0);
                 }

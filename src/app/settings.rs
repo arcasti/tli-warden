@@ -59,7 +59,7 @@ impl Default for Settings {
             read_hotkey: "F9".to_string(),
             auto_hotkey: "F8".to_string(),
             window_title: "Torchlight".to_string(),
-            rollouts: 400,
+            rollouts: 1600,
             tools: Vec::new(),
             tools_days: None,
             theme: None,
@@ -89,10 +89,18 @@ impl Settings {
 
     /// The saved settings, or the defaults when there are none or they don't parse.
     pub fn load() -> Settings {
-        Settings::path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default()
+        Settings::path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|text| Settings::parse(&text)).unwrap_or_default()
+    }
+
+    /// Settings from saved JSON. Every save stores the whole struct, so
+    /// installs from before 0.7.1 hold its default of 400 playouts: that
+    /// count is raised to the current default.
+    fn parse(text: &str) -> Option<Settings> {
+        let mut s: Settings = serde_json::from_str(text).ok()?;
+        if s.rollouts == 400 {
+            s.rollouts = Settings::default().rollouts;
+        }
+        Some(s)
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -120,5 +128,14 @@ mod tests {
         assert_eq!((s.read_hotkey.as_str(), s.auto_hotkey.as_str(), s.rollouts, s.auto_place, s.tools_days, s.theme, s.run_log), ("F9", "F8", 300, true, None, None, true));
         assert!(s.check_updates && s.offer_install);
         assert_eq!((s.share_logs, s.shared_from.as_str(), s.install_id.as_str()), (None, "", ""));
+    }
+
+    #[test]
+    fn old_default_rollouts_raised() {
+        let rollouts = |text: &str| Settings::parse(text).map(|s| s.rollouts);
+        assert_eq!(rollouts(r#"{"rollouts": 400}"#), Some(1600));
+        assert_eq!(rollouts(r#"{"rollouts": 300}"#), Some(300));
+        assert_eq!(rollouts("{}"), Some(1600));
+        assert_eq!(rollouts("not json"), None);
     }
 }

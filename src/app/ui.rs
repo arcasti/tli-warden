@@ -11,7 +11,8 @@
 //! asks once whether to share run logs, and offers to update once installed,
 //! when GitHub has a newer release.
 
-use super::capture::{Event, Watcher, capture, game_rect, on_screen};
+use super::capture::{Event, Watcher, capture, game_in_front, game_rect, on_screen};
+use super::ring::{self, Ring};
 use super::hotkey::{Hotkey, parse};
 use super::session::{CellEdit, Session};
 use crate::solver::advise::also_good;
@@ -32,7 +33,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 /// Space between two board tiles.
 const GAP: f32 = 4.0;
@@ -156,6 +157,10 @@ pub struct WardenApp {
     /// The run log's folder last seen: a change means the run before it is
     /// finished, so it is sent.
     log_dir: Option<PathBuf>,
+    /// The ring around what to click on the game, made when first shown.
+    ring: Option<Ring>,
+    /// The read the player clicked in the game after: no ring until a newer one.
+    clicked: Option<SystemTime>,
 }
 
 impl WardenApp {
@@ -202,6 +207,8 @@ impl WardenApp {
             }),
             upload_error: None,
             log_dir: None,
+            ring: None,
+            clicked: None,
         };
         if app.current.is_some() && app.settings.check_updates {
             app.checking = Some(in_background(&app.ctx, update::check));
@@ -231,6 +238,53 @@ impl WardenApp {
             flag.store(true, Ordering::SeqCst);
             ctx.request_repaint();
         })
+    }
+
+    /// Shows the ring around what to click on the game while the setting is
+    /// on and [`WardenApp::ring_spot`] gives one; hides it otherwise. Looks
+    /// again every 50 ms while the session has a ring, shown or not, so a
+    /// window move, a click or the game coming back in front is seen.
+    fn highlight(&mut self, ctx: &egui::Context) {
+        if self.settings.highlight && self.session.ring().is_some() {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
+        match self.settings.highlight.then(|| self.ring_spot()).flatten() {
+            Some((x, y, r, stroke)) => {
+                if self.ring.is_none() {
+                    self.ring = Ring::new();
+                }
+                if let Some(ring) = &mut self.ring {
+                    ring.show(x, y, r, stroke);
+                }
+            }
+            None => {
+                if let Some(ring) = &mut self.ring {
+                    ring.hide();
+                }
+            }
+        }
+    }
+
+    /// The ring in physical screen px (centre, radius, stroke): the
+    /// session's (see [`Session::ring`]) while the game or this window is in
+    /// front and the player has not clicked in the game since the read.
+    fn ring_spot(&mut self) -> Option<(f32, f32, f32, f32)> {
+        let at = self.session.reading.as_ref()?.at;
+        let (x, y, r) = self.session.ring()?;
+        let title = &self.settings.window_title;
+        if self.clicked == Some(at) || !game_in_front(title) {
+            return None;
+        }
+        let rect @ [left, top, _, height] = game_rect(title).ok()?;
+        // Clicks while no ring showed are not clicks on it.
+        if !self.ring.as_ref().is_some_and(Ring::shown) {
+            ring::forget_clicks();
+        }
+        if ring::clicked_in(rect) {
+            self.clicked = Some(at);
+            return None;
+        }
+        Some((left as f32 + x, top as f32 + y, r, ring::STROKE * height as f32 / 1080.0))
     }
 
     /// Reads the watcher's newest frame, else a fresh capture.
@@ -605,6 +659,7 @@ impl eframe::App for WardenApp {
             self.settings.tools_days = self.session.days_left();
             self.save();
         }
+        self.highlight(ctx);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -884,6 +939,13 @@ impl WardenApp {
             if place {
                 self.settings.window_pos = None;
             }
+            self.save();
+        }
+        let mut highlight = self.settings.highlight;
+        let hover = "Draws a ring on the game around the cell, card or button to click for the advised move. Clicks go through it to the game";
+        if ui.checkbox(&mut highlight, "Highlight where to click").on_hover_text(hover).changed() {
+            self.settings.highlight = highlight;
+            self.ring = None;
             self.save();
         }
         let mut open = false;

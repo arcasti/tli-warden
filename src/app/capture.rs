@@ -33,7 +33,7 @@ use windows::Win32::System::WinRT::Direct3D11::{CreateDirect3D11DeviceFromDXGIDe
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetClientRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
+    EnumWindows, GetClassNameW, GetClientRect, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
 };
 use windows::core::{BOOL, Interface, PWSTR, factory};
 
@@ -154,7 +154,7 @@ fn describe(hwnd: HWND) -> String {
 
 /// Runs `f` with this thread aware of per-monitor DPI, so window rectangles
 /// and the screen copy come in physical pixels, as the captured frame does.
-fn dpi_aware<T>(f: impl FnOnce() -> T) -> T {
+pub(crate) fn dpi_aware<T>(f: impl FnOnce() -> T) -> T {
     // SAFETY: sets this thread's DPI awareness and restores it.
     unsafe {
         let old = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -178,6 +178,19 @@ pub fn game_rect(title: &str) -> Result<[i32; 4], String> {
     let hwnd = find_window(title)?;
     let r = dpi_aware(|| client_rect(hwnd))?;
     Ok([r.left, r.top, r.right - r.left, r.bottom - r.top])
+}
+
+/// Whether the game's window or one of this process's windows is in front.
+pub fn game_in_front(title: &str) -> bool {
+    // SAFETY: a plain Win32 call.
+    let front = unsafe { GetForegroundWindow() };
+    !front.is_invalid() && (ours(front) || find(title) == Some(front))
+}
+
+/// Whether `hwnd` is one of this process's windows.
+pub(crate) fn ours(hwnd: HWND) -> bool {
+    // SAFETY: a plain Win32 call.
+    window_pid(hwnd) == unsafe { GetCurrentProcessId() }
 }
 
 /// Whether a point in physical screen pixels is on a monitor.

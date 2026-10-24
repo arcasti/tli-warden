@@ -51,6 +51,9 @@ pub struct Settings {
     /// of an install made before it existed; a shortcut the player deletes is
     /// not made again.
     pub desktop_shortcut: bool,
+    /// Draw a ring on the game around what to click for the advised move,
+    /// see [`super::ring`].
+    pub highlight: bool,
 }
 
 impl Default for Settings {
@@ -73,6 +76,7 @@ impl Default for Settings {
             shared_from: String::new(),
             install_id: String::new(),
             desktop_shortcut: false,
+            highlight: false,
         }
     }
 }

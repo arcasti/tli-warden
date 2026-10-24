@@ -9,6 +9,8 @@ pub mod share;
 #[cfg(windows)]
 pub mod capture;
 #[cfg(windows)]
+pub mod ring;
+#[cfg(windows)]
 pub mod hotkey;
 #[cfg(windows)]
 pub mod http;

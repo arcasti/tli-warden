@@ -818,6 +818,39 @@ fn popup_keeps_the_last_reading() {
     assert_eq!(s.ranking, ranking);
 }
 
+/// A live read of a patrol rings the advised door's card once the solve
+/// ends: three 330 px cards centred 345 apart in y 750-920. A popup read
+/// after it hides the ring; the same board from an opened file gives none.
+#[test]
+fn ring_on_the_advised_door() {
+    let dir = common::frames();
+    let (board, popup) = (dir.join("rec1-t087.png"), dir.join("rec2-t109.png"));
+    if !board.is_file() || !popup.is_file() {
+        println!("skipped: {} is missing", dir.display());
+        return;
+    }
+    let mut s = Session::new(20, Vec::new(), None, None);
+    s.read_live(load_png(&board).unwrap());
+    s.wait();
+    let r = s.reading.clone().unwrap();
+    assert_eq!(r.screen, Screen::Patrol);
+    let Action::Patrol { cell } = s.advice().unwrap().action else { panic!("not a patrol move") };
+    let card = r.model.dest.iter().position(|&d| d == cell).expect("the advised door's card");
+    let (x, y, radius) = s.ring().expect("a ring");
+    let centre = 615.0 + 345.0 * card as f32;
+    assert!((centre - 165.0..centre + 165.0).contains(&x) && (750.0..920.0).contains(&y), "card {card}: ring at ({x}, {y})");
+    assert!((50.0..200.0).contains(&radius), "radius {radius}");
+    s.read_live(load_png(&popup).unwrap());
+    s.wait();
+    assert_eq!(s.ring(), None);
+
+    let mut s = Session::new(20, Vec::new(), None, None);
+    s.read_in_background(load_png(&board).unwrap());
+    s.wait();
+    assert!(s.advice().is_some());
+    assert_eq!(s.ring(), None);
+}
+
 /// A black frame: no board, no pick, no days counter.
 fn black() -> Rgba {
     Rgba { w: 1920, h: 1080, data: [0, 0, 0, 255].repeat(1920 * 1080) }

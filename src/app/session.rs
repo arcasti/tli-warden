@@ -10,6 +10,7 @@ use crate::reader::model::{RUN_DAYS, Warning, WarningKind, iron_law_days, to_mod
 use crate::reader::panels::{Panels, Screen, read_panels_titled};
 use crate::reader::scene::{CELLS, Scene, read_scene};
 use crate::reader::layout::{is_16_9, lay_out_scaled};
+use crate::reader::click;
 use crate::reader::{REF_H, REF_W, Rgba};
 use crate::solver::TUNED;
 use super::runlog::{RunLog, timestamp};
@@ -605,6 +606,9 @@ pub struct Session {
     queued: Option<(Rgba, bool)>,
     /// The frame `scan` reads came from the game, see [`Session::read_live`].
     live: bool,
+    /// The game's screen shows the stored read: it came from the game and no
+    /// read since was kept, see [`Session::ring`].
+    on_screen: bool,
     /// The last read was held as a changed board: the next one is taken
     /// whatever it shows.
     confirming: bool,
@@ -659,6 +663,7 @@ impl Session {
             scan: None,
             queued: None,
             live: false,
+            on_screen: false,
             confirming: false,
             reread: false,
             notify: None,
@@ -770,6 +775,7 @@ impl Session {
                 self.log_read(frame);
             }
             Taken::Kept(line) => {
+                self.on_screen = false;
                 // Off the board or between runs the frame shows another game screen.
                 let frame = frame.filter(|_| line != OFF_BOARD && line != RUN_OVER_WAIT);
                 self.log_miss(screen, line, frame);
@@ -991,6 +997,8 @@ impl Session {
             _ => (scene, panels),
         };
         self.scene = Some((scene, panels, SystemTime::now()));
+        // A pick kept on show is not the screen the game shows.
+        self.on_screen = live && !keep_pick;
         let mut before = std::mem::take(&mut self.steady);
         if new_run {
             before.clear();
@@ -1338,6 +1346,20 @@ impl Session {
             Some(st) => prefer_change(st, &self.ranking, a),
             None => a,
         })
+    }
+
+    /// Where the player clicks for the advice: the centre and radius of a
+    /// ring in the game frame's pixels. None while a solve runs, for a
+    /// reading from an opened file, and while the game shows another screen
+    /// than the reading's (a read since was kept or ended the run).
+    pub fn ring(&self) -> Option<(f32, f32, f32)> {
+        let (Some((_, panels, _)), Some(r)) = (&self.scene, &self.reading) else { return None };
+        if !self.on_screen || self.solving || panels.screen != r.screen {
+            return None;
+        }
+        let advice = self.advice()?;
+        let click = click::target(panels.screen, &panels.spots, &advice.action)?;
+        Some(click::to_frame(&click, self.size.0, self.size.1, self.ui_scale?))
     }
 
     /// The line the window shows under the advice `a`; see [`why_shown`].

@@ -27,13 +27,14 @@ use crate::engine::text::{cell_label, tier_name};
 use crate::engine::{Action, ChoiceId};
 use crate::reader::load_png;
 use crate::reader::model::WarningKind;
+use crate::reader::panels::Screen;
 use crate::reader::ocr;
 use eframe::egui::{self, Align, Align2, Color32, FontId, Layout, Pos2, Rect, RichText, Sense, Shape, Stroke, StrokeKind, Vec2};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 /// Space between two board tiles.
 const GAP: f32 = 4.0;
@@ -159,8 +160,10 @@ pub struct WardenApp {
     log_dir: Option<PathBuf>,
     /// The mark on what to click on the game, made when first shown.
     mark: Option<Mark>,
-    /// The read the player clicked in the game after: no mark until a newer one.
-    clicked: Option<SystemTime>,
+    /// The screen, board and advised action the player clicked in the game
+    /// after: no mark until a reading changes one of them, so the re-reads of
+    /// the same screen as the game moves on after the click leave it hidden.
+    clicked: Option<(Screen, Model, Action)>,
 }
 
 impl WardenApp {
@@ -269,11 +272,12 @@ impl WardenApp {
     /// The mark in physical screen px (centre, half width, half height, and
     /// screen px per reference px): the session's `(x, y, half_w, half_h)`
     /// (see [`Session::mark`]) while the game or this window is in front and
-    /// the player has not clicked in the game since the read.
+    /// the player has not clicked it on this screen, board and advice.
     fn mark_spot(&mut self, (x, y, half_w, half_h): (f32, f32, f32, f32)) -> Option<(f32, f32, f32, f32, f32)> {
-        let at = self.session.reading.as_ref()?.at;
+        let r = self.session.reading.as_ref()?;
+        let shown = (r.screen, r.model.clone(), self.session.advice()?.action);
         let title = &self.settings.window_title;
-        if self.clicked == Some(at) || !game_in_front(title) {
+        if self.clicked.as_ref() == Some(&shown) || !game_in_front(title) {
             return None;
         }
         let rect @ [left, top, _, height] = game_rect(title).ok()?;
@@ -282,7 +286,7 @@ impl WardenApp {
             mark::forget_clicks();
         }
         if mark::clicked_in(rect) {
-            self.clicked = Some(at);
+            self.clicked = Some(shown);
             return None;
         }
         Some((left as f32 + x, top as f32 + y, half_w, half_h, height as f32 / 1080.0))

@@ -9,7 +9,7 @@ use super::ocr::{Line, ocr, ocr_all};
 use super::scene::{beast_at, pick_shown};
 use super::layout::Layout;
 use super::{Rect, Rgba};
-use crate::engine::data::{Beast, Tool, data};
+use crate::engine::data::{Beast, Gift, Tool, data};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Screen {
@@ -512,6 +512,10 @@ pub fn read_panels_titled(img: &Rgba, title: &Rgba) -> Panels {
         }
     } else if has(&title, "Warden's Treasure", 0.75) || title.iter().any(|l| squash(&l.text).contains("treasure")) {
         p.screen = Screen::TreasurePick;
+        // The four cards' middles line up with the instrument cards' (rec1-t085).
+        for (i, x) in offers(&name_lines, &d.gift_names) {
+            p.spots.push((Spot::Card(Gift::ALL[i].key().to_string()), Layout::Board, (x, PICK_Y)));
+        }
     } else if has(&status, "Return to Selection", 0.75) {
         p.screen = Screen::PrisonStatus;
     } else if has(&target, "Select an Inmate to Consume", 0.75) || has(&cancel, "Cancel", 0.8) {

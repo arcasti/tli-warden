@@ -10,11 +10,12 @@ use crate::engine::actions::{Action, ChoiceId};
 /// Target boxes in reference px, width by height: a cell portrait
 /// (portraits at a 175 px pitch, scene.rs PORTRAIT), a destination or
 /// Interrogation card (rec1-t049), an instrument card (y 187-870,
-/// reroll-2000x837), a decision or round Cancel button (rec1-t055 and
-/// rec1-t057) and the Re-roll button.
+/// reroll-2000x837), a Warden's Treasure card (rec1-t085), a decision or
+/// round Cancel button (rec1-t055 and rec1-t057) and the Re-roll button.
 const CELL: (f32, f32) = (130.0, 130.0);
 const DOOR: (f32, f32) = (330.0, 170.0);
 const PICK: (f32, f32) = (457.0, 683.0);
+const TREASURE: (f32, f32) = (420.0, 665.0);
 const BUTTON: (f32, f32) = (140.0, 140.0);
 const REROLL: (f32, f32) = (270.0, 65.0);
 
@@ -47,6 +48,7 @@ pub fn target(screen: Screen, spots: &[(Spot, Layout, (i32, i32))], action: &Act
         (Screen::CellPick, Action::Choose { id: ChoiceId::Cell(n) }) => cell(*n),
         (Screen::InstrumentPick, Action::Choose { id: ChoiceId::Name(key) }) => card(key, PICK),
         (Screen::InstrumentPick, Action::Reroll) => spot(Spot::Button("Re-roll"), REROLL),
+        (Screen::TreasurePick, Action::Choose { id: ChoiceId::Name(key) }) => card(key, TREASURE),
         (Screen::Interrogation, Action::Choose { id: ChoiceId::Name(key) }) => card(key, DOOR),
         _ => None,
     }
@@ -62,7 +64,7 @@ pub fn to_frame(click: &Click, w: usize, h: usize, u: f32) -> (f32, f32, f32, f3
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::data::Tool;
+    use crate::engine::data::{Gift, Tool};
     use crate::reader::panels::{Panels, read_panels_titled};
     use std::path::Path;
 
@@ -145,5 +147,18 @@ mod tests {
         let (x, y, hw, hh) = to_frame(&click, frame.w, frame.h, u);
         // The button is 210 x 55 px on this frame.
         assert!(inside((x as i32, y as i32), (760, 715, 970, 770)) && (95.0..115.0).contains(&hw) && (22.0..30.0).contains(&hh), "({x}, {y}) half {hw} x {hh}");
+    }
+
+    /// The four Warden's Treasure cards, about 420 px across, centre at
+    /// x 310, 747, 1185 and 1623 in y 190-855 (rec1-t085).
+    #[test]
+    fn treasure_cards() {
+        let Some(dir) = super::super::training("s16") else { return };
+        let pick = read(&dir, "rec1-t085.png");
+        assert_eq!(pick.screen, Screen::TreasurePick);
+        for (gift, x) in Gift::ALL.iter().zip([310, 747, 1185, 1623]) {
+            let action = Action::Choose { id: ChoiceId::Name(gift.key().to_string()) };
+            assert!(inside(at(&pick, action).unwrap(), (x - 60, 470, x + 60, 580)), "{gift:?}");
+        }
     }
 }

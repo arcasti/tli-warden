@@ -221,7 +221,7 @@ fn read_board(scene: &Scene, under: Option<&Model>, m: &mut Model, warn: &mut Ve
         if r.covered {
             if let Some(board) = under {
                 m.cells[n] = board.cells[n].clone();
-                kept.push(at);
+                kept.push(n);
                 continue;
             }
             warn.push(Warning::cell(n, format!("Check cell {at}: a tooltip covers it.")));
@@ -255,7 +255,7 @@ fn read_board(scene: &Scene, under: Option<&Model>, m: &mut Model, warn: &mut Ve
                     });
                     let tier = match before.filter(|_| glowless) {
                         Some(t) => {
-                            unlit.push(at.clone());
+                            unlit.push(n);
                             t
                         }
                         None => i64::from(tier),

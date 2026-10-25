@@ -24,8 +24,9 @@ pub fn cell_label(n: usize) -> String {
 }
 
 /// "cell 04", "cells 04 and 08", "cells 04, 08 and 14", or "none".
-pub fn cell_list(labels: &[String]) -> String {
-    match labels {
+pub fn cell_list(cells: &[usize]) -> String {
+    let labels: Vec<String> = cells.iter().map(|&n| cell_label(n)).collect();
+    match labels.as_slice() {
         [] => "none".to_string(),
         [one] => format!("cell {one}"),
         [rest @ .., last] => format!("cells {} and {last}", rest.join(", ")),

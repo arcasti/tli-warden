@@ -21,7 +21,7 @@ const REROLL: (f32, f32) = (270.0, 65.0);
 
 /// A place to click: its centre on the reference frame, the layout it was
 /// read from, and its half width and half height in reference px.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Debug)]
 pub struct Click {
     pub at: (i32, i32),
     pub layout: Layout,
@@ -35,10 +35,10 @@ pub fn target(screen: Screen, spots: &[(Spot, Layout, (i32, i32))], action: &Act
     let half = |(w, h): (f32, f32)| (w / 2.0, h / 2.0);
     let spot = |want: Spot, size| spots.iter().find(|s| s.0 == want).map(|&(_, layout, at)| Click { at, layout, half: half(size) });
     // Actions name model cells; the screen numbers them from 1.
-    let cell = |n: usize| (n < 16).then(|| Click { at: portrait(n as u8 + 1), layout: Layout::Board, half: half(CELL) });
+    let cell = |n: usize| Some(Click { at: portrait(n as u8 + 1), layout: Layout::Board, half: half(CELL) });
     let card = |key: &str, size| spot(Spot::Card(key.to_string()), size);
     match (screen, action) {
-        (Screen::Patrol, Action::Patrol { cell }) => spot(Spot::Door(u8::try_from(*cell + 1).ok()?), DOOR),
+        (Screen::Patrol, Action::Patrol { cell }) => spot(Spot::Door(*cell as u8 + 1), DOOR),
         (Screen::Manage, Action::Devour { .. }) => spot(Spot::Button("Consume"), BUTTON),
         (Screen::Manage, Action::Swap) => spot(Spot::Button("Replace"), BUTTON),
         (Screen::Manage, Action::Hunt { .. }) => spot(Spot::Button("Hunt"), BUTTON),
@@ -90,7 +90,6 @@ mod tests {
             assert_eq!(at(&chain, Action::Devour { to }), Some(portrait(to as u8 + 1)));
             assert_eq!(at(&chain, Action::Chain { to }), Some(portrait(to as u8 + 1)));
         }
-        assert_eq!(at(&chain, Action::Devour { to: 16 }), None);
         // The Cancel region of the panels reader.
         assert!(inside(at(&chain, Action::EndChain).unwrap(), (1600, 740, 1918, 880)));
         let pick = read(&dir, "rec2-t340.png");

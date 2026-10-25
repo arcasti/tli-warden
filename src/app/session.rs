@@ -227,11 +227,10 @@ pub fn consume_targets(options: &[usize], jawed: &[usize], eater: usize) -> (Vec
     if jawed.is_empty() || (jawed.len() == options.len() && options.iter().all(|n| jawed.contains(n))) {
         return (options.to_vec(), None);
     }
-    let cells = |list: &[usize]| cell_list(&list.iter().map(|&n| cell_label(n)).collect::<Vec<_>>());
     let text = format!(
         "{TARGETS_DIFFER}{} and the board read allows {}: check the eater in cell {} and those cells.",
-        cells(jawed),
-        cells(options),
+        cell_list(jawed),
+        cell_list(options),
         cell_label(eater),
     );
     let both: Vec<usize> = options.iter().copied().filter(|n| jawed.contains(n)).collect();

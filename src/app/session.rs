@@ -1189,8 +1189,7 @@ impl Session {
             && !reading.model.devour_used
             && reading.model.swap_used;
         if mid_chain {
-            let m = &mut reading.model;
-            (m.devour_used, m.swap_used, m.hunt_used) = (true, true, true);
+            reading.model.devour_used = true;
         }
         if matches!(reading.screen, Screen::Patrol | Screen::Manage | Screen::CellPick | Screen::PrisonStatus) {
             self.board = Some(reading.model.clone());
@@ -1417,9 +1416,7 @@ impl Session {
         // A Consume target screen after a bite, or the manage screen a chain's
         // Cancel goes back to: the next pick is the chain's.
         let chain = self.chained && matches!(reading.screen, Screen::ChainTarget | Screen::Manage);
-        if !chain {
-            self.retries = 0;
-        }
+        let retries = std::mem::take(&mut self.retries);
         let (mut st, problems) = build_state(&reading.model, SEED);
         if !problems.is_empty() {
             self.problems = problems;
@@ -1445,8 +1442,8 @@ impl Session {
             // read again at once, up to RETRY_READS times.
             if !st.pending.iter().any(|p| matches!(p, Pending::Chain { .. })) {
                 let cell = cell_label(st.position);
-                self.problems = vec![if live && self.retries < RETRY_READS {
-                    self.retries += 1;
+                self.problems = vec![if live && retries < RETRY_READS {
+                    self.retries = retries + 1;
                     self.reread = true;
                     format!("Reading again: the eater in cell {cell} shows no target yet.")
                 } else {
@@ -1454,7 +1451,6 @@ impl Session {
                 }];
                 return;
             }
-            self.retries = 0;
         }
         let first = target && !self.chained;
         let mut warning = None;

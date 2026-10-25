@@ -414,10 +414,6 @@ pub fn decide(st: &State, p: &Params, roll: &mut Rng32) -> Option<Action> {
     if let Some(choice) = st.pending.first() {
         return match choice {
             Pending::Chain { from, options, .. } => {
-                // A Hunt still open ends the chain: it is worth more than another bite.
-                if !hunt_targets(st).is_empty() {
-                    return Some(Action::EndChain);
-                }
                 let bites = devour_options(st, *from).into_iter().filter(|o| options.contains(&o.cell)).collect();
                 let next = devour_scores(&mut ctx, bites);
                 Some(match next.first() {

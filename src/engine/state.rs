@@ -44,6 +44,11 @@ pub struct Params {
     /// show; the JS engine allowed it, and its traces leave the field out.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub markers_avoid_warden: bool,
+    /// Whether the day's Consume leaves only its chain and End, as in the
+    /// game; the JS engine allowed a Replace or Hunt after it, and its traces
+    /// leave the field out.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub consume_last: bool,
 }
 
 fn rises() -> bool {
@@ -83,6 +88,7 @@ impl Default for Params {
             maiden: true,
             hidden_incidents: true,
             markers_avoid_warden: true,
+            consume_last: true,
         }
     }
 }

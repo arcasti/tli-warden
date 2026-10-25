@@ -6,7 +6,7 @@ use super::chain::chain_odds;
 use super::scores::patrol_why;
 use super::{Params, Rng32, TOOL_RANK, TUNED, composition, decide, decide_bite};
 use crate::engine::data::{Beast, RAINBOW, Tool};
-use crate::engine::devour::{can_devour_now, hunt_targets, start_options};
+use crate::engine::devour::{can_devour_now, can_swap, hunt_targets, start_options};
 use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, execution_victims};
 use crate::engine::rules::{clockwise_path, draw_incident, marker_seen, patrol_options};
 use crate::engine::state::{Inmate, Pending, Phase, State};
@@ -164,7 +164,7 @@ pub fn candidates(st: &State) -> Vec<Candidate> {
         out.push(candidate(Action::Devour { to: o.cell }, format!("Consume {meal} in {}", cell_label(o.cell))));
     }
     if let Some((c, i)) = here.and_then(|c| c.inmate.filter(|_| !c.sealed).map(|i| (c, i)))
-        && st.used.swap < st.params.swaps_per_day
+        && can_swap(st)
     {
         out.push(candidate(Action::Swap, format!("Replace the {} in {}", describe(&i), cell_label(c.n))));
     }
@@ -506,7 +506,7 @@ fn coin_reason(st: &State) -> Option<String> {
     let matched = |i: &Inmate| i.tier < RAINBOW && board[i.tier as usize * 4 + i.beast.index()] >= 2;
     let here = st.cells.get(st.position).and_then(|c| c.inmate.filter(|_| !c.sealed));
     let starts = start_options(st);
-    let acts = !starts.is_empty() || st.used.swap < st.params.swaps_per_day;
+    let acts = !starts.is_empty() || can_swap(st);
     let mut meals = starts.iter().filter(|o| !o.scratch).filter_map(|o| st.cells[o.cell].inmate);
     let kept = here.filter(|i| acts && matched(i)).or_else(|| meals.find(matched))?;
     let mut cells: Vec<usize> = st
@@ -584,7 +584,7 @@ pub fn reason(st: &State, action: &Action) -> String {
             if let Some(why) = coin_reason(st) {
                 return why;
             }
-            if let Some((removed, others)) = guillotine_cut(st).filter(|_| st.used.swap < st.params.swaps_per_day) {
+            if let Some((removed, others)) = guillotine_cut(st).filter(|_| can_swap(st)) {
                 return format!(
                     "Skip the Replace: {} would remove {removed} of the {others} other Inmates.",
                     tool_name(Tool::Scapegoat.key())

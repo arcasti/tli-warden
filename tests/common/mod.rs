@@ -37,7 +37,7 @@ pub fn fixture(name: &str) -> PathBuf {
 /// markers each morning at 117 in 10000 per free cell, and let a new marker
 /// land on the warden's cell.
 pub fn no_cap() -> Params {
-    Params { vault_cap: None, incident_spawn_chance: 117, markers_avoid_warden: false, ..Params::default() }
+    Params { vault_cap: None, incident_spawn_chance: 117, markers_avoid_warden: false, consume_last: false, ..Params::default() }
 }
 
 /// Continues a replay from the traced JS state `js` where the JS rolled a repeated step and the

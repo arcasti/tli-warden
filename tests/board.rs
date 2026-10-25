@@ -196,7 +196,7 @@ fn drop_rust_only(rust: &mut Value, js: &Value) {
     if js["params"].get("vaultCap").is_none() {
         rust["params"].as_object_mut().unwrap().remove("vaultCap");
     }
-    for key in ["maiden", "hiddenIncidents", "markersAvoidWarden"] {
+    for key in ["maiden", "hiddenIncidents", "markersAvoidWarden", "consumeLast"] {
         if js["params"].get(key).is_none() {
             rust["params"].as_object_mut().unwrap().remove(key);
         }

@@ -163,6 +163,16 @@ pub fn can_devour_now(s: &State) -> bool {
     s.used.devour < 1
 }
 
+/// The day's Consume has started: only its chain and End remain.
+pub fn consumed(s: &State) -> bool {
+    s.params.consume_last && s.used.devour >= 1
+}
+
+/// A Replace is left today and no Consume has started.
+pub fn can_swap(s: &State) -> bool {
+    s.used.swap < s.params.swaps_per_day && !consumed(s)
+}
+
 /// Today's first-bite options for the inmate in the warden's cell (startOptions).
 pub fn start_options(s: &State) -> Vec<Bite> {
     let cell = &s.cells[s.position];
@@ -323,11 +333,13 @@ pub fn end_chain(s: &mut State) -> Outcome {
 }
 
 /// Hunt targets: with the Blood-Stained Trap, a Lion in the warden's cell
-/// may mark one open Consumable target that has no prey mark yet.
+/// may mark one open Consumable target that has no prey mark yet. None after
+/// the day's Consume.
 pub fn hunt_targets(s: &State) -> Vec<usize> {
     let n = s.position;
     let lion = s.cells[n].inmate.filter(|i| !s.cells[n].sealed && i.beast == Beast::Lion);
-    if s.phase != Phase::Manage || !s.has(Tool::Trap) || s.used.hunt >= 1 || lion.is_none() {
+    let used = s.used.hunt >= 1 || consumed(s);
+    if s.phase != Phase::Manage || !s.has(Tool::Trap) || used || lion.is_none() {
         return Vec::new();
     }
     let linked = |id: u32| s.prey.iter().any(|l| l.lion == id || l.prey == id);

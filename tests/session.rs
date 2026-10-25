@@ -13,7 +13,9 @@ use warden::engine::devour::{devour_options, start_options};
 use warden::engine::{Action, ChoiceId};
 use warden::reader::{Rgba, load_png, read_model};
 use warden::reader::model::WarningKind;
-use warden::reader::panels::Screen;
+use warden::reader::click::target;
+use warden::reader::panels::{Screen, read_panels};
+use warden::reader::scene::portrait;
 use warden::solver::TUNED;
 use warden::solver::solve::{Rollouts, solve};
 
@@ -512,6 +514,90 @@ fn consume_target_with_no_target_read_gets_no_advice() {
     assert_eq!(s.advice(), None, "{:?}", s.ranking);
     assert!(s.ranking.is_empty(), "{:?}", s.ranking);
     assert!(s.problems.iter().any(|p| p.contains("eater in cell 16")), "{:?}", s.problems);
+}
+
+/// The day 14 chain of run1235 (warden on 07): the manage screen with
+/// Consume, Replace and End (f0064), the first bite's target screen (f0065),
+/// the target screen after the bite (f0066, the eater now a wolf) and the
+/// manage screen Cancel goes back to, with only Consume and End (f0067).
+const CHAIN_1235: [&str; 4] = ["run1235-f0064.png", "run1235-f0065.png", "run1235-f0066.png", "run1235-f0067.png"];
+
+/// Cancel on a chain's target screen goes back to a manage screen with only
+/// Consume and End: it goes on with the same chain, never a Replace, a Hunt
+/// or an End the day, and the advice is clicked on Consume or End.
+#[test]
+fn manage_after_a_chain_cancel_goes_on_with_the_chain() {
+    let Some(s) = read_all(Vec::new(), &CHAIN_1235) else { return };
+    let r = s.reading.clone().unwrap();
+    assert_eq!(r.screen, Screen::Manage);
+    assert!(r.model.devour_used && r.model.swap_used && r.model.hunt_used, "{:?}", r.model);
+    assert!(!s.ranking.is_empty(), "{:?}", s.problems);
+    assert!(s.ranking.iter().all(|o| matches!(o.action, Action::Chain { .. } | Action::EndChain)), "{:?}", s.ranking);
+    let advice = s.advice().expect("advice");
+    let panels = read_panels(&frame(CHAIN_1235[3]));
+    let at = |a: &Action| target(Screen::Manage, &panels.spots, a).map(|c| c.at);
+    let (consume, end) = (at(&Action::Devour { to: 0 }), at(&Action::End));
+    assert!(consume.is_some() && end.is_some(), "{:?}", panels.spots);
+    let click = at(&advice.action);
+    assert!(click == consume || click == end, "{advice:?} {click:?}");
+}
+
+/// The day's manage screen read again with Replace on show after a chain
+/// is a fresh one: the day's Consume and Replace are open.
+#[test]
+fn manage_with_replace_after_a_chain_is_fresh() {
+    let frames = [CHAIN_1235[0], CHAIN_1235[1], CHAIN_1235[2], CHAIN_1235[0]];
+    let Some(s) = read_all(Vec::new(), &frames) else { return };
+    let r = s.reading.clone().unwrap();
+    assert_eq!(r.screen, Screen::Manage);
+    assert!(!r.model.devour_used && !r.model.swap_used, "{:?}", r.model);
+    assert!(s.ranking.iter().all(|o| !matches!(o.action, Action::Chain { .. } | Action::EndChain)), "{:?}", s.ranking);
+    assert!(s.ranking.iter().any(|o| matches!(o.action, Action::Swap)), "{:?}", s.ranking);
+}
+
+/// f0066 with cell 02, the wolf's only target, painted over with the
+/// sealed cell 08's portrait: the board read gives the eater nothing.
+fn no_target_1235() -> Rgba {
+    let mut img = frame(CHAIN_1235[2]);
+    let ((x0, y0), (x1, y1)) = (portrait(8), portrait(2));
+    for dy in -75..75 {
+        for dx in -75..75 {
+            let from = (((y0 + dy) as usize) * img.w + (x0 + dx) as usize) * 4;
+            let to = (((y1 + dy) as usize) * img.w + (x1 + dx) as usize) * 4;
+            img.data.copy_within(from..from + 4, to);
+        }
+    }
+    img
+}
+
+/// A live chain read that gives the eater no target is read again at once,
+/// with a line that says so, RETRY_READS (8) times in a row; the next one
+/// shows the problem. A read that finds the target again gives advice, and
+/// the count starts over.
+#[test]
+fn chain_read_with_no_target_is_read_again() {
+    let Some(mut s) = read_all(Vec::new(), &CHAIN_1235[..2]) else { return };
+    let retry = |s: &Session| s.problems.iter().any(|p| p.starts_with("Reading again: the eater in cell 07"));
+    let red = |s: &Session| s.problems.iter().any(|p| p.starts_with("The game shows a target for the eater in cell 07"));
+    for n in 0..8 {
+        s.read_live(no_target_1235());
+        s.wait();
+        assert_eq!(s.reading.as_ref().unwrap().screen, Screen::ChainTarget);
+        assert!(retry(&s), "read {n}: {:?}", s.problems);
+        assert!(s.wants_reread(), "read {n}");
+        assert!(s.ranking.is_empty() && s.advice().is_none(), "read {n}: {:?}", s.ranking);
+    }
+    s.read_live(no_target_1235());
+    s.wait();
+    assert!(red(&s), "{:?}", s.problems);
+    assert!(!s.wants_reread());
+    s.read_live(frame(CHAIN_1235[2]));
+    s.wait();
+    assert!(s.problems.is_empty(), "{:?}", s.problems);
+    assert!(s.advice().is_some());
+    s.read_live(no_target_1235());
+    s.wait();
+    assert!(retry(&s) && s.wants_reread(), "{:?}", s.problems);
 }
 
 /// The red jaws over the targets of the Consume target screen rec4-t110

@@ -213,6 +213,11 @@ fn steady_key(w: &Warning) -> Option<String> {
     text.starts_with(CHECK_CELL).then(|| text.to_string())
 }
 
+/// Live chain reads that give the eater no target are read again this many
+/// times in a row (one 250 ms sample each, about 2 s) before the problem
+/// asks the player to check the board.
+const RETRY_READS: usize = 8;
+
 /// How the reader's warnings about one cell's read start.
 const CHECK_CELL: &str = "Check cell ";
 
@@ -580,6 +585,12 @@ pub struct Session {
     /// A Consume target screen read since the last manage screen showed a
     /// bite: the target screen is a chain's (see [`bitten`]).
     chained: bool,
+    /// Live chain reads in a row that gave the eater no target, see
+    /// [`RETRY_READS`].
+    retries: usize,
+    /// The solve about to start is a live read's: a chain read with no
+    /// target is read again, see [`RETRY_READS`].
+    live_solve: bool,
     /// The meal picked on the last Consume target screen since the last
     /// patrol, manage or cell pick screen: what a treasure pick covers, see
     /// [`vaulted`].
@@ -647,6 +658,8 @@ impl Session {
             vault_top: None,
             prey_seen: Vec::new(),
             chained: false,
+            retries: 0,
+            live_solve: false,
             meal: None,
             steady: BTreeMap::new(),
             edits: BTreeMap::new(),
@@ -1001,7 +1014,9 @@ impl Session {
             let n = before.get(&k).map_or(1, |n| n + 1);
             (k, n)
         }).collect();
+        // A chain read retried for its missing target is solved again.
         if !held_changed
+            && self.retries == 0
             && let (Some(old), Some(new)) = (&self.reading, self.build())
             && (&old.model, old.screen, old.days_left) == (&new.model, new.screen, new.days_left)
         {
@@ -1012,6 +1027,7 @@ impl Session {
         self.notes = notes;
         self.edits.clear();
         self.markers.clear();
+        self.live_solve = live;
         self.rebuild();
         Taken::Installed
     }
@@ -1164,9 +1180,21 @@ impl Session {
             reading.model.cells = m.cells.clone();
             (reading.model.devour_used, reading.model.swap_used) = (m.devour_used, m.swap_used);
         }
+        // Cancel on a chain's target screen goes back to the day's manage
+        // screen with only Consume and End: Consume goes on with the same
+        // chain, and Replace and Hunt are gone for the day.
+        let mid_chain = reading.screen == Screen::Manage
+            && self.chained
+            && self.consume.as_ref().is_some_and(|m| m.day == reading.model.day)
+            && !reading.model.devour_used
+            && reading.model.swap_used;
+        if mid_chain {
+            let m = &mut reading.model;
+            (m.devour_used, m.swap_used, m.hunt_used) = (true, true, true);
+        }
         if matches!(reading.screen, Screen::Patrol | Screen::Manage | Screen::CellPick | Screen::PrisonStatus) {
             self.board = Some(reading.model.clone());
-            self.chained = false;
+            self.chained = mid_chain;
             self.meal = None;
         }
         match reading.screen {
@@ -1384,7 +1412,14 @@ impl Session {
     /// old worker at its next send.
     pub fn solve(&mut self) {
         self.stop();
+        let live = std::mem::take(&mut self.live_solve);
         let Some(reading) = &self.reading else { return };
+        // A Consume target screen after a bite, or the manage screen a chain's
+        // Cancel goes back to: the next pick is the chain's.
+        let chain = self.chained && matches!(reading.screen, Screen::ChainTarget | Screen::Manage);
+        if !chain {
+            self.retries = 0;
+        }
         let (mut st, problems) = build_state(&reading.model, SEED);
         if !problems.is_empty() {
             self.problems = problems;
@@ -1399,25 +1434,32 @@ impl Session {
         // A Consume target screen picks the day's first bite, or a chain's
         // next, among the cells the screen marks as targets.
         let target = reading.screen == Screen::ChainTarget;
-        if target && self.chained {
+        if chain {
             if let Some(eater) = st.cells[st.position].inmate {
                 offer_chain(&mut st, eater.id);
             }
-            // The game opens this screen only while the eater has a target, so
-            // a board read that gives it none is wrong (the eater's rarity not
-            // risen yet, a misread target) and gets no advice.
+            // The game shows these screens only while the eater has a target,
+            // so a board read that gives it none is wrong and gets no advice.
+            // Most often the eater was read before its portrait changed after
+            // the bite, a change too small to start a read: a live read is
+            // read again at once, up to RETRY_READS times.
             if !st.pending.iter().any(|p| matches!(p, Pending::Chain { .. })) {
-                self.problems = vec![format!(
-                    "The board read gives the eater in cell {} nothing to Consume, but the game marks targets: check the eater and the marked cells.",
-                    cell_label(st.position)
-                )];
+                let cell = cell_label(st.position);
+                self.problems = vec![if live && self.retries < RETRY_READS {
+                    self.retries += 1;
+                    self.reread = true;
+                    format!("Reading again: the eater in cell {cell} shows no target yet.")
+                } else {
+                    format!("The game shows a target for the eater in cell {cell}, but the board read gives it none: check the eater and the marked cells.")
+                }];
                 return;
             }
+            self.retries = 0;
         }
         let first = target && !self.chained;
         let mut warning = None;
         let mut bites = Vec::new();
-        if target {
+        if target || chain {
             let jawed = self.scene.as_ref().map_or(Vec::new(), |(scene, _, _)| jawed(scene));
             let (eater, chain) = (st.position, st.pending.iter_mut().find_map(|p| match p {
                 Pending::Chain { options, .. } => Some(options),
@@ -1511,6 +1553,7 @@ impl Session {
         self.vault_top = None;
         self.prey_seen.clear();
         self.chained = false;
+        self.retries = 0;
         self.meal = None;
         self.advised_tool = None;
         self.held_edit = None;

@@ -5,7 +5,7 @@ use super::chain::{best_meal, coin_of_fate, devour_delta, replace_odds};
 use super::values::{activation, execution_value, fresh_value, stair_delta, swap_value};
 use super::{Comp, Ctx, Dist, Params, Rng32, TOP, beasts, composition, dist_worth, door_dist, seen_door, tier_values, worth};
 use crate::engine::data::{Beast, Card, ObjectiveKind, RAINBOW, TYRANNY, Tool, data};
-use crate::engine::devour::{Bite, eater_mask, sure_gain};
+use crate::engine::devour::{Bite, can_swap, eater_mask, sure_gain};
 use crate::engine::incidents::{CHAIN_REACTION, EXECUTION_EFFICIENCY, SEWER_RATWAY};
 use crate::engine::rules::{clockwise_path, fitting_incidents, land, marker_seen, steps_between};
 use crate::engine::state::{Cell, Inmate, State};
@@ -147,7 +147,7 @@ pub fn patrol_scores(ctx: &mut Ctx, cells: &[usize]) -> Vec<(usize, f64)> {
     let st = ctx.st;
     let p = ctx.p;
     let (mut board, crowd) = composition(st, None);
-    let swap_left = st.used.swap < st.params.swaps_per_day;
+    let swap_left = can_swap(st);
     // The door in cell c, by whether its opening sets off the "after opening"
     // instruments; an unseen door is valued once per kind of opening.
     let mut fresh: [Option<f64>; 2] = [None; 2];
@@ -537,7 +537,7 @@ pub fn devour_scores(ctx: &mut Ctx, options: Vec<Bite>) -> Vec<(usize, f64)> {
 pub fn swap_gain_here(ctx: &Ctx) -> f64 {
     let st = ctx.st;
     let here = &st.cells[st.position];
-    let Some(inmate) = here.inmate.filter(|_| !here.sealed && st.used.swap < st.params.swaps_per_day) else {
+    let Some(inmate) = here.inmate.filter(|_| !here.sealed && can_swap(st)) else {
         return f64::NEG_INFINITY;
     };
     let (comp, crowd) = composition(st, Some(st.position));
@@ -646,16 +646,18 @@ mod tests {
     }
 
     #[test]
-    fn a_lion_with_the_trap_ends_the_chain_for_its_hunt() {
+    fn a_lion_with_the_trap_keeps_its_chain() {
         let mut st = bare(5);
         (st.phase, st.position) = (Phase::Manage, 3);
+        st.used.devour = 1;
         st.cells[3].inmate = Some(Inmate { id: 900, beast: Beast::Lion, tier: 2 });
         st.cells[4].inmate = Some(Inmate { id: 901, beast: Beast::Rat, tier: 2 });
         st.pending = vec![Pending::Chain { from: 3, eater_id: 900, options: vec![4] }];
         let pick = |st: &State| crate::solver::decide(st, &TUNED, &mut crate::solver::Rng32::new(1));
         assert_eq!(pick(&st), Some(Action::Chain { to: 4 }));
+        // No Hunt is left after the day's Consume, so the Trap changes nothing.
         st.tools.push(Tool::Trap);
-        assert_eq!(pick(&st), Some(Action::EndChain));
+        assert_eq!(pick(&st), Some(Action::Chain { to: 4 }));
     }
 
     #[test]

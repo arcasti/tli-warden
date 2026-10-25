@@ -2,7 +2,7 @@
 //! JS `bounded`: the incident markers are synced after every action.
 
 use super::data::{Beast, Card, Gift, RAINBOW, Tool, data};
-use super::devour::{devour, devour_next, end_chain, hunt, refresh_chain};
+use super::devour::{can_swap, consumed, devour, devour_next, end_chain, hunt, refresh_chain};
 use super::gifts::{apply_gift, interrogate};
 use super::incidents::{ratway_move, resolve_event};
 use super::rng::{pick_index, shuffle};
@@ -108,7 +108,8 @@ pub fn patrol(s: &mut State, n: usize) -> Outcome {
     Outcome::Ok
 }
 
-/// Replace: the inmate in the warden's cell makes way for a new one.
+/// Replace: the inmate in the warden's cell makes way for a new one. Not after
+/// the day's Consume.
 pub fn swap(s: &mut State) -> Outcome {
     if let Some(reason) = guard(s, Need::Manage) {
         return Outcome::Fail(reason);
@@ -118,7 +119,10 @@ pub fn swap(s: &mut State) -> Outcome {
     let Some(old) = s.cells[n].inmate.filter(|_| !s.cells[n].sealed) else {
         return Outcome::Fail("The warden’s cell has no Inmate to replace.");
     };
-    if s.used.swap >= s.params.swaps_per_day {
+    if consumed(s) {
+        return Outcome::Fail("After a Consume only the chain or End remain today.");
+    }
+    if !can_swap(s) {
         return Outcome::Fail("No Replace left today.");
     }
     let mut weights = weights(&s.params.tier_weights);

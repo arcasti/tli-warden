@@ -648,6 +648,43 @@ mod tests {
         assert_eq!(offer(&s), at_zero);
     }
 
+    /// An open, empty block in the Manage phase with the Trap: a Lion in cell 3
+    /// and two Rats it can consume in cells 4 and 5.
+    fn lion_manage() -> State {
+        let mut s = new_game("AFTER-CONSUME");
+        for c in &mut s.cells {
+            (c.sealed, c.inmate, c.hidden, c.event, c.nest) = (false, None, None, None, None);
+        }
+        s.pending.clear();
+        s.tools = vec![Tool::Trap];
+        (s.phase, s.position) = (Phase::Manage, 3);
+        s.cells[3].inmate = Some(make_inmate(&mut s, Beast::Lion, 2));
+        s.cells[4].inmate = Some(make_inmate(&mut s, Beast::Rat, 2));
+        s.cells[5].inmate = Some(make_inmate(&mut s, Beast::Rat, 2));
+        s
+    }
+
+    #[test]
+    fn no_replace_after_a_consume() {
+        use crate::engine::actions::{Action, Outcome, apply};
+        let mut s = lion_manage();
+        assert!(apply(&mut s.clone(), &Action::Swap).is_ok());
+        s.used.devour = 1;
+        let before = s.cells[3].inmate;
+        let out = apply(&mut s, &Action::Swap);
+        assert_eq!(out, Outcome::Fail("After a Consume only the chain or End remain today."));
+        assert_eq!((s.cells[3].inmate, s.used.swap), (before, 0));
+    }
+
+    #[test]
+    fn no_hunt_after_a_consume() {
+        use crate::engine::devour::hunt_targets;
+        let mut s = lion_manage();
+        assert_eq!(hunt_targets(&s), vec![4, 5]);
+        s.used.devour = 1;
+        assert!(hunt_targets(&s).is_empty());
+    }
+
     #[test]
     fn reroll_needs_an_instrument_pick() {
         use crate::engine::actions::{Action, apply};

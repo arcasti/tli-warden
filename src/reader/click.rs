@@ -39,10 +39,11 @@ pub fn target(screen: Screen, spots: &[(Spot, Layout, (i32, i32))], action: &Act
     let card = |key: &str, size| spot(Spot::Card(key.to_string()), size);
     match (screen, action) {
         (Screen::Patrol, Action::Patrol { cell }) => spot(Spot::Door(*cell as u8 + 1), DOOR),
-        (Screen::Manage, Action::Devour { .. }) => spot(Spot::Button("Consume"), BUTTON),
+        // A chain's manage screen (Cancel on its target screen) shows only Consume and End.
+        (Screen::Manage, Action::Devour { .. } | Action::Chain { .. }) => spot(Spot::Button("Consume"), BUTTON),
         (Screen::Manage, Action::Swap) => spot(Spot::Button("Replace"), BUTTON),
         (Screen::Manage, Action::Hunt { .. }) => spot(Spot::Button("Hunt"), BUTTON),
-        (Screen::Manage, Action::End) => spot(Spot::Button("End"), BUTTON),
+        (Screen::Manage, Action::End | Action::EndChain) => spot(Spot::Button("End"), BUTTON),
         (Screen::ChainTarget, Action::Devour { to } | Action::Chain { to } | Action::Choose { id: ChoiceId::Cell(to) }) => cell(*to),
         (Screen::ChainTarget, Action::EndChain) => spot(Spot::Button("Cancel"), BUTTON),
         (Screen::CellPick, Action::Choose { id: ChoiceId::Cell(n) }) => cell(*n),
@@ -116,7 +117,7 @@ mod tests {
         // Consume, Replace and End, icon and name, about 140 px across round x 614, 960 and 1304.
         let manage = read(&dir, "rec1-t055.png");
         assert_eq!(manage.screen, Screen::Manage);
-        for (action, x) in [(Action::Devour { to: 4 }, 614), (Action::Swap, 960), (Action::End, 1304)] {
+        for (action, x) in [(Action::Devour { to: 4 }, 614), (Action::Chain { to: 4 }, 614), (Action::Swap, 960), (Action::End, 1304), (Action::EndChain, 1304)] {
             assert!(inside(at(&manage, action.clone()).unwrap(), (x - 70, 775, x + 70, 915)), "{action:?}");
         }
         assert_eq!(at(&manage, Action::Hunt { cell: 4 }), None);

@@ -2,7 +2,7 @@
 //! JS `bounded`: the incident markers are synced after every action.
 
 use super::data::{Beast, Card, Gift, RAINBOW, Tool, data};
-use super::devour::{can_swap, consumed, devour, devour_next, end_chain, hunt, refresh_chain};
+use super::devour::{consumed, devour, devour_next, end_chain, hunt, refresh_chain};
 use super::gifts::{apply_gift, interrogate};
 use super::incidents::{ratway_move, resolve_event};
 use super::rng::{pick_index, shuffle};
@@ -122,7 +122,7 @@ pub fn swap(s: &mut State) -> Outcome {
     if consumed(s) {
         return Outcome::Fail("After a Consume only the chain or End remain today.");
     }
-    if !can_swap(s) {
+    if s.used.swap >= s.params.swaps_per_day {
         return Outcome::Fail("No Replace left today.");
     }
     let mut weights = weights(&s.params.tier_weights);

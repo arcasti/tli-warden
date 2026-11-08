@@ -11,13 +11,12 @@ use crate::engine::text::tier_name;
 use crate::engine::{Action, apply};
 use crate::solver::solve::{candidates, hide_future};
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 /// One `read` line of a run log.
-#[derive(Debug, PartialEq)]
 pub struct Read {
     pub at: String,
     pub model: Model,
@@ -53,13 +52,10 @@ pub fn log_files(paths: &[PathBuf]) -> Vec<PathBuf> {
         for p in entries {
             if p.is_dir() {
                 walk(&p, out);
-            } else if is_log(&p) {
+            } else if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("jsonl")) {
                 out.push(p);
             }
         }
-    }
-    fn is_log(p: &Path) -> bool {
-        p.extension().is_some_and(|e| e.eq_ignore_ascii_case("jsonl"))
     }
     let mut out = Vec::new();
     for p in paths {
@@ -73,7 +69,7 @@ pub fn log_files(paths: &[PathBuf]) -> Vec<PathBuf> {
 }
 
 /// One cell as the reader sees it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 struct CellView {
     sealed: bool,
     inmate: Option<(Beast, i32)>,
@@ -86,7 +82,7 @@ struct CellView {
 }
 
 /// What the reader sees of a state.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 struct View {
     day: u32,
     position: usize,
@@ -128,24 +124,8 @@ pub enum Field {
     Marker,
 }
 
-impl Field {
-    fn name(self) -> &'static str {
-        match self {
-            Field::Sealed => "sealed",
-            Field::Inmate => "inmate",
-            Field::Beast => "beast",
-            Field::Tier => "tier",
-            Field::Known => "known",
-            Field::Hidden => "hidden tier",
-            Field::Scratch => "scratch",
-            Field::Nest => "nest",
-            Field::Marker => "marker",
-        }
-    }
-}
-
 /// Where the engine's result and the read board differ.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "what", rename_all = "lowercase")]
 pub enum Mismatch {
     Cell { cell: usize, field: Field, engine: String, read: String },
@@ -159,7 +139,8 @@ impl Mismatch {
     /// A short name to group mismatches by.
     pub fn kind(&self) -> String {
         match self {
-            Mismatch::Cell { field, .. } => format!("cell {}", field.name()),
+            Mismatch::Cell { field: Field::Hidden, .. } => "cell hidden tier".to_string(),
+            Mismatch::Cell { field, .. } => format!("cell {field:?}").to_lowercase(),
             Mismatch::Day { .. } => "day".to_string(),
             Mismatch::Position { .. } => "position".to_string(),
             Mismatch::Vault { .. } => "vault".to_string(),
@@ -269,7 +250,9 @@ pub fn explain(a: &Model, b: &Model, seeds: u32) -> Verdict {
         *best = Some(Explanation { label: label(), end, mismatches, reveals });
         done
     };
-    'moves: for c in candidates(&st) {
+    let moves = candidates(&st);
+    let mut after = Vec::new();
+    'moves: for c in &moves {
         for seed in 0..seeds {
             let mut s = st.clone();
             hide_future(&mut s, seed);
@@ -277,21 +260,17 @@ pub fn explain(a: &Model, b: &Model, seeds: u32) -> Verdict {
             if consider(&mut best, &s, &|| c.label.clone(), c.action == Action::End) {
                 break 'moves;
             }
+            after.push((c, s));
         }
     }
     if best.as_ref().is_some_and(|b| !b.mismatches.is_empty()) {
         // Reads can miss a move: try every pair of moves too.
-        'pairs: for c in candidates(&st) {
-            for seed in 0..seeds {
-                let mut s = st.clone();
-                hide_future(&mut s, seed);
-                apply(&mut s, &c.action);
-                for c2 in candidates(&s) {
-                    let mut s2 = s.clone();
-                    apply(&mut s2, &c2.action);
-                    if consider(&mut best, &s2, &|| format!("{}, then {}", c.label, c2.label), c.action == Action::End) {
-                        break 'pairs;
-                    }
+        'pairs: for (c, s) in &after {
+            for c2 in candidates(s) {
+                let mut s2 = s.clone();
+                apply(&mut s2, &c2.action);
+                if consider(&mut best, &s2, &|| format!("{}, then {}", c.label, c2.label), c.action == Action::End) {
+                    break 'pairs;
                 }
             }
         }
@@ -300,7 +279,7 @@ pub fn explain(a: &Model, b: &Model, seeds: u32) -> Verdict {
 }
 
 /// A transition no candidate explains.
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Serialize)]
 pub struct Unexplained {
     pub file: String,
     pub a_at: String,
@@ -338,32 +317,29 @@ impl Report {
                 continue;
             }
             let verdict = explain(&a.model, &b.model, seeds);
-            let end = matches!(&verdict, Verdict::Best(e) if e.end);
-            if verdict != Verdict::Unchanged {
-                let spawned = a.model.cells.iter().zip(&b.model.cells).filter(|(ca, cb)| ca.event().is_none() && cb.event().is_some()).count();
-                let row = self.markers.entry((format!("{:?}", a.model.step).to_lowercase(), end)).or_default();
-                row.0 += 1;
-                row.1 += spawned as u32;
+            if verdict == Verdict::Unchanged {
+                self.unchanged += 1;
+                continue;
             }
+            let end = matches!(&verdict, Verdict::Best(e) if e.end);
+            let spawned = a.model.cells.iter().zip(&b.model.cells).filter(|(ca, cb)| ca.event().is_none() && cb.event().is_some()).count();
+            let row = self.markers.entry((format!("{:?}", a.model.step).to_lowercase(), end)).or_default();
+            row.0 += 1;
+            row.1 += spawned as u32;
             let (label, mismatches) = match verdict {
-                Verdict::Unchanged => {
-                    self.unchanged += 1;
-                    continue;
-                }
-                Verdict::NoCandidates => (None, Vec::new()),
                 Verdict::Best(e) => {
                     if e.mismatches.is_empty() {
                         // An inmate may rise after its door opens.
                         for &t in &e.reveals {
-                            if let Some(n) = self.doors.get_mut(t as usize) {
-                                *n += 1;
-                            }
+                            self.doors[t as usize] += 1;
                         }
                         self.explained += 1;
                         continue;
                     }
                     (Some(e.label), e.mismatches)
                 }
+                // Unchanged already went on to the next transition above.
+                Verdict::NoCandidates | Verdict::Unchanged => (None, Vec::new()),
             };
             self.unexplained.push(Unexplained { file: file.to_string(), a_at: a.at.clone(), b_at: b.at.clone(), label, mismatches });
         }
@@ -413,11 +389,7 @@ impl Report {
             let how = if *end { "end" } else { "other" };
             let _ = writeln!(s, "  {step:<8} {how:<6} {n:>8} {m:>8} {:>8.3}", f64::from(*m) / f64::from(*n));
         }
+        s.pop();
         s
-    }
-
-    /// One JSON line per unexplained transition.
-    pub fn unexplained_lines(&self) -> String {
-        self.unexplained.iter().map(|u| json!(u).to_string() + "\n").collect()
     }
 }

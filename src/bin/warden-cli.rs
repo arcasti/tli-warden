@@ -277,9 +277,10 @@ fn run_replay(args: &[String]) -> Result<ExitCode, String> {
         let name = file.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
         report.add_log(&name, &parse_log(&text), seeds);
     }
-    out!("{}", report.summary().trim_end());
+    out!("{}", report.summary());
     if let Some(f) = out_file {
-        std::fs::write(f, report.unexplained_lines()).map_err(|e| format!("{f}: {e}"))?;
+        let lines: String = report.unexplained.iter().map(|u| serde_json::json!(u).to_string() + "\n").collect();
+        std::fs::write(f, lines).map_err(|e| format!("{f}: {e}"))?;
     }
     Ok(ExitCode::SUCCESS)
 }

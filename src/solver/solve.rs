@@ -3,6 +3,8 @@
 //! the reasons behind the strategy's pick.
 
 use super::chain::chain_odds;
+use super::features::{encode, is_morning};
+use super::net::Net;
 use super::scores::patrol_why;
 use super::{Params, Rng32, TOOL_RANK, TUNED, composition, decide, decide_bite};
 use crate::engine::data::{Beast, RAINBOW, Tool};
@@ -27,6 +29,25 @@ pub fn playout(st: &mut State, p: &Params, roll: &mut Rng32) {
             break;
         }
     }
+}
+
+/// `playout` up to the next morning, valued there by `net`; a run that ends
+/// first, or a move that fails with its End Day, is valued by its Riot loot. A
+/// state that is already a morning is valued as it stands.
+pub fn settle(st: &mut State, p: &Params, roll: &mut Rng32, net: &Net) -> f64 {
+    for _ in 0..2000 {
+        if st.phase == Phase::Ended {
+            break;
+        }
+        if is_morning(st) {
+            return f64::from(net.value(&encode(st)));
+        }
+        let Some(action) = decide(st, p, roll) else { break };
+        if !apply(st, &action).is_ok() && !(action != Action::End && apply(st, &Action::End).is_ok()) {
+            break;
+        }
+    }
+    st.loot()
 }
 
 /// hideFuture: re-rolls everything the player can't see, the game's dice and
@@ -237,9 +258,13 @@ pub fn solve(st: &State, rollouts: usize, seed: u32, p: &Params) -> Vec<SolveOpt
 /// rounds and keeps the values it has. The checkpoints fall on fixed round
 /// counts, so racing keeps the ranking independent of steps and threads.
 /// With one candidate left the solve is over and `run` plays nothing more.
+///
+/// With a net (see [`Rollouts::net`]), a playout stops at the next morning
+/// and takes the net's value there instead of playing the run to the end.
 pub struct Rollouts<'a> {
     base: State,
     p: &'a Params,
+    net: Option<&'a Net>,
     list: Vec<Candidate>,
     pick: Option<Action>,
     random: Rng32,
@@ -292,7 +317,13 @@ impl<'a> Rollouts<'a> {
             None => decide(&base, p, roll),
         };
         let n = list.len();
-        Rollouts { base, p, list, pick, random: Rng32::new(seed), vals: vec![Vec::new(); n], best: vec![0.0; n], live: vec![true; n], rounds: 0 }
+        Rollouts { base, p, net: None, list, pick, random: Rng32::new(seed), vals: vec![Vec::new(); n], best: vec![0.0; n], live: vec![true; n], rounds: 0 }
+    }
+
+    /// Values the playouts with `net` from the next morning on (see [`settle`]).
+    pub fn net(mut self, net: &'a Net) -> Rollouts<'a> {
+        self.net = Some(net);
+        self
     }
 
     /// Rounds played so far.
@@ -389,7 +420,9 @@ impl<'a> Rollouts<'a> {
     }
 
     /// One round on `seed`: per running candidate, the Riot loot (NaN when
-    /// the move does not apply) and the best rarity reached (0 then).
+    /// the move does not apply) and the best rarity reached (0 then). With a
+    /// net, the loot is the net's value at the next morning and the best
+    /// rarity is the one reached by then.
     fn round(&self, seed: u32) -> Vec<(f64, f64)> {
         // The hidden future is the same for every candidate of the round.
         let mut hidden = self.base.clone();
@@ -403,10 +436,17 @@ impl<'a> Rollouts<'a> {
                 if !apply(&mut trial, &c.action).is_ok() {
                     return (f64::NAN, 0.0);
                 }
-                playout(&mut trial, self.p, &mut Rng32::new(seed ^ 0x9e3779b9));
+                let roll = &mut Rng32::new(seed ^ 0x9e3779b9);
+                let value = match self.net {
+                    Some(net) => settle(&mut trial, self.p, roll, net),
+                    None => {
+                        playout(&mut trial, self.p, roll);
+                        trial.loot()
+                    }
+                };
                 // Second measure: the best rarity reached.
                 let top = trial.cells.iter().filter_map(|c| c.inmate.filter(|_| !c.sealed)).map(|i| i.tier).max().unwrap_or(0);
-                (trial.loot(), f64::from(top.max(if trial.vault.is_empty() { 0 } else { RAINBOW }).max(0)))
+                (value, f64::from(top.max(if trial.vault.is_empty() { 0 } else { RAINBOW }).max(0)))
             })
             .collect()
     }
@@ -638,5 +678,56 @@ pub fn reason(st: &State, action: &Action) -> String {
                 rank.map_or(String::new(), |r| format!("Ranked #{} of {} Torture Instruments in training.", r + 1, TOOL_RANK.len()))
             }
         },
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::engine::new_game;
+    use crate::solver::features::INPUTS;
+
+    /// A net of `INPUTS` -> 2 -> 2 -> 1 with zero weights and output bias 2.5.
+    pub(crate) fn zero_net() -> Net {
+        let mut bytes = b"WNET".to_vec();
+        for n in [INPUTS as u32, 2, 2] {
+            bytes.extend_from_slice(&n.to_le_bytes());
+        }
+        // w1, b1, w2, b2, w3.
+        for _ in 0..INPUTS * 2 + 2 + 4 + 2 + 2 {
+            bytes.extend_from_slice(&0f32.to_le_bytes());
+        }
+        bytes.extend_from_slice(&2.5f32.to_le_bytes());
+        Net::from_bytes(&bytes).unwrap()
+    }
+
+    #[test]
+    fn settle_values_a_morning_by_the_net_and_an_ended_run_by_its_loot() {
+        let net = zero_net();
+        let (mut st, roll) = (new_game("1-0"), &mut Rng32::new(1));
+        while !is_morning(&st) {
+            let action = decide(&st, &TUNED, roll).unwrap();
+            assert!(apply(&mut st, &action).is_ok());
+        }
+        let mut morning = st.clone();
+        assert_eq!(settle(&mut morning, &TUNED, roll, &net), 2.5);
+        assert!(morning == st, "a morning is valued as it stands");
+        playout(&mut st, &TUNED, &mut Rng32::new(1));
+        assert_eq!(st.phase, Phase::Ended);
+        assert_eq!(settle(&mut st.clone(), &TUNED, &mut Rng32::new(1), &net), st.loot());
+    }
+
+    #[test]
+    fn rollouts_with_a_net_rank_the_same_on_any_thread_count() {
+        let net = zero_net();
+        let st = new_game("1-0");
+        assert!(candidates(&st).len() >= 2);
+        let mut one = Rollouts::new(&st, 7, &TUNED).net(&net);
+        one.run(16);
+        let mut three = Rollouts::new(&st, 7, &TUNED).net(&net);
+        three.run_on(16, 3);
+        let key = |r: &Rollouts| r.ranking().into_iter().map(|o| (o.action, o.mean.to_bits(), o.n)).collect::<Vec<_>>();
+        assert_eq!(key(&one), key(&three));
+        assert!(one.ranking().iter().filter(|o| o.n > 0).all(|o| o.mean.is_finite()));
     }
 }

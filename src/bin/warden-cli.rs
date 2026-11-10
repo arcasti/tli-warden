@@ -5,9 +5,11 @@
 //!   warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id]
 //!   warden-cli read <frame.png> [--tools id,id]
 //!   warden-cli capture [--frames N] <title text> <out.png>
-//!   warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N]
+//!   warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] [--net FILE]
 //!   warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T]
 //!   warden-cli replay <log.jsonl | dir>... [--seeds N] [--out file]
+//!   warden-cli samples --out file [--games N] [--seed S] [--threads T] [--explore X] [--label-playouts N] [--net FILE] [--rollouts N]
+//!   warden-cli net <net file> <samples file>
 //!   warden-cli --version
 
 use std::path::{Path, PathBuf};
@@ -17,6 +19,8 @@ use warden::engine::data::Tool;
 use warden::reader::{read_model, save_png};
 use warden::replay::{Report, log_files, parse_log};
 use warden::solver::bench::{LOW, Solo, bench, is_low, mean_se, spread, strategy_bench, summarize};
+use warden::solver::net::Net;
+use warden::solver::sampling::{Advice, read_samples, samples, write_samples};
 use warden::solver::{Params, TUNED};
 use warden::solver::solve::{instant, solve};
 
@@ -29,7 +33,7 @@ macro_rules! out {
     }};
 }
 
-const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] | warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T] | warden-cli replay <log.jsonl | dir>... [--seeds N] [--out file] | warden-cli --version";
+const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] [--net FILE] | warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T] | warden-cli replay <log.jsonl | dir>... [--seeds N] [--out file] | warden-cli samples --out file [--games N] [--seed S] [--threads T] [--explore X] [--label-playouts N] [--net FILE] [--rollouts N] | warden-cli net <net file> <samples file> | warden-cli --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -38,12 +42,14 @@ fn main() -> ExitCode {
             out!("warden {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
-        Some(cmd @ ("solve" | "read" | "capture" | "bench" | "replay")) => {
+        Some(cmd @ ("solve" | "read" | "capture" | "bench" | "replay" | "samples" | "net")) => {
             let run = match cmd {
                 "solve" => run_solve(&args[1..]),
                 "read" => run_read(&args[1..]),
                 "bench" => run_bench(&args[1..]),
                 "replay" => run_replay(&args[1..]),
+                "samples" => run_samples(&args[1..]),
+                "net" => run_net(&args[1..]),
                 _ => run_capture(&args[1..]),
             };
             run.unwrap_or_else(|message| {
@@ -111,13 +117,15 @@ fn run_capture(args: &[String]) -> Result<ExitCode, String> {
 }
 
 /// `bench`: Chromatics and loot per run for the strategy alone and following the
-/// advice, on the same seeds; see `warden::solver::bench`. With
-/// `--strategy-only`, the strategy alone; see `run_strategy_bench`.
+/// advice, on the same seeds; see `warden::solver::bench`. With `--net`, the
+/// advice's playouts stop at the next morning and take the net's value there.
+/// With `--strategy-only`, the strategy alone; see `run_strategy_bench`.
 fn run_bench(args: &[String]) -> Result<ExitCode, String> {
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     let (mut games, mut rollouts, mut seed, mut threads) = (None, 400usize, 1u32, threads);
     let (mut strategy_only, mut changed, mut rerolls) = (false, None::<Params>, 0u8);
     let (mut held, mut save, mut against) = (Vec::new(), None::<&String>, None::<&String>);
+    let mut net_file = None::<&String>;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -131,11 +139,15 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
             "--rerolls" => rerolls = number("--rerolls", it.next())?,
             "--save" => save = Some(it.next().ok_or_else(|| format!("--save needs a file; {USAGE}"))?),
             "--against" => against = Some(it.next().ok_or_else(|| format!("--against needs a file; {USAGE}"))?),
+            "--net" => net_file = Some(it.next().ok_or_else(|| format!("--net needs a file; {USAGE}"))?),
             _ => return Err(format!("unexpected argument {arg}; {USAGE}")),
         }
     }
     if !strategy_only && (changed.is_some() || !held.is_empty() || save.is_some() || against.is_some()) {
         return Err(format!("--set, --hold, --save and --against need --strategy-only; {USAGE}"));
+    }
+    if strategy_only && net_file.is_some() {
+        return Err(format!("--net values the advice's playouts and does not go with --strategy-only; {USAGE}"));
     }
     let games = games.unwrap_or(if strategy_only { 2000 } else { 100 });
     if games == 0 || rollouts == 0 || threads == 0 {
@@ -144,8 +156,15 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
     if strategy_only {
         return run_strategy_bench(games, seed, threads, (&held, rerolls), changed.as_ref(), save, against);
     }
+    let net = match net_file {
+        Some(file) => {
+            let bytes = std::fs::read(file).map_err(|e| format!("{file}: {e}"))?;
+            Some(Net::from_bytes(&bytes).map_err(|e| format!("{file}: {e}"))?)
+        }
+        None => None,
+    };
     let clock = std::time::Instant::now();
-    let s = summarize(&bench(games, rollouts, seed, threads, rerolls));
+    let s = summarize(&bench(games, rollouts, seed, threads, rerolls, net.as_ref()));
     let secs = clock.elapsed().as_secs_f64();
     out!(
         "strategy  {:.3} +- {:.3} Chromatics, {:.3} +- {:.3} loot per run",
@@ -157,7 +176,8 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
     out!("advice    {:.3} +- {:.3}, {:.3} +- {:.3}", s.advice.0, s.advice.1, s.advice_loot.0, s.advice_loot.1);
     out!("advice - strategy  {:+.3} +- {:.3} loot (paired)", s.gain.0, s.gain.1);
     out!("advice overruled the strategy at {} of {} decisions with 2+ options", s.overruled, s.decisions);
-    out!("{games} games, {rollouts} playouts per option, seed {seed}, {threads} threads, {rerolls} rerolls, {secs:.1} s");
+    let with_net = net_file.map_or(String::new(), |file| format!(", net {file}"));
+    out!("{games} games, {rollouts} playouts per option, seed {seed}, {threads} threads, {rerolls} rerolls{with_net}, {secs:.1} s");
     Ok(ExitCode::SUCCESS)
 }
 
@@ -251,6 +271,86 @@ fn run_strategy_bench(
         format!(", holding {}", held.iter().map(|t| t.key()).collect::<Vec<_>>().join(","))
     };
     out!("{games} games, seed {seed}, {threads} threads{holding}, {rerolls} rerolls, {:.1} s", clock.elapsed().as_secs_f64());
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `samples --out file`: writes the labelled morning states of strategy runs for
+/// tools/train_net.py; see `warden::solver::sampling`.
+fn run_samples(args: &[String]) -> Result<ExitCode, String> {
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let (mut games, mut seed, mut threads, mut explore, mut label_playouts) = (1000u32, 1u32, threads, 0.15f64, 1usize);
+    let (mut out_file, mut net_file, mut rollouts) = (None::<&String>, None::<&String>, None::<usize>);
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--out" => out_file = Some(it.next().ok_or_else(|| format!("--out needs a file; {USAGE}"))?),
+            "--games" => games = number("--games", it.next())?,
+            "--seed" => seed = number("--seed", it.next())?,
+            "--threads" => threads = number("--threads", it.next())?,
+            "--explore" => explore = number("--explore", it.next())?,
+            "--label-playouts" => label_playouts = number("--label-playouts", it.next())?,
+            "--net" => net_file = Some(it.next().ok_or_else(|| format!("--net needs a file; {USAGE}"))?),
+            "--rollouts" => rollouts = Some(number("--rollouts", it.next())?),
+            _ => return Err(format!("unexpected argument {arg}; {USAGE}")),
+        }
+    }
+    let out_file = out_file.ok_or_else(|| format!("samples needs --out; {USAGE}"))?;
+    if rollouts.is_some() && net_file.is_none() {
+        return Err(format!("--rollouts sets the advice's playouts and needs --net; {USAGE}"));
+    }
+    let rollouts = rollouts.unwrap_or(16);
+    if games == 0 || threads == 0 || label_playouts == 0 || rollouts == 0 {
+        return Err(format!("--games, --threads, --label-playouts and --rollouts must be at least 1; {USAGE}"));
+    }
+    if !(0.0..=1.0).contains(&explore) {
+        return Err(format!("--explore must be between 0 and 1; {USAGE}"));
+    }
+    let net = match net_file {
+        Some(file) => {
+            let bytes = std::fs::read(file).map_err(|e| format!("{file}: {e}"))?;
+            Some(Net::from_bytes(&bytes).map_err(|e| format!("{file}: {e}"))?)
+        }
+        None => None,
+    };
+    let advice = net.as_ref().map(|net| Advice { net, rollouts });
+    let clock = std::time::Instant::now();
+    let list = samples(games, seed, threads, explore, label_playouts, advice);
+    let secs = clock.elapsed().as_secs_f64();
+    let mut bytes = Vec::new();
+    write_samples(&list, &mut bytes).map_err(|e| format!("{out_file}: {e}"))?;
+    std::fs::write(out_file, bytes).map_err(|e| format!("{out_file}: {e}"))?;
+    let mean = list.iter().map(|s| s.label as f64).sum::<f64>() / list.len().max(1) as f64;
+    let played = net_file.map_or(String::new(), |file| format!(", played by the advice with net {file} at {rollouts} rollouts"));
+    out!("{} samples from {games} games{played}, mean label {mean:.4}, {secs:.1} s", list.len());
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `net <net file> <samples file>`: the error of a net from tools/train_net.py on
+/// a samples file, beside the error of predicting the mean label.
+fn run_net(args: &[String]) -> Result<ExitCode, String> {
+    let [net_file, samples_file] = args else {
+        return Err(format!("net needs a net file and a samples file; {USAGE}"));
+    };
+    let net = std::fs::read(net_file).map_err(|e| format!("{net_file}: {e}"))?;
+    let net = Net::from_bytes(&net).map_err(|e| format!("{net_file}: {e}"))?;
+    let list = std::fs::read(samples_file).map_err(|e| format!("{samples_file}: {e}"))?;
+    let list = read_samples(&list).map_err(|e| format!("{samples_file}: {e}"))?;
+    if list.is_empty() {
+        return Err(format!("{samples_file}: no samples"));
+    }
+    let values: Vec<f64> = list.iter().map(|s| net.value(&s.row) as f64).collect();
+    let n = list.len() as f64;
+    let mean_label = list.iter().map(|s| s.label as f64).sum::<f64>() / n;
+    let mean_value = values.iter().sum::<f64>() / n;
+    let mse = list.iter().zip(&values).map(|(s, v)| (v - s.label as f64).powi(2)).sum::<f64>() / n;
+    let var = list.iter().map(|s| (s.label as f64 - mean_label).powi(2)).sum::<f64>() / n;
+    out!("{} samples", list.len());
+    out!("rmse {:.6}", mse.sqrt());
+    out!("mean label {mean_label:.6}");
+    out!("mean value {mean_value:.6}");
+    out!("constant predictor rmse {:.6}", var.sqrt());
+    let first: Vec<String> = values.iter().take(5).map(|v| format!("{v:.6}")).collect();
+    out!("first: {}", first.join(" "));
     Ok(ExitCode::SUCCESS)
 }
 

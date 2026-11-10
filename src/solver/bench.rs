@@ -1,11 +1,14 @@
 //! `warden-cli bench`: full runs played by the strategy alone and by the
 //! app's advice (playouts at every decision, the strategy's pick unless the
 //! leader beats it by more than its paired margin) on the same seeds, so the
-//! paired difference measures what following the advice is worth.
+//! paired difference measures what following the advice is worth. With a
+//! net, the advice's playouts stop at the next morning and take the net's
+//! value there (see `Rollouts::net`).
 //! `warden-cli bench --strategy-only` plays the strategy alone, on the tuned
 //! weights or changed ones, to measure a change of weights.
 
 use super::advise::{Pick, advise};
+use super::net::Net;
 use super::solve::{Rollouts, playout};
 use super::{Params, Rng32, TUNED, decide};
 use crate::engine::actions::take_tool;
@@ -47,8 +50,9 @@ pub struct Game {
 }
 
 /// Plays game `k` both ways, with `rerolls` instrument rerolls for the run;
-/// the advice runs `rollouts` playouts per option.
-pub fn play(seed: u32, k: u32, rollouts: usize, rerolls: u8) -> Game {
+/// the advice runs `rollouts` playouts per option, valued by `net` when one
+/// is given.
+pub fn play(seed: u32, k: u32, rollouts: usize, rerolls: u8, net: Option<&Net>) -> Game {
     let Solo { chromatics: strategy, loot: strategy_loot, .. } = play_strategy(seed, k, &[], rerolls, &TUNED);
 
     let (mut st, mut rng) = start(seed, k, &[]);
@@ -59,21 +63,15 @@ pub fn play(seed: u32, k: u32, rollouts: usize, rerolls: u8) -> Game {
             break;
         }
         let Some(mine) = decide(&st, &TUNED, &mut rng) else { break };
-        let solve_seed = k.wrapping_mul(7919).wrapping_add(step.wrapping_mul(104729)).wrapping_add(seed);
-        let mut r = Rollouts::new(&st, solve_seed, &TUNED);
-        let action = if r.run(rollouts) == 0 {
-            mine
-        } else {
-            decisions += 1;
-            let ranking = r.ranking();
-            let pick = Pick { action: mine.clone(), label: String::new(), why: String::new() };
-            match advise(Some(&pick), &ranking, true).and_then(|a| a.option) {
-                Some(i) if ranking[i].action != mine => {
+        let action = match advised(&st, &mine, rollouts, solve_seed(seed, k, step), net) {
+            Some(action) => {
+                decisions += 1;
+                if action != mine {
                     overruled += 1;
-                    ranking[i].action.clone()
                 }
-                _ => mine,
+                action
             }
+            None => mine,
         };
         if !apply(&mut st, &action).is_ok() && !(action != Action::End && apply(&mut st, &Action::End).is_ok()) {
             break;
@@ -82,10 +80,35 @@ pub fn play(seed: u32, k: u32, rollouts: usize, rerolls: u8) -> Game {
     Game { strategy, advice: st.vault.len(), strategy_loot, advice_loot: st.loot(), decisions, overruled }
 }
 
+/// The playouts' seed at move `step` of game `k` of `seed`.
+pub(super) fn solve_seed(seed: u32, k: u32, step: u32) -> u32 {
+    k.wrapping_mul(7919).wrapping_add(step.wrapping_mul(104729)).wrapping_add(seed)
+}
+
+/// The move the advice plays at `st`: the strategy's `mine` unless the playouts' leader beats it by more
+/// than its paired margin. None when fewer than two options compete.
+pub(super) fn advised(st: &State, mine: &Action, rollouts: usize, solve_seed: u32, net: Option<&Net>) -> Option<Action> {
+    let r = Rollouts::new(st, solve_seed, &TUNED);
+    let mut r = match net {
+        Some(n) => r.net(n),
+        None => r,
+    };
+    if r.run(rollouts) == 0 {
+        return None;
+    }
+    let ranking = r.ranking();
+    let pick = Pick { action: mine.clone(), label: String::new(), why: String::new() };
+    Some(match advise(Some(&pick), &ranking, true).and_then(|a| a.option) {
+        Some(i) => ranking[i].action.clone(),
+        None => mine.clone(),
+    })
+}
+
 /// Games 0..`games` of `seed` with `rerolls` rerolls each, on `threads`
-/// threads, in game order.
-pub fn bench(games: u32, rollouts: usize, seed: u32, threads: usize, rerolls: u8) -> Vec<Game> {
-    each_game(games, threads, |k| play(seed, k, rollouts, rerolls))
+/// threads, in game order; the advice's playouts are valued by `net` when
+/// one is given.
+pub fn bench(games: u32, rollouts: usize, seed: u32, threads: usize, rerolls: u8, net: Option<&Net>) -> Vec<Game> {
+    each_game(games, threads, |k| play(seed, k, rollouts, rerolls, net))
 }
 
 /// A run played by the strategy alone.
@@ -116,7 +139,7 @@ pub fn strategy_bench(games: u32, seed: u32, threads: usize, held: &[Tool], rero
 }
 
 /// `play` on games 0..`games` on `threads` threads, in game order.
-fn each_game<T: Send>(games: u32, threads: usize, play: impl Fn(u32) -> T + Sync) -> Vec<T> {
+pub(super) fn each_game<T: Send>(games: u32, threads: usize, play: impl Fn(u32) -> T + Sync) -> Vec<T> {
     let next = AtomicU32::new(0);
     let done = Mutex::new(Vec::new());
     std::thread::scope(|s| {
@@ -216,7 +239,7 @@ mod tests {
 
     #[test]
     fn the_strategy_player_replays_plain_games() {
-        let games = bench(2, 20, 1, 2, 0);
+        let games = bench(2, 20, 1, 2, 0, None);
         assert_eq!(games.len(), 2);
         for (k, g) in games.iter().enumerate() {
             let (mut st, mut rng) = start(1, k as u32, &[]);
@@ -235,6 +258,14 @@ mod tests {
         for x in [s.strategy.0, s.strategy.1, s.advice.0, s.advice.1, s.gain.0, s.gain.1] {
             assert!(x.is_finite());
         }
+    }
+
+    #[test]
+    fn a_net_leaves_the_strategy_side_alone() {
+        let net = crate::solver::solve::tests::zero_net();
+        let (with, plain) = (play(1, 0, 8, 1, Some(&net)), play(1, 0, 8, 1, None));
+        assert_eq!((with.strategy, with.strategy_loot), (plain.strategy, plain.strategy_loot));
+        assert!(with.advice_loot.is_finite());
     }
 
     #[test]

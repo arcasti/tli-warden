@@ -5,6 +5,9 @@
 pub mod advise;
 pub mod bench;
 pub mod chain;
+pub mod features;
+pub mod net;
+pub mod sampling;
 pub mod scores;
 pub mod solve;
 pub mod values;

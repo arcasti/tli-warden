@@ -35,19 +35,26 @@ pub fn playout(st: &mut State, p: &Params, roll: &mut Rng32) {
 /// first, or a move that fails with its End Day, is valued by its Riot loot. A
 /// state that is already a morning is valued as it stands.
 pub fn settle(st: &mut State, p: &Params, roll: &mut Rng32, net: &Net) -> f64 {
+    if to_morning(st, p, roll) { f64::from(net.value(&encode(st))) } else { st.loot() }
+}
+
+/// `playout` up to the next morning: true when one is reached, false when the
+/// run ends first or a move fails with its End Day. A state that is already a
+/// morning is left as it stands.
+pub(super) fn to_morning(st: &mut State, p: &Params, roll: &mut Rng32) -> bool {
     for _ in 0..2000 {
         if st.phase == Phase::Ended {
-            break;
+            return false;
         }
         if is_morning(st) {
-            return f64::from(net.value(&encode(st)));
+            return true;
         }
-        let Some(action) = decide(st, p, roll) else { break };
+        let Some(action) = decide(st, p, roll) else { return false };
         if !apply(st, &action).is_ok() && !(action != Action::End && apply(st, &Action::End).is_ok()) {
-            break;
+            return false;
         }
     }
-    st.loot()
+    false
 }
 
 /// hideFuture: re-rolls everything the player can't see, the game's dice and

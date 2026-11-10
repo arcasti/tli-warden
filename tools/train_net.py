@@ -6,6 +6,9 @@
 
 The net is inputs -> h1 -> h2 -> 1 with clamp(x, 0, 1) after each hidden layer and a
 linear output. The weights file it writes is read by `warden-cli net` and `Net::from_bytes`.
+The loss is the squared error on each sample plus `--pair-weight` times the squared error on
+values and labels centred on their sibling group's mean, so the net learns the differences
+between the options of one decision.
 """
 
 import argparse
@@ -17,14 +20,18 @@ import torch
 
 
 def read_samples(path):
-    """The samples file at `path` as (inputs, labels, offsets, indices, values) arrays."""
+    """The samples file at `path` as (inputs, labels, groups, offsets, indices, values) arrays."""
     data = open(path, "rb").read()
-    if data[:4] != b"WSMP":
-        raise SystemExit(f"{path}: not a samples file")
+    if data[:4] != b"WSM2":
+        raise SystemExit(f"{path}: not a samples file of this version (expected magic WSM2)")
     inputs, count, nnz = struct.unpack_from("<III", data, 4)
     at = 16
     labels = np.frombuffer(data, "<f4", count, at).astype(np.float32)
     at += count * 4
+    groups = np.frombuffer(data, "<u4", count, at).astype(np.int64)
+    at += count * 4
+    if np.any(np.diff(groups) < 0):
+        raise SystemExit(f"{path}: the groups are not in order")
     offsets = np.frombuffer(data, "<u4", count + 1, at).astype(np.int64)
     at += (count + 1) * 4
     indices = np.frombuffer(data, "<u2", nnz, at).astype(np.int64)
@@ -33,19 +40,42 @@ def read_samples(path):
     at += nnz * 4
     if at != len(data):
         raise SystemExit(f"{path}: {len(data)} bytes, expected {at}")
-    return inputs, labels, offsets, indices, values
+    return inputs, labels, groups, offsets, indices, values
 
 
 def join(sets):
-    """Several sample sets with the same inputs as one."""
+    """Several sample sets with the same inputs as one; each file's group ids come after the previous file's."""
     inputs = sets[0][0]
     for other in sets[1:]:
         if other[0] != inputs:
             raise SystemExit(f"the train files disagree on the inputs: {inputs} and {other[0]}")
     labels = np.concatenate([s[1] for s in sets])
-    starts = np.cumsum([0] + [len(s[3]) for s in sets[:-1]])
-    offsets = np.concatenate([s[2][:-1] + start for s, start in zip(sets, starts)] + [[sum(len(s[3]) for s in sets)]])
-    return inputs, labels, offsets, np.concatenate([s[3] for s in sets]), np.concatenate([s[4] for s in sets])
+    shifts = np.cumsum([0] + [int(s[2][-1]) + 1 if len(s[2]) else 0 for s in sets[:-1]])
+    groups = np.concatenate([s[2] + shift for s, shift in zip(sets, shifts)])
+    starts = np.cumsum([0] + [len(s[4]) for s in sets[:-1]])
+    offsets = np.concatenate([s[3][:-1] + start for s, start in zip(sets, starts)] + [[sum(len(s[4]) for s in sets)]])
+    return inputs, labels, groups, offsets, np.concatenate([s[4] for s in sets]), np.concatenate([s[5] for s in sets])
+
+
+def group_ranges(groups):
+    """The [start, end) sample ranges of the groups, which are contiguous runs of equal ids."""
+    cuts = np.flatnonzero(np.diff(groups)) + 1
+    starts = np.concatenate([[0], cuts]).astype(np.int64)
+    ends = np.concatenate([cuts, [len(groups)]]).astype(np.int64)
+    return starts, ends
+
+
+def pair_rmse(pred, labels, groups):
+    """For the members of groups of 2+: the rmse of the value minus its group's mean against the
+    label minus its group's mean, and the same for a value of 0; None for a file without such groups."""
+    _, ids, sizes = np.unique(groups, return_inverse=True, return_counts=True)
+    member = sizes[ids] >= 2
+    if not member.any():
+        return None
+    pred, labels = pred.astype(np.float64), labels.astype(np.float64)
+    cv = pred - (np.bincount(ids, pred) / sizes)[ids]
+    cl = labels - (np.bincount(ids, labels) / sizes)[ids]
+    return float(np.sqrt(np.mean((cv - cl)[member] ** 2))), float(np.sqrt(np.mean(cl[member] ** 2)))
 
 
 class Net(torch.nn.Module):
@@ -64,7 +94,7 @@ class Net(torch.nn.Module):
 
 def batch(set_, rows):
     """The EmbeddingBag inputs and the labels of samples `rows` of `set_`."""
-    _, labels, offsets, indices, values = set_
+    _, labels, _, offsets, indices, values = set_
     starts = offsets[rows]
     lens = offsets[rows + 1] - starts
     bag = np.zeros(len(rows), np.int64)
@@ -112,54 +142,78 @@ def write_weights(model, path, inputs, h1, h2):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--train", required=True, nargs="+", help="one or more samples files, trained on together")
-    parser.add_argument("--val")
+    parser.add_argument("--val", nargs="*", default=[], help="samples files reported on after each epoch")
     parser.add_argument("--out", required=True)
     parser.add_argument("--h1", type=int, default=128)
     parser.add_argument("--h2", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=8)
-    parser.add_argument("--batch", type=int, default=1024)
+    parser.add_argument("--batch", type=int, default=1024, help="least samples per batch; a batch holds whole groups")
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument(
+        "--pair-weight", type=float, default=1.0, help="weight of the error on values centred on their group's mean"
+    )
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
     torch.set_num_threads(4)
     rng = np.random.default_rng(args.seed)
     train = join([read_samples(path) for path in args.train])
-    val = read_samples(args.val) if args.val else None
+    vals = [(path, read_samples(path)) for path in args.val]
     inputs = train[0]
-    if val is not None and val[0] != inputs:
-        raise SystemExit(f"{args.val}: {val[0]} inputs, the train files have {inputs}")
+    for path, val in vals:
+        if val[0] != inputs:
+            raise SystemExit(f"{path}: {val[0]} inputs, the train files have {inputs}")
     count = len(train[1])
-    print(f"{count} train samples" + (f", {len(val[1])} val samples" if val else ""))
+    print(f"{count} train samples" + "".join(f", {len(val[1])} val samples in {path}" for path, val in vals), flush=True)
     mean = float(train[1].mean())
-    if val is not None:
-        print(f"constant predictor val rmse {rmse(np.full(len(val[1]), mean), val[1]):.6f}")
+    for path, val in vals:
+        print(f"{path}: constant predictor val rmse {rmse(np.full(len(val[1]), mean), val[1]):.6f}", flush=True)
 
     model = Net(inputs, args.h1, args.h2)
     with torch.no_grad():
         model.out.bias.fill_(mean)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
-    loss_fn = torch.nn.MSELoss()
+    starts, ends = group_ranges(train[2])
     for epoch in range(1, args.epochs + 1):
         clock = time.time()
         model.train()
-        perm = rng.permutation(count)
-        for at in range(0, count, args.batch):
-            i, o, w, y = batch(train, perm[at : at + args.batch])
+        order = rng.permutation(len(starts))
+        first_rows, sizes = starts[order], ends[order] - starts[order]
+        cum = np.concatenate([[0], np.cumsum(sizes)])
+        g = 0
+        while g < len(order):
+            # Whole groups until the batch holds at least --batch samples.
+            e = min(int(np.searchsorted(cum, cum[g] + args.batch, side="left")), len(order))
+            e = max(e, g + 1)
+            n = sizes[g:e]
+            rows = np.repeat(first_rows[g:e] - (cum[g:e] - cum[g]), n) + np.arange(cum[e] - cum[g])
+            gidx = torch.from_numpy(np.repeat(np.arange(e - g), n))
+            i, o, w, y = batch(train, rows)
             opt.zero_grad()
-            loss = loss_fn(model(i, o, w), y)
+            v = model(i, o, w)
+            loss = torch.mean((v - y) ** 2)
+            if args.pair_weight:
+                k = torch.from_numpy(n.astype(np.float32))
+                cv = v - (torch.zeros(e - g).index_add_(0, gidx, v) / k)[gidx]
+                cl = y - (torch.zeros(e - g).index_add_(0, gidx, y) / k)[gidx]
+                loss = loss + args.pair_weight * torch.mean((cv - cl) ** 2)
             loss.backward()
             opt.step()
+            g = e
         model.eval()
-        line = f"epoch {epoch} train rmse {rmse(predict(model, train, 8192), train[1]):.6f}"
-        if val is not None:
-            line += f" val rmse {rmse(predict(model, val, 8192), val[1]):.6f}"
-        print(f"{line} {time.time() - clock:.1f} s")
+        print(f"epoch {epoch} train rmse {rmse(predict(model, train, 8192), train[1]):.6f} {time.time() - clock:.1f} s", flush=True)
+        for path, val in vals:
+            pred = predict(model, val, 8192)
+            line = f"  {path}: val rmse {rmse(pred, val[1]):.6f}"
+            pair = pair_rmse(pred, val[1], val[2])
+            if pair is not None:
+                line += f" pair rmse {pair[0]:.6f} pair rmse of no difference {pair[1]:.6f}"
+            print(line, flush=True)
 
     write_weights(model, args.out, inputs, args.h1, args.h2)
-    first = predict(model, val if val is not None else train, 8192)[:5]
-    print("first: " + " ".join(f"{v:.6f}" for v in first))
+    first = predict(model, vals[0][1] if vals else train, 8192)[:5]
+    print("first: " + " ".join(f"{v:.6f}" for v in first), flush=True)
 
 
 if __name__ == "__main__":

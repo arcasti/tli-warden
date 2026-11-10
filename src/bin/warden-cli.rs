@@ -8,7 +8,7 @@
 //!   warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] [--net FILE]
 //!   warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T]
 //!   warden-cli replay <log.jsonl | dir>... [--seeds N] [--out file]
-//!   warden-cli samples --out file [--games N] [--seed S] [--threads T] [--explore X] [--label-playouts N] [--net FILE] [--rollouts N]
+//!   warden-cli samples --out file [--games N] [--seed S] [--threads T] [--explore X] [--label-playouts N] [--net FILE] [--rollouts N] [--siblings X]
 //!   warden-cli net <net file> <samples file>
 //!   warden-cli --version
 
@@ -20,7 +20,7 @@ use warden::reader::{read_model, save_png};
 use warden::replay::{Report, log_files, parse_log};
 use warden::solver::bench::{LOW, Solo, bench, is_low, mean_se, spread, strategy_bench, summarize};
 use warden::solver::net::Net;
-use warden::solver::sampling::{Advice, read_samples, samples, write_samples};
+use warden::solver::sampling::{Advice, Sample, read_samples, samples, write_samples};
 use warden::solver::{Params, TUNED};
 use warden::solver::solve::{instant, solve};
 
@@ -33,7 +33,7 @@ macro_rules! out {
     }};
 }
 
-const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] [--net FILE] | warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T] | warden-cli replay <log.jsonl | dir>... [--seeds N] [--out file] | warden-cli samples --out file [--games N] [--seed S] [--threads T] [--explore X] [--label-playouts N] [--net FILE] [--rollouts N] | warden-cli net <net file> <samples file> | warden-cli --version";
+const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] [--net FILE] | warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T] | warden-cli replay <log.jsonl | dir>... [--seeds N] [--out file] | warden-cli samples --out file [--games N] [--seed S] [--threads T] [--explore X] [--label-playouts N] [--net FILE] [--rollouts N] [--siblings X] | warden-cli net <net file> <samples file> | warden-cli --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -279,6 +279,7 @@ fn run_strategy_bench(
 fn run_samples(args: &[String]) -> Result<ExitCode, String> {
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     let (mut games, mut seed, mut threads, mut explore, mut label_playouts) = (1000u32, 1u32, threads, 0.15f64, 1usize);
+    let mut siblings = 0.0f64;
     let (mut out_file, mut net_file, mut rollouts) = (None::<&String>, None::<&String>, None::<usize>);
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -291,6 +292,7 @@ fn run_samples(args: &[String]) -> Result<ExitCode, String> {
             "--label-playouts" => label_playouts = number("--label-playouts", it.next())?,
             "--net" => net_file = Some(it.next().ok_or_else(|| format!("--net needs a file; {USAGE}"))?),
             "--rollouts" => rollouts = Some(number("--rollouts", it.next())?),
+            "--siblings" => siblings = number("--siblings", it.next())?,
             _ => return Err(format!("unexpected argument {arg}; {USAGE}")),
         }
     }
@@ -305,6 +307,9 @@ fn run_samples(args: &[String]) -> Result<ExitCode, String> {
     if !(0.0..=1.0).contains(&explore) {
         return Err(format!("--explore must be between 0 and 1; {USAGE}"));
     }
+    if !(0.0..=1.0).contains(&siblings) {
+        return Err(format!("--siblings must be between 0 and 1; {USAGE}"));
+    }
     let net = match net_file {
         Some(file) => {
             let bytes = std::fs::read(file).map_err(|e| format!("{file}: {e}"))?;
@@ -314,19 +319,31 @@ fn run_samples(args: &[String]) -> Result<ExitCode, String> {
     };
     let advice = net.as_ref().map(|net| Advice { net, rollouts });
     let clock = std::time::Instant::now();
-    let list = samples(games, seed, threads, explore, label_playouts, advice);
+    let list = samples(games, seed, threads, explore, label_playouts, advice, siblings);
     let secs = clock.elapsed().as_secs_f64();
     let mut bytes = Vec::new();
     write_samples(&list, &mut bytes).map_err(|e| format!("{out_file}: {e}"))?;
     std::fs::write(out_file, bytes).map_err(|e| format!("{out_file}: {e}"))?;
     let mean = list.iter().map(|s| s.label as f64).sum::<f64>() / list.len().max(1) as f64;
     let played = net_file.map_or(String::new(), |file| format!(", played by the advice with net {file} at {rollouts} rollouts"));
-    out!("{} samples from {games} games{played}, mean label {mean:.4}, {secs:.1} s", list.len());
+    let groups = if siblings > 0.0 {
+        let sizes = group_sizes(&list);
+        format!(", {} sibling groups", sizes.iter().filter(|&&n| n >= 2).count())
+    } else {
+        String::new()
+    };
+    out!("{} samples from {games} games{played}{groups}, mean label {mean:.4}, {secs:.1} s", list.len());
     Ok(ExitCode::SUCCESS)
 }
 
+/// The sizes of the runs of adjacent samples with the same group, in order.
+fn group_sizes(list: &[Sample]) -> Vec<usize> {
+    list.chunk_by(|a, b| a.group == b.group).map(<[Sample]>::len).collect()
+}
+
 /// `net <net file> <samples file>`: the error of a net from tools/train_net.py on
-/// a samples file, beside the error of predicting the mean label.
+/// a samples file, beside the error of predicting the mean label. For a file with
+/// sibling groups, also the error on the values centred on their group's mean.
 fn run_net(args: &[String]) -> Result<ExitCode, String> {
     let [net_file, samples_file] = args else {
         return Err(format!("net needs a net file and a samples file; {USAGE}"));
@@ -351,6 +368,28 @@ fn run_net(args: &[String]) -> Result<ExitCode, String> {
     out!("constant predictor rmse {:.6}", var.sqrt());
     let first: Vec<String> = values.iter().take(5).map(|v| format!("{v:.6}")).collect();
     out!("first: {}", first.join(" "));
+    // Each member of a group of 2+: its value and its label, each minus the group's mean.
+    let (mut pair, mut none, mut members, mut at) = (0.0, 0.0, 0usize, 0);
+    for size in group_sizes(&list) {
+        let range = at..at + size;
+        at += size;
+        if size < 2 {
+            continue;
+        }
+        let k = size as f64;
+        let mean_v = values[range.clone()].iter().sum::<f64>() / k;
+        let mean_l = list[range.clone()].iter().map(|s| s.label as f64).sum::<f64>() / k;
+        for (s, v) in list[range.clone()].iter().zip(&values[range]) {
+            let label = s.label as f64 - mean_l;
+            pair += (v - mean_v - label).powi(2);
+            none += label * label;
+        }
+        members += size;
+    }
+    if members > 0 {
+        out!("pair rmse {:.6}", (pair / members as f64).sqrt());
+        out!("pair rmse of no difference {:.6}", (none / members as f64).sqrt());
+    }
     Ok(ExitCode::SUCCESS)
 }
 

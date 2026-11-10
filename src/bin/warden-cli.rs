@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use warden::board::{Model, build_state};
 use warden::engine::data::Tool;
-use warden::reader::{read_model, save_png};
+use warden::reader::read_model;
 use warden::replay::{Report, log_files, parse_log};
 use warden::solver::bench::{LOW, Solo, bench, is_low, mean_se, spread, strategy_bench, summarize};
 use warden::solver::net::Net;
@@ -86,6 +86,12 @@ fn is_png(file: &str) -> bool {
 /// first visible window whose title contains the text, as the reader takes it.
 /// With `--frames` it grabs N frames through one capture session, as auto read
 /// does, and prints the mean time per frame after the first.
+#[cfg(not(windows))]
+fn run_capture(_: &[String]) -> Result<ExitCode, String> {
+    Err("capture needs Windows".to_string())
+}
+
+#[cfg(windows)]
 fn run_capture(args: &[String]) -> Result<ExitCode, String> {
     let (mut frames, mut rest) = (None, Vec::new());
     let mut it = args.iter();
@@ -111,7 +117,7 @@ fn run_capture(args: &[String]) -> Result<ExitCode, String> {
             img
         }
     };
-    save_png(Path::new(out), &img)?;
+    warden::reader::save_png(Path::new(out), &img)?;
     out!("{}x{} saved to {out}", img.w, img.h);
     Ok(ExitCode::SUCCESS)
 }

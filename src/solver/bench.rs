@@ -50,9 +50,9 @@ pub struct Game {
 }
 
 /// Plays game `k` both ways, with `rerolls` instrument rerolls for the run;
-/// the advice runs `rollouts` playouts per option, valued by `net` when one
-/// is given.
-pub fn play(seed: u32, k: u32, rollouts: usize, rerolls: u8, net: Option<&Net>) -> Game {
+/// the advice runs `rollouts` playouts per option, valued by `net` at the
+/// morning of its depth when one is given.
+pub fn play(seed: u32, k: u32, rollouts: usize, rerolls: u8, net: Option<(&Net, usize)>) -> Game {
     let Solo { chromatics: strategy, loot: strategy_loot, .. } = play_strategy(seed, k, &[], rerolls, &TUNED);
 
     let (mut st, mut rng) = start(seed, k, &[]);
@@ -87,10 +87,10 @@ pub(super) fn solve_seed(seed: u32, k: u32, step: u32) -> u32 {
 
 /// The move the advice plays at `st`: the strategy's `mine` unless the playouts' leader beats it by more
 /// than its paired margin. None when fewer than two options compete.
-pub(super) fn advised(st: &State, mine: &Action, rollouts: usize, solve_seed: u32, net: Option<&Net>) -> Option<Action> {
+pub(super) fn advised(st: &State, mine: &Action, rollouts: usize, solve_seed: u32, net: Option<(&Net, usize)>) -> Option<Action> {
     let r = Rollouts::new(st, solve_seed, &TUNED);
     let mut r = match net {
-        Some(n) => r.net(n),
+        Some((n, depth)) => r.net(n, depth),
         None => r,
     };
     if r.run(rollouts) == 0 {
@@ -105,9 +105,9 @@ pub(super) fn advised(st: &State, mine: &Action, rollouts: usize, solve_seed: u3
 }
 
 /// Games 0..`games` of `seed` with `rerolls` rerolls each, on `threads`
-/// threads, in game order; the advice's playouts are valued by `net` when
-/// one is given.
-pub fn bench(games: u32, rollouts: usize, seed: u32, threads: usize, rerolls: u8, net: Option<&Net>) -> Vec<Game> {
+/// threads, in game order; the advice's playouts are valued by `net` at the
+/// morning of its depth when one is given.
+pub fn bench(games: u32, rollouts: usize, seed: u32, threads: usize, rerolls: u8, net: Option<(&Net, usize)>) -> Vec<Game> {
     each_game(games, threads, |k| play(seed, k, rollouts, rerolls, net))
 }
 
@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn a_net_leaves_the_strategy_side_alone() {
         let net = crate::solver::solve::tests::zero_net();
-        let (with, plain) = (play(1, 0, 8, 1, Some(&net)), play(1, 0, 8, 1, None));
+        let (with, plain) = (play(1, 0, 8, 1, Some((&net, 1))), play(1, 0, 8, 1, None));
         assert_eq!((with.strategy, with.strategy_loot), (plain.strategy, plain.strategy_loot));
         assert!(with.advice_loot.is_finite());
     }

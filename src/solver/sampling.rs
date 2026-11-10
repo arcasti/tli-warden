@@ -87,7 +87,7 @@ fn game(seed: u32, k: u32, explore: f64, label_playouts: usize, advice: Option<A
             break;
         };
         let base = match advice {
-            Some(a) => advised(&st, &mine, a.rollouts, solve_seed(seed, k, step), Some(a.net)).unwrap_or(mine),
+            Some(a) => advised(&st, &mine, a.rollouts, solve_seed(seed, k, step), Some((a.net, 1))).unwrap_or(mine),
             None => mine,
         };
         let action = if list.len() >= 2 && own.roll() < explore {
@@ -130,7 +130,7 @@ fn sibling_group(st: &State, list: &[Candidate], h: u32) -> Vec<(Row, f32)> {
             continue;
         }
         let mut roll = Rng32::new(h ^ 0x9e3779b9);
-        if !to_morning(&mut t, &TUNED, &mut roll) {
+        if !to_morning(&mut t, &TUNED, &mut roll, 1) {
             continue;
         }
         let row = encode(&t);

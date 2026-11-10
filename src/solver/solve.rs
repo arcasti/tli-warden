@@ -31,23 +31,28 @@ pub fn playout(st: &mut State, p: &Params, roll: &mut Rng32) {
     }
 }
 
-/// `playout` up to the next morning, valued there by `net`; a run that ends
-/// first, or a move that fails with its End Day, is valued by its Riot loot. A
-/// state that is already a morning is valued as it stands.
-pub fn settle(st: &mut State, p: &Params, roll: &mut Rng32, net: &Net) -> f64 {
-    if to_morning(st, p, roll) { f64::from(net.value(&encode(st))) } else { st.loot() }
+/// `playout` up to the `depth`-th morning it meets, valued there by `net`; a
+/// run that ends first, or a move that fails with its End Day, is valued by
+/// its Riot loot. A state that is already a morning counts as the first.
+pub fn settle(st: &mut State, p: &Params, roll: &mut Rng32, net: &Net, depth: usize) -> f64 {
+    if to_morning(st, p, roll, depth) { f64::from(net.value(&encode(st))) } else { st.loot() }
 }
 
-/// `playout` up to the next morning: true when one is reached, false when the
-/// run ends first or a move fails with its End Day. A state that is already a
-/// morning is left as it stands.
-pub(super) fn to_morning(st: &mut State, p: &Params, roll: &mut Rng32) -> bool {
+/// `playout` up to the `depth`-th morning it meets: true when it is reached,
+/// false when the run ends first or a move fails with its End Day. A state
+/// that is already a morning counts as the first, so with depth 1 it is left
+/// as it stands. The strategy is asked at the same states as in `playout`.
+pub(super) fn to_morning(st: &mut State, p: &Params, roll: &mut Rng32, depth: usize) -> bool {
+    let mut met = 0;
     for _ in 0..2000 {
         if st.phase == Phase::Ended {
             return false;
         }
         if is_morning(st) {
-            return true;
+            met += 1;
+            if met >= depth {
+                return true;
+            }
         }
         let Some(action) = decide(st, p, roll) else { return false };
         if !apply(st, &action).is_ok() && !(action != Action::End && apply(st, &Action::End).is_ok()) {
@@ -266,12 +271,13 @@ pub fn solve(st: &State, rollouts: usize, seed: u32, p: &Params) -> Vec<SolveOpt
 /// counts, so racing keeps the ranking independent of steps and threads.
 /// With one candidate left the solve is over and `run` plays nothing more.
 ///
-/// With a net (see [`Rollouts::net`]), a playout stops at the next morning
-/// and takes the net's value there instead of playing the run to the end.
+/// With a net (see [`Rollouts::net`]), a playout stops at the morning of its
+/// depth and takes the net's value there instead of playing the run to the end.
 pub struct Rollouts<'a> {
     base: State,
     p: &'a Params,
-    net: Option<&'a Net>,
+    /// The net and the depth of the morning it values (see [`settle`]).
+    net: Option<(&'a Net, usize)>,
     list: Vec<Candidate>,
     pick: Option<Action>,
     random: Rng32,
@@ -327,9 +333,10 @@ impl<'a> Rollouts<'a> {
         Rollouts { base, p, net: None, list, pick, random: Rng32::new(seed), vals: vec![Vec::new(); n], best: vec![0.0; n], live: vec![true; n], rounds: 0 }
     }
 
-    /// Values the playouts with `net` from the next morning on (see [`settle`]).
-    pub fn net(mut self, net: &'a Net) -> Rollouts<'a> {
-        self.net = Some(net);
+    /// Values the playouts with `net` at the `depth`-th morning they meet
+    /// (see [`settle`]).
+    pub fn net(mut self, net: &'a Net, depth: usize) -> Rollouts<'a> {
+        self.net = Some((net, depth));
         self
     }
 
@@ -428,8 +435,8 @@ impl<'a> Rollouts<'a> {
 
     /// One round on `seed`: per running candidate, the Riot loot (NaN when
     /// the move does not apply) and the best rarity reached (0 then). With a
-    /// net, the loot is the net's value at the next morning and the best
-    /// rarity is the one reached by then.
+    /// net, the loot is the net's value at the morning of its depth and the
+    /// best rarity is the one reached by then.
     fn round(&self, seed: u32) -> Vec<(f64, f64)> {
         // The hidden future is the same for every candidate of the round.
         let mut hidden = self.base.clone();
@@ -445,7 +452,7 @@ impl<'a> Rollouts<'a> {
                 }
                 let roll = &mut Rng32::new(seed ^ 0x9e3779b9);
                 let value = match self.net {
-                    Some(net) => settle(&mut trial, self.p, roll, net),
+                    Some((net, depth)) => settle(&mut trial, self.p, roll, net, depth),
                     None => {
                         playout(&mut trial, self.p, roll);
                         trial.loot()
@@ -717,11 +724,43 @@ pub(crate) mod tests {
             assert!(apply(&mut st, &action).is_ok());
         }
         let mut morning = st.clone();
-        assert_eq!(settle(&mut morning, &TUNED, roll, &net), 2.5);
+        assert_eq!(settle(&mut morning, &TUNED, roll, &net, 1), 2.5);
         assert!(morning == st, "a morning is valued as it stands");
         playout(&mut st, &TUNED, &mut Rng32::new(1));
         assert_eq!(st.phase, Phase::Ended);
-        assert_eq!(settle(&mut st.clone(), &TUNED, &mut Rng32::new(1), &net), st.loot());
+        assert_eq!(settle(&mut st.clone(), &TUNED, &mut Rng32::new(1), &net, 1), st.loot());
+    }
+
+    #[test]
+    fn settle_at_depth_two_values_the_next_morning() {
+        let net = zero_net();
+        let (mut st, roll) = (new_game("1-0"), &mut Rng32::new(1));
+        while !is_morning(&st) {
+            let action = decide(&st, &TUNED, roll).unwrap();
+            assert!(apply(&mut st, &action).is_ok());
+        }
+        // By hand: the strategy's move at this morning, then on to the next.
+        let (mut next, roll) = (st.clone(), &mut Rng32::new(5));
+        let action = decide(&next, &TUNED, roll).unwrap();
+        assert!(apply(&mut next, &action).is_ok() || apply(&mut next, &Action::End).is_ok());
+        let want = if to_morning(&mut next, &TUNED, roll, 1) { f64::from(net.value(&encode(&next))) } else { next.loot() };
+        let mut deep = st.clone();
+        assert_eq!(settle(&mut deep, &TUNED, &mut Rng32::new(5), &net, 2), want);
+        assert!(deep == next, "the playout stops at the next morning");
+        assert!(deep != st, "a morning at depth 2 is played past");
+    }
+
+    #[test]
+    fn settle_past_every_morning_is_the_plain_playout() {
+        let net = zero_net();
+        for seed in [1, 2, 3, 4] {
+            let st = new_game(&format!("{seed}-0"));
+            let mut plain = st.clone();
+            playout(&mut plain, &TUNED, &mut Rng32::new(seed));
+            let mut deep = st.clone();
+            assert_eq!(settle(&mut deep, &TUNED, &mut Rng32::new(seed), &net, usize::MAX), plain.loot());
+            assert!(deep == plain, "seed {seed}");
+        }
     }
 
     #[test]
@@ -729,9 +768,9 @@ pub(crate) mod tests {
         let net = zero_net();
         let st = new_game("1-0");
         assert!(candidates(&st).len() >= 2);
-        let mut one = Rollouts::new(&st, 7, &TUNED).net(&net);
+        let mut one = Rollouts::new(&st, 7, &TUNED).net(&net, 1);
         one.run(16);
-        let mut three = Rollouts::new(&st, 7, &TUNED).net(&net);
+        let mut three = Rollouts::new(&st, 7, &TUNED).net(&net, 1);
         three.run_on(16, 3);
         let key = |r: &Rollouts| r.ranking().into_iter().map(|o| (o.action, o.mean.to_bits(), o.n)).collect::<Vec<_>>();
         assert_eq!(key(&one), key(&three));

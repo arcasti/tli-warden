@@ -8,8 +8,9 @@
 //! weights or changed ones, to measure a change of weights.
 
 use super::advise::{Pick, advise};
+use super::features::is_morning;
 use super::net::Net;
-use super::solve::{Rollouts, playout};
+use super::solve::{Inner, Rollouts, playout};
 use super::{Params, Rng32, TUNED, decide};
 use crate::engine::actions::take_tool;
 use crate::engine::data::Tool;
@@ -51,8 +52,9 @@ pub struct Game {
 
 /// Plays game `k` both ways, with `rerolls` instrument rerolls for the run;
 /// the advice runs `rollouts` playouts per option, valued by `net` at the
-/// morning of its depth when one is given.
-pub fn play(seed: u32, k: u32, rollouts: usize, rerolls: u8, net: Option<(&Net, usize)>) -> Game {
+/// morning of its depth when one is given, its playouts' days played by
+/// `inner` when given (see `Rollouts::inner`).
+pub fn play(seed: u32, k: u32, rollouts: usize, rerolls: u8, net: Option<(&Net, usize)>, inner: Option<Inner>) -> Game {
     let Solo { chromatics: strategy, loot: strategy_loot, .. } = play_strategy(seed, k, &[], rerolls, &TUNED);
 
     let (mut st, mut rng) = start(seed, k, &[]);
@@ -63,7 +65,7 @@ pub fn play(seed: u32, k: u32, rollouts: usize, rerolls: u8, net: Option<(&Net, 
             break;
         }
         let Some(mine) = decide(&st, &TUNED, &mut rng) else { break };
-        let action = match advised(&st, &mine, rollouts, solve_seed(seed, k, step), net) {
+        let action = match advised(&st, &mine, rollouts, solve_seed(seed, k, step), net, inner) {
             Some(action) => {
                 decisions += 1;
                 if action != mine {
@@ -86,11 +88,16 @@ pub(super) fn solve_seed(seed: u32, k: u32, step: u32) -> u32 {
 }
 
 /// The move the advice plays at `st`: the strategy's `mine` unless the playouts' leader beats it by more
-/// than its paired margin. None when fewer than two options compete.
-pub(super) fn advised(st: &State, mine: &Action, rollouts: usize, solve_seed: u32, net: Option<(&Net, usize)>) -> Option<Action> {
+/// than its paired margin. None when fewer than two options compete. The playouts' days are
+/// played by `inner` when given (see `Rollouts::inner`).
+pub(super) fn advised(st: &State, mine: &Action, rollouts: usize, solve_seed: u32, net: Option<(&Net, usize)>, inner: Option<Inner>) -> Option<Action> {
     let r = Rollouts::new(st, solve_seed, &TUNED);
-    let mut r = match net {
+    let r = match net {
         Some((n, depth)) => r.net(n, depth),
+        None => r,
+    };
+    let mut r = match inner {
+        Some(inner) => r.inner(inner),
         None => r,
     };
     if r.run(rollouts) == 0 {
@@ -104,11 +111,38 @@ pub(super) fn advised(st: &State, mine: &Action, rollouts: usize, solve_seed: u3
     })
 }
 
+/// Plays `st` by the advice at `rollouts` playouts per option valued by `net`, the strategy's
+/// picks drawing from `rng` and the advice's playouts at step `step` seeded by
+/// `solve_seed(seed, 0, step)`, up to the `mornings`-th morning it meets: true when it is
+/// reached, false when the run ends first or a move fails with its End Day. A state that is
+/// already a morning counts as the first, as in `to_morning`.
+pub(super) fn follow(st: &mut State, rng: &mut Rng32, rollouts: usize, net: (&Net, usize), seed: u32, mornings: usize) -> bool {
+    let mut met = 0;
+    for step in 0..GUARD {
+        if st.phase == Phase::Ended {
+            return false;
+        }
+        if is_morning(st) {
+            met += 1;
+            if met >= mornings {
+                return true;
+            }
+        }
+        let Some(mine) = decide(st, &TUNED, rng) else { return false };
+        let action = advised(st, &mine, rollouts, solve_seed(seed, 0, step), Some(net), None).unwrap_or(mine);
+        if !apply(st, &action).is_ok() && !(action != Action::End && apply(st, &Action::End).is_ok()) {
+            return false;
+        }
+    }
+    false
+}
+
 /// Games 0..`games` of `seed` with `rerolls` rerolls each, on `threads`
 /// threads, in game order; the advice's playouts are valued by `net` at the
-/// morning of its depth when one is given.
-pub fn bench(games: u32, rollouts: usize, seed: u32, threads: usize, rerolls: u8, net: Option<(&Net, usize)>) -> Vec<Game> {
-    each_game(games, threads, |k| play(seed, k, rollouts, rerolls, net))
+/// morning of its depth when one is given, their days played by `inner` when
+/// given.
+pub fn bench(games: u32, rollouts: usize, seed: u32, threads: usize, rerolls: u8, net: Option<(&Net, usize)>, inner: Option<Inner>) -> Vec<Game> {
+    each_game(games, threads, |k| play(seed, k, rollouts, rerolls, net, inner))
 }
 
 /// A run played by the strategy alone.
@@ -239,7 +273,7 @@ mod tests {
 
     #[test]
     fn the_strategy_player_replays_plain_games() {
-        let games = bench(2, 20, 1, 2, 0, None);
+        let games = bench(2, 20, 1, 2, 0, None, None);
         assert_eq!(games.len(), 2);
         for (k, g) in games.iter().enumerate() {
             let (mut st, mut rng) = start(1, k as u32, &[]);
@@ -263,9 +297,18 @@ mod tests {
     #[test]
     fn a_net_leaves_the_strategy_side_alone() {
         let net = crate::solver::solve::tests::zero_net();
-        let (with, plain) = (play(1, 0, 8, 1, Some((&net, 1))), play(1, 0, 8, 1, None));
+        let (with, plain) = (play(1, 0, 8, 1, Some((&net, 1)), None), play(1, 0, 8, 1, None, None));
         assert_eq!((with.strategy, with.strategy_loot), (plain.strategy, plain.strategy_loot));
         assert!(with.advice_loot.is_finite());
+    }
+
+    #[test]
+    fn an_inner_advice_replays_and_leaves_the_strategy_side_alone() {
+        let net = crate::solver::solve::tests::zero_net();
+        let inner = || play(1, 0, 8, 1, Some((&net, 2)), Some(Inner { net: &net, rollouts: 4 }));
+        let (with, again, plain) = (inner(), inner(), play(1, 0, 8, 1, None, None));
+        assert_eq!(with, again);
+        assert_eq!((with.strategy, with.strategy_loot), (plain.strategy, plain.strategy_loot));
     }
 
     #[test]

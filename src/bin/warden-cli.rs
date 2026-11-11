@@ -5,7 +5,7 @@
 //!   warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id]
 //!   warden-cli read <frame.png> [--tools id,id]
 //!   warden-cli capture [--frames N] <title text> <out.png>
-//!   warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] [--net FILE [--net-depth K]]
+//!   warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] [--net FILE [--net-depth K] [--inner-rollouts N [--inner-net FILE]]]
 //!   warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T]
 //!   warden-cli replay <log.jsonl | dir>... [--seeds N] [--out file]
 //!   warden-cli samples --out file [--games N] [--seed S] [--threads T] [--explore X] [--label-playouts N] [--net FILE [--rollouts N] [--net-depth K] [--label-rollouts N]] [--siblings X]
@@ -22,7 +22,7 @@ use warden::solver::bench::{LOW, Solo, bench, is_low, mean_se, spread, strategy_
 use warden::solver::net::Net;
 use warden::solver::sampling::{Advice, Sample, read_samples, samples, write_samples};
 use warden::solver::{Params, TUNED};
-use warden::solver::solve::{instant, solve};
+use warden::solver::solve::{Inner, instant, solve};
 
 /// println! that ignores a closed pipe (`| head`) instead of aborting.
 macro_rules! out {
@@ -33,7 +33,7 @@ macro_rules! out {
     }};
 }
 
-const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] [--net FILE [--net-depth K]] | warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T] | warden-cli replay <log.jsonl | dir>... [--seeds N] [--out file] | warden-cli samples --out file [--games N] [--seed S] [--threads T] [--explore X] [--label-playouts N] [--net FILE [--rollouts N] [--net-depth K] [--label-rollouts N]] [--siblings X] | warden-cli net <net file> <samples file> | warden-cli --version";
+const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] [--net FILE [--net-depth K] [--inner-rollouts N [--inner-net FILE]]] | warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T] | warden-cli replay <log.jsonl | dir>... [--seeds N] [--out file] | warden-cli samples --out file [--games N] [--seed S] [--threads T] [--explore X] [--label-playouts N] [--net FILE [--rollouts N] [--net-depth K] [--label-rollouts N]] [--siblings X] | warden-cli net <net file> <samples file> | warden-cli --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -126,13 +126,17 @@ fn run_capture(args: &[String]) -> Result<ExitCode, String> {
 /// advice, on the same seeds; see `warden::solver::bench`. With `--net`, the
 /// advice's playouts stop at the next morning and take the net's value there;
 /// `--net-depth K` plays on to the K-th morning they meet instead (default 1).
-/// With `--strategy-only`, the strategy alone; see `run_strategy_bench`.
+/// `--inner-rollouts N` plays the playouts' days up to that morning by the
+/// advice at N playouts per option valued at the next morning by the
+/// `--inner-net` file, or by the `--net` file without it, instead of the
+/// strategy. With `--strategy-only`, the strategy alone; see `run_strategy_bench`.
 fn run_bench(args: &[String]) -> Result<ExitCode, String> {
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     let (mut games, mut rollouts, mut seed, mut threads) = (None, 400usize, 1u32, threads);
     let (mut strategy_only, mut changed, mut rerolls) = (false, None::<Params>, 0u8);
     let (mut held, mut save, mut against) = (Vec::new(), None::<&String>, None::<&String>);
     let (mut net_file, mut net_depth) = (None::<&String>, None::<usize>);
+    let (mut inner_rollouts, mut inner_file) = (None::<usize>, None::<&String>);
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -148,11 +152,22 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
             "--against" => against = Some(it.next().ok_or_else(|| format!("--against needs a file; {USAGE}"))?),
             "--net" => net_file = Some(it.next().ok_or_else(|| format!("--net needs a file; {USAGE}"))?),
             "--net-depth" => net_depth = Some(number("--net-depth", it.next())?),
+            "--inner-rollouts" => inner_rollouts = Some(number("--inner-rollouts", it.next())?),
+            "--inner-net" => inner_file = Some(it.next().ok_or_else(|| format!("--inner-net needs a file; {USAGE}"))?),
             _ => return Err(format!("unexpected argument {arg}; {USAGE}")),
         }
     }
     if net_depth.is_some() && net_file.is_none() {
         return Err(format!("--net-depth sets where the net values the playouts and needs --net; {USAGE}"));
+    }
+    if inner_rollouts.is_some() && net_file.is_none() {
+        return Err(format!("--inner-rollouts plays the playouts' days by a net advice and needs --net; {USAGE}"));
+    }
+    if inner_rollouts == Some(0) {
+        return Err(format!("--inner-rollouts must be at least 1; {USAGE}"));
+    }
+    if inner_file.is_some() && inner_rollouts.is_none() {
+        return Err(format!("--inner-net sets the net of the inner advice and needs --inner-rollouts; {USAGE}"));
     }
     let net_depth = net_depth.unwrap_or(1);
     if net_depth == 0 {
@@ -171,15 +186,15 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
     if strategy_only {
         return run_strategy_bench(games, seed, threads, (&held, rerolls), changed.as_ref(), save, against);
     }
-    let net = match net_file {
-        Some(file) => {
-            let bytes = std::fs::read(file).map_err(|e| format!("{file}: {e}"))?;
-            Some(Net::from_bytes(&bytes).map_err(|e| format!("{file}: {e}"))?)
-        }
-        None => None,
+    let load = |file: &String| -> Result<Net, String> {
+        let bytes = std::fs::read(file).map_err(|e| format!("{file}: {e}"))?;
+        Net::from_bytes(&bytes).map_err(|e| format!("{file}: {e}"))
     };
+    let net = net_file.map(load).transpose()?;
+    let inner_net = inner_file.map(load).transpose()?;
+    let inner = inner_rollouts.zip(inner_net.as_ref().or(net.as_ref())).map(|(rollouts, net)| Inner { net, rollouts });
     let clock = std::time::Instant::now();
-    let s = summarize(&bench(games, rollouts, seed, threads, rerolls, net.as_ref().map(|net| (net, net_depth))));
+    let s = summarize(&bench(games, rollouts, seed, threads, rerolls, net.as_ref().map(|net| (net, net_depth)), inner));
     let secs = clock.elapsed().as_secs_f64();
     out!(
         "strategy  {:.3} +- {:.3} Chromatics, {:.3} +- {:.3} loot per run",
@@ -192,7 +207,8 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
     out!("advice - strategy  {:+.3} +- {:.3} loot (paired)", s.gain.0, s.gain.1);
     out!("advice overruled the strategy at {} of {} decisions with 2+ options", s.overruled, s.decisions);
     let with_net = net_file.map_or(String::new(), |file| format!(", net {file} at depth {net_depth}"));
-    out!("{games} games, {rollouts} playouts per option, seed {seed}, {threads} threads, {rerolls} rerolls{with_net}, {secs:.1} s");
+    let with_inner = inner_rollouts.map_or(String::new(), |n| format!(", days played by the advice of net {} at {n} playouts", inner_file.or(net_file).map_or("", |f| f.as_str())));
+    out!("{games} games, {rollouts} playouts per option, seed {seed}, {threads} threads, {rerolls} rerolls{with_net}{with_inner}, {secs:.1} s");
     Ok(ExitCode::SUCCESS)
 }
 

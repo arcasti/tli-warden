@@ -6,7 +6,7 @@
 //! share their futures across the group. The playouts that give the labels
 //! follow the strategy, or the net's advice when `Advice::label_rollouts` is set.
 
-use super::bench::{advised, each_game, solve_seed, start};
+use super::bench::{advised, each_game, follow, solve_seed, start};
 use super::features::{INPUTS, Row, encode, is_morning};
 use super::net::Net;
 use super::solve::{Candidate, candidates, hide_future, playout, to_morning};
@@ -95,7 +95,7 @@ fn game(seed: u32, k: u32, explore: f64, label_playouts: usize, advice: Option<A
             break;
         };
         let base = match advice {
-            Some(a) => advised(&st, &mine, a.rollouts, solve_seed(seed, k, step), Some((a.net, a.depth))).unwrap_or(mine),
+            Some(a) => advised(&st, &mine, a.rollouts, solve_seed(seed, k, step), Some((a.net, a.depth)), None).unwrap_or(mine),
             None => mine,
         };
         let action = if list.len() >= 2 && own.roll() < explore {
@@ -137,18 +137,7 @@ fn finish(st: &mut State, rng: &mut Rng32, labels: Option<Advice>, seed: u32) {
         playout(st, &TUNED, rng);
         return;
     };
-    for step in 0..GUARD {
-        if st.phase == Phase::Ended {
-            break;
-        }
-        let Some(mine) = decide(st, &TUNED, rng) else {
-            break;
-        };
-        let action = advised(st, &mine, a.rollouts, solve_seed(seed, 0, step), Some((a.net, a.depth))).unwrap_or(mine);
-        if !apply(st, &action).is_ok() && !(action != Action::End && apply(st, &Action::End).is_ok()) {
-            break;
-        }
-    }
+    follow(st, rng, a.rollouts, (a.net, a.depth), seed, usize::MAX);
 }
 
 /// The sibling group of the decision at `st`: for each candidate of `list` that applies on

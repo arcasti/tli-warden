@@ -2,6 +2,7 @@
 //! playouts, the candidate moves with their labels, `solve`, `instant` and
 //! the reasons behind the strategy's pick.
 
+use super::bench::follow;
 use super::chain::chain_odds;
 use super::features::{encode, is_morning};
 use super::net::Net;
@@ -278,6 +279,8 @@ pub struct Rollouts<'a> {
     p: &'a Params,
     /// The net and the depth of the morning it values (see [`settle`]).
     net: Option<(&'a Net, usize)>,
+    /// The advice that plays the playouts' days up to that morning.
+    inner: Option<Inner<'a>>,
     list: Vec<Candidate>,
     pick: Option<Action>,
     random: Rng32,
@@ -286,6 +289,14 @@ pub struct Rollouts<'a> {
     /// The candidates still playing rounds.
     live: Vec<bool>,
     rounds: usize,
+}
+
+/// The advice that plays a playout's days: `rollouts` playouts per option,
+/// valued by `net` at the next morning (see [`Rollouts::inner`]).
+#[derive(Clone, Copy)]
+pub struct Inner<'a> {
+    pub net: &'a Net,
+    pub rollouts: usize,
 }
 
 /// The first round count where racing drops trailing candidates.
@@ -330,13 +341,20 @@ impl<'a> Rollouts<'a> {
             None => decide(&base, p, roll),
         };
         let n = list.len();
-        Rollouts { base, p, net: None, list, pick, random: Rng32::new(seed), vals: vec![Vec::new(); n], best: vec![0.0; n], live: vec![true; n], rounds: 0 }
+        Rollouts { base, p, net: None, inner: None, list, pick, random: Rng32::new(seed), vals: vec![Vec::new(); n], best: vec![0.0; n], live: vec![true; n], rounds: 0 }
     }
 
     /// Values the playouts with `net` at the `depth`-th morning they meet
     /// (see [`settle`]).
     pub fn net(mut self, net: &'a Net, depth: usize) -> Rollouts<'a> {
         self.net = Some((net, depth));
+        self
+    }
+
+    /// Plays the playouts' days with `inner` instead of the strategy up to
+    /// the morning the net values; without a net it has no effect.
+    pub fn inner(mut self, inner: Inner<'a>) -> Rollouts<'a> {
+        self.inner = Some(inner);
         self
     }
 
@@ -451,9 +469,12 @@ impl<'a> Rollouts<'a> {
                     return (f64::NAN, 0.0);
                 }
                 let roll = &mut Rng32::new(seed ^ 0x9e3779b9);
-                let value = match self.net {
-                    Some((net, depth)) => settle(&mut trial, self.p, roll, net, depth),
-                    None => {
+                let value = match (self.net, self.inner) {
+                    (Some((net, depth)), Some(inner)) => {
+                        if follow(&mut trial, roll, inner.rollouts, (inner.net, 1), seed ^ 0x85ebca6b, depth) { f64::from(net.value(&encode(&trial))) } else { trial.loot() }
+                    }
+                    (Some((net, depth)), None) => settle(&mut trial, self.p, roll, net, depth),
+                    (None, _) => {
                         playout(&mut trial, self.p, roll);
                         trial.loot()
                     }

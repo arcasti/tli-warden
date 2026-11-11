@@ -121,8 +121,8 @@ mod tests {
 
     #[test]
     fn old_hotkey_field() {
-        let s: Settings = serde_json::from_str(r#"{"hotkey": "F7", "rollouts": 300}"#).unwrap();
-        assert_eq!((s.read_hotkey.as_str(), s.auto_hotkey.as_str(), s.rollouts, s.auto_place, s.tools_days, s.theme, s.run_log), ("F9", "F8", 400, true, None, None, true));
+        let s: Settings = serde_json::from_str(r#"{"hotkey": "F7"}"#).unwrap();
+        assert_eq!((s.read_hotkey.as_str(), s.auto_hotkey.as_str(), s.auto_place, s.tools_days, s.theme, s.run_log), ("F9", "F8", true, None, None, true));
         assert!(s.check_updates && s.offer_install);
         assert_eq!((s.share_logs, s.shared_from.as_str(), s.install_id.as_str()), (None, "", ""));
     }

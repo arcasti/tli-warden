@@ -171,7 +171,6 @@ impl WardenApp {
     pub fn new(cc: &eframe::CreationContext<'_>, settings: Settings, preload: Option<&Path>, current: Option<PathBuf>, installed: bool) -> WardenApp {
         cc.egui_ctx.set_theme(egui::Theme::Dark);
         let mut session = Session::new(settings.rollouts, settings.held_tools(), settings.theme, settings.tools_days);
-        // The window's advice values its playouts with the embedded net.
         session.net = Some(crate::solver::net::embedded());
         session.log = settings.run_log.then(RunLog::in_appdata).flatten();
         let ctx = cc.egui_ctx.clone();

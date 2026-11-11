@@ -8,7 +8,7 @@
 //!   warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] [--net FILE [--net-depth K]]
 //!   warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T]
 //!   warden-cli replay <log.jsonl | dir>... [--seeds N] [--out file]
-//!   warden-cli samples --out file [--games N] [--seed S] [--threads T] [--explore X] [--label-playouts N] [--net FILE] [--rollouts N] [--siblings X]
+//!   warden-cli samples --out file [--games N] [--seed S] [--threads T] [--explore X] [--label-playouts N] [--net FILE [--rollouts N] [--net-depth K] [--label-rollouts N]] [--siblings X]
 //!   warden-cli net <net file> <samples file>
 //!   warden-cli --version
 
@@ -33,7 +33,7 @@ macro_rules! out {
     }};
 }
 
-const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] [--net FILE [--net-depth K]] | warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T] | warden-cli replay <log.jsonl | dir>... [--seeds N] [--out file] | warden-cli samples --out file [--games N] [--seed S] [--threads T] [--explore X] [--label-playouts N] [--net FILE] [--rollouts N] [--siblings X] | warden-cli net <net file> <samples file> | warden-cli --version";
+const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] [--net FILE [--net-depth K]] | warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T] | warden-cli replay <log.jsonl | dir>... [--seeds N] [--out file] | warden-cli samples --out file [--games N] [--seed S] [--threads T] [--explore X] [--label-playouts N] [--net FILE [--rollouts N] [--net-depth K] [--label-rollouts N]] [--siblings X] | warden-cli net <net file> <samples file> | warden-cli --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -296,6 +296,7 @@ fn run_samples(args: &[String]) -> Result<ExitCode, String> {
     let (mut games, mut seed, mut threads, mut explore, mut label_playouts) = (1000u32, 1u32, threads, 0.15f64, 1usize);
     let mut siblings = 0.0f64;
     let (mut out_file, mut net_file, mut rollouts) = (None::<&String>, None::<&String>, None::<usize>);
+    let (mut net_depth, mut label_rollouts) = (None::<usize>, None::<usize>);
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -307,6 +308,8 @@ fn run_samples(args: &[String]) -> Result<ExitCode, String> {
             "--label-playouts" => label_playouts = number("--label-playouts", it.next())?,
             "--net" => net_file = Some(it.next().ok_or_else(|| format!("--net needs a file; {USAGE}"))?),
             "--rollouts" => rollouts = Some(number("--rollouts", it.next())?),
+            "--net-depth" => net_depth = Some(number("--net-depth", it.next())?),
+            "--label-rollouts" => label_rollouts = Some(number("--label-rollouts", it.next())?),
             "--siblings" => siblings = number("--siblings", it.next())?,
             _ => return Err(format!("unexpected argument {arg}; {USAGE}")),
         }
@@ -315,9 +318,17 @@ fn run_samples(args: &[String]) -> Result<ExitCode, String> {
     if rollouts.is_some() && net_file.is_none() {
         return Err(format!("--rollouts sets the advice's playouts and needs --net; {USAGE}"));
     }
-    let rollouts = rollouts.unwrap_or(16);
-    if games == 0 || threads == 0 || label_playouts == 0 || rollouts == 0 {
-        return Err(format!("--games, --threads, --label-playouts and --rollouts must be at least 1; {USAGE}"));
+    if net_depth.is_some() && net_file.is_none() {
+        return Err(format!("--net-depth sets where the net values the playouts and needs --net; {USAGE}"));
+    }
+    if label_rollouts.is_some() && net_file.is_none() {
+        return Err(format!("--label-rollouts sets the playouts of the advice that labels and needs --net; {USAGE}"));
+    }
+    let (rollouts, net_depth) = (rollouts.unwrap_or(16), net_depth.unwrap_or(1));
+    if games == 0 || threads == 0 || label_playouts == 0 || rollouts == 0 || net_depth == 0 || label_rollouts == Some(0) {
+        return Err(format!(
+            "--games, --threads, --label-playouts, --rollouts, --net-depth and --label-rollouts must be at least 1; {USAGE}"
+        ));
     }
     if !(0.0..=1.0).contains(&explore) {
         return Err(format!("--explore must be between 0 and 1; {USAGE}"));
@@ -332,7 +343,7 @@ fn run_samples(args: &[String]) -> Result<ExitCode, String> {
         }
         None => None,
     };
-    let advice = net.as_ref().map(|net| Advice { net, rollouts });
+    let advice = net.as_ref().map(|net| Advice { net, rollouts, depth: net_depth, label_rollouts });
     let clock = std::time::Instant::now();
     let list = samples(games, seed, threads, explore, label_playouts, advice, siblings);
     let secs = clock.elapsed().as_secs_f64();
@@ -340,7 +351,11 @@ fn run_samples(args: &[String]) -> Result<ExitCode, String> {
     write_samples(&list, &mut bytes).map_err(|e| format!("{out_file}: {e}"))?;
     std::fs::write(out_file, bytes).map_err(|e| format!("{out_file}: {e}"))?;
     let mean = list.iter().map(|s| s.label as f64).sum::<f64>() / list.len().max(1) as f64;
-    let played = net_file.map_or(String::new(), |file| format!(", played by the advice with net {file} at {rollouts} rollouts"));
+    let played = net_file.map_or(String::new(), |file| {
+        let depth = if net_depth > 1 { format!(" at depth {net_depth}") } else { String::new() };
+        let labels = label_rollouts.map_or(String::new(), |n| format!(", labels by that advice at {n} rollouts"));
+        format!(", played by the advice with net {file} at {rollouts} rollouts{depth}{labels}")
+    });
     let groups = if siblings > 0.0 {
         let sizes = group_sizes(&list);
         format!(", {} sibling groups", sizes.iter().filter(|&&n| n >= 2).count())

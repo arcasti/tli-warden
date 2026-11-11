@@ -1,8 +1,10 @@
 //! Training samples for a learned value function: the morning states of
 //! runs played by the strategy or by a net's advice, each labelled with the
-//! mean Riot loot of strategy playouts from it on re-rolled hidden information,
+//! mean Riot loot of playouts from it on re-rolled hidden information,
 //! and sibling groups: the next-morning states of the options of one decision
-//! under one hidden future, each labelled with the loot of one playout.
+//! under one hidden future, each labelled with the loot of one playout. The
+//! playouts that give the labels follow the strategy, or the net's advice when
+//! `Advice::label_rollouts` is set.
 
 use super::bench::{advised, each_game, solve_seed, start};
 use super::features::{INPUTS, Row, encode, is_morning};
@@ -15,7 +17,7 @@ use crate::engine::{Action, apply};
 /// Moves a run may take before it is cut, as in `playout`.
 const GUARD: u32 = 2000;
 
-/// One state and the loot of strategy playouts from it. Samples with the same
+/// One state and the loot of playouts from it. Samples with the same
 /// `group` are the options of one decision under one hidden future; a morning
 /// sample is alone in its group.
 #[derive(Clone, Debug, PartialEq)]
@@ -26,20 +28,24 @@ pub struct Sample {
 }
 
 /// The advice that plays the sampled games in place of the strategy: `rollouts` playouts per
-/// option, valued by `net` at the next morning.
+/// option, valued by `net` at the `depth`-th morning they meet (1 = the next morning). With
+/// `label_rollouts` set, the playouts that give the labels follow this advice at that many
+/// playouts per option, with the same net and depth, instead of the strategy.
 #[derive(Clone, Copy)]
 pub struct Advice<'a> {
     pub net: &'a Net,
     pub rollouts: usize,
+    pub depth: usize,
+    pub label_rollouts: Option<usize>,
 }
 
 /// Games 0..`games` of `seed` on `threads` threads; every morning state gives one sample.
 /// Game `k` has `k % 3` instrument rerolls. Each move is the strategy's pick, or the pick of
 /// `advice` when one is given. With odds `explore`, a move with two or more candidates is a
 /// uniformly random candidate instead. Each label is the mean loot of `label_playouts`
-/// strategy playouts. With odds `siblings`, a decision with two or more candidates also gives
-/// a sibling group (see `sibling_group`). Group ids are 0, 1, 2, ... in the order of the result,
-/// distinct across games.
+/// playouts that follow the strategy, or `advice` when its `label_rollouts` is set. With odds
+/// `siblings`, a decision with two or more candidates also gives a sibling group (see
+/// `sibling_group`). Group ids are 0, 1, 2, ... in the order of the result, distinct across games.
 pub fn samples(
     games: u32,
     seed: u32,
@@ -64,6 +70,7 @@ fn game(seed: u32, k: u32, explore: f64, label_playouts: usize, advice: Option<A
     let (mut st, mut rng) = start(seed, k, &[]);
     st.rerolls = (k % 3) as u8;
     let mut own = Rng32::new(seed.wrapping_mul(0x9e3779b9) ^ k.wrapping_mul(40503).wrapping_add(1));
+    let labels = advice.and_then(|a| a.label_rollouts.map(|n| Advice { rollouts: n, ..a }));
     let mut out = Vec::new();
     let mut group = 0;
     for step in 0..GUARD {
@@ -71,13 +78,13 @@ fn game(seed: u32, k: u32, explore: f64, label_playouts: usize, advice: Option<A
             break;
         }
         if is_morning(&st) {
-            let label = label(&st, label_playouts, &mut own);
+            let label = label(&st, label_playouts, &mut own, labels);
             out.push(Sample { row: encode(&st), label, group });
             group += 1;
         }
         let list = candidates(&st);
         if siblings > 0.0 && list.len() >= 2 && own.roll() < siblings {
-            let members = sibling_group(&st, &list, (own.roll() * 4294967296.0) as u32);
+            let members = sibling_group(&st, &list, (own.roll() * 4294967296.0) as u32, labels);
             if members.len() >= 2 {
                 out.extend(members.into_iter().map(|(row, label)| Sample { row, label, group }));
                 group += 1;
@@ -87,7 +94,7 @@ fn game(seed: u32, k: u32, explore: f64, label_playouts: usize, advice: Option<A
             break;
         };
         let base = match advice {
-            Some(a) => advised(&st, &mine, a.rollouts, solve_seed(seed, k, step), Some((a.net, 1))).unwrap_or(mine),
+            Some(a) => advised(&st, &mine, a.rollouts, solve_seed(seed, k, step), Some((a.net, a.depth))).unwrap_or(mine),
             None => mine,
         };
         let action = if list.len() >= 2 && own.roll() < explore {
@@ -102,25 +109,50 @@ fn game(seed: u32, k: u32, explore: f64, label_playouts: usize, advice: Option<A
     out
 }
 
-/// Mean loot of `playouts` strategy playouts from `st`, each on hidden information
-/// re-rolled with a seed drawn from `own`.
-fn label(st: &State, playouts: usize, own: &mut Rng32) -> f32 {
+/// Mean loot of `playouts` playouts from `st`, each on hidden information re-rolled with a
+/// seed drawn from `own`; they follow the strategy, or `labels` when given (see `finish`).
+fn label(st: &State, playouts: usize, own: &mut Rng32, labels: Option<Advice>) -> f32 {
     let mut total = 0.0;
     for _ in 0..playouts {
         let s = (own.roll() * 4294967296.0) as u32;
         let mut clone = st.clone();
         hide_future(&mut clone, s);
-        playout(&mut clone, &TUNED, &mut Rng32::new(s ^ 0x9e3779b9));
+        finish(&mut clone, &mut Rng32::new(s ^ 0x9e3779b9), labels, s ^ 0x85ebca6b);
         total += clone.loot();
     }
     (total / playouts.max(1) as f64) as f32
 }
 
+/// Plays `st` to the end of the run: a strategy playout drawing from `rng`, or, with `labels`,
+/// the moves of that advice at `labels.rollouts` playouts per option, the strategy's picks
+/// drawing from `rng`. The advice's playouts at step `step` are seeded by
+/// `solve_seed(seed, 0, step)`, so the result depends only on the arguments.
+fn finish(st: &mut State, rng: &mut Rng32, labels: Option<Advice>, seed: u32) {
+    let Some(a) = labels else {
+        playout(st, &TUNED, rng);
+        return;
+    };
+    for step in 0..GUARD {
+        if st.phase == Phase::Ended {
+            break;
+        }
+        let Some(mine) = decide(st, &TUNED, rng) else {
+            break;
+        };
+        let action = advised(st, &mine, a.rollouts, solve_seed(seed, 0, step), Some((a.net, a.depth))).unwrap_or(mine);
+        if !apply(st, &action).is_ok() && !(action != Action::End && apply(st, &Action::End).is_ok()) {
+            break;
+        }
+    }
+}
+
 /// The sibling group of the decision at `st`: for each candidate of `list` that applies on
 /// `st` with its hidden future re-rolled by `h`, the next-morning state the strategy reaches
-/// and the loot of the rest of that playout, as the advice's rounds with a net see them
-/// (`Rollouts::round` then `settle`). A candidate whose run ends before a morning gives none.
-fn sibling_group(st: &State, list: &[Candidate], h: u32) -> Vec<(Row, f32)> {
+/// and the loot of the rest of that run, as the advice's rounds with a net see them
+/// (`Rollouts::round` then `settle`). The rest of the run follows the strategy, or `labels`
+/// when given, with the same seeds for every member. A candidate whose run ends before a
+/// morning gives none.
+fn sibling_group(st: &State, list: &[Candidate], h: u32, labels: Option<Advice>) -> Vec<(Row, f32)> {
     let mut hidden = st.clone();
     hide_future(&mut hidden, h);
     let mut members = Vec::new();
@@ -134,7 +166,7 @@ fn sibling_group(st: &State, list: &[Candidate], h: u32) -> Vec<(Row, f32)> {
             continue;
         }
         let row = encode(&t);
-        playout(&mut t, &TUNED, &mut roll);
+        finish(&mut t, &mut roll, labels, h ^ 0x85ebca6b);
         members.push((row, t.loot() as f32));
     }
     members
@@ -233,10 +265,31 @@ mod tests {
     #[test]
     fn advised_samples_do_not_depend_on_threads() {
         let zero = crate::solver::solve::tests::zero_net();
-        let advice = Some(Advice { net: &zero, rollouts: 8 });
+        let advice = Some(Advice { net: &zero, rollouts: 8, depth: 1, label_rollouts: None });
         let one = samples(4, 1, 1, 0.0, 1, advice, 0.0);
         assert_eq!(one, samples(4, 1, 3, 0.0, 1, advice, 0.0));
         assert!(!one.is_empty() && one.iter().all(|s| s.label.is_finite()));
+    }
+
+    #[test]
+    fn advised_labels_do_not_depend_on_threads() {
+        let zero = crate::solver::solve::tests::zero_net();
+        let advice = Some(Advice { net: &zero, rollouts: 4, depth: 2, label_rollouts: Some(2) });
+        let one = samples(2, 1, 1, 0.2, 1, advice, 0.3);
+        assert_eq!(one, samples(2, 1, 3, 0.2, 1, advice, 0.3));
+        assert!(one.windows(2).any(|w| w[0].group == w[1].group), "no sibling group");
+        assert!(one.iter().all(|s| s.label.is_finite() && s.label >= 0.0));
+    }
+
+    #[test]
+    fn advised_labels_keep_the_rows_and_groups() {
+        let zero = crate::solver::solve::tests::zero_net();
+        let strategy = Advice { net: &zero, rollouts: 4, depth: 1, label_rollouts: None };
+        let advised = Advice { label_rollouts: Some(2), ..strategy };
+        let a = samples(2, 1, 2, 0.2, 1, Some(strategy), 0.3);
+        let b = samples(2, 1, 2, 0.2, 1, Some(advised), 0.3);
+        let shape = |l: &[Sample]| l.iter().map(|s| (s.row.clone(), s.group)).collect::<Vec<_>>();
+        assert_eq!(shape(&a), shape(&b));
     }
 
     #[test]

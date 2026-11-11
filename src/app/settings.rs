@@ -13,6 +13,10 @@ pub struct Settings {
     pub auto_hotkey: String,
     /// A part of the game window's title.
     pub window_title: String,
+    /// Playouts per option for a solve. Saved as "playouts": a count saved
+    /// as "rollouts" (up to 0.8.0) was chosen for playouts that ran each run
+    /// to its end and is not read, so those installs get the default.
+    #[serde(rename = "playouts")]
     pub rollouts: usize,
     /// Held instrument keys.
     pub tools: Vec<String>,
@@ -62,7 +66,7 @@ impl Default for Settings {
             read_hotkey: "F9".to_string(),
             auto_hotkey: "F8".to_string(),
             window_title: "Torchlight".to_string(),
-            rollouts: 1600,
+            rollouts: 400,
             tools: Vec::new(),
             tools_days: None,
             theme: None,
@@ -93,18 +97,7 @@ impl Settings {
 
     /// The saved settings, or the defaults when there are none or they don't parse.
     pub fn load() -> Settings {
-        Settings::path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|text| Settings::parse(&text)).unwrap_or_default()
-    }
-
-    /// Settings from saved JSON. Every save stores the whole struct, so
-    /// installs from before 0.7.1 hold its default of 400 playouts: that
-    /// count is raised to the current default.
-    fn parse(text: &str) -> Option<Settings> {
-        let mut s: Settings = serde_json::from_str(text).ok()?;
-        if s.rollouts == 400 {
-            s.rollouts = Settings::default().rollouts;
-        }
-        Some(s)
+        Settings::path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -129,17 +122,19 @@ mod tests {
     #[test]
     fn old_hotkey_field() {
         let s: Settings = serde_json::from_str(r#"{"hotkey": "F7", "rollouts": 300}"#).unwrap();
-        assert_eq!((s.read_hotkey.as_str(), s.auto_hotkey.as_str(), s.rollouts, s.auto_place, s.tools_days, s.theme, s.run_log), ("F9", "F8", 300, true, None, None, true));
+        assert_eq!((s.read_hotkey.as_str(), s.auto_hotkey.as_str(), s.rollouts, s.auto_place, s.tools_days, s.theme, s.run_log), ("F9", "F8", 400, true, None, None, true));
         assert!(s.check_updates && s.offer_install);
         assert_eq!((s.share_logs, s.shared_from.as_str(), s.install_id.as_str()), (None, "", ""));
     }
 
     #[test]
-    fn old_default_rollouts_raised() {
-        let rollouts = |text: &str| Settings::parse(text).map(|s| s.rollouts);
-        assert_eq!(rollouts(r#"{"rollouts": 400}"#), Some(1600));
-        assert_eq!(rollouts(r#"{"rollouts": 300}"#), Some(300));
-        assert_eq!(rollouts("{}"), Some(1600));
-        assert_eq!(rollouts("not json"), None);
+    fn saved_playouts_are_read_and_old_rollouts_are_not() {
+        let playouts = |text: &str| serde_json::from_str::<Settings>(text).map(|s| s.rollouts).ok();
+        assert_eq!(playouts(r#"{"playouts": 300}"#), Some(300));
+        assert_eq!(playouts(r#"{"rollouts": 1600}"#), Some(400));
+        assert_eq!(playouts("{}"), Some(400));
+        assert_eq!(playouts("not json"), None);
+        let saved = serde_json::to_string(&Settings { rollouts: 900, ..Settings::default() }).unwrap();
+        assert_eq!(playouts(&saved), Some(900));
     }
 }

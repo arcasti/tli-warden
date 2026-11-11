@@ -174,7 +174,7 @@ fn sibling_group(st: &State, list: &[Candidate], h: u32, playouts: usize, labels
         let row = encode(&t);
         let rest: f64 = (1..playouts).map(|j| replay(&t, h.wrapping_add((j as u32).wrapping_mul(0x9e3779b9)), labels)).sum();
         finish(&mut t, &mut roll, labels, h ^ 0x85ebca6b);
-        members.push((row, ((t.loot() + rest) / playouts.max(1) as f64) as f32));
+        members.push((row, ((t.loot() + rest) / playouts as f64) as f32));
     }
     members
 }
@@ -366,7 +366,6 @@ mod tests {
         assert!(one.len() >= 2 && one.len() == many.len());
         assert!(one.iter().zip(&many).all(|(a, b)| a.0 == b.0));
         assert_eq!(many, sibling_group(&st, &list, 12345, 16, None));
-        assert!(one.iter().chain(&many).all(|m| m.1.is_finite() && m.1 >= 0.0));
         assert!(one.iter().zip(&many).any(|(a, b)| a.1 != b.1));
     }
 

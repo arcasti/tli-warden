@@ -147,6 +147,30 @@ fn marker_correction() {
     assert!(s.set_marker(1, true).is_err(), "the Interrogation Room takes no marker");
 }
 
+/// A session with the net values its playouts at a morning by the net, not by
+/// the loot of the played-out run.
+#[test]
+fn net_values_the_session_playouts() {
+    let frame = common::frames().join("rec1-t087.png");
+    if !frame.is_file() {
+        println!("skipped: {} is missing", frame.display());
+        return;
+    }
+    let ranking = |net: bool| {
+        let mut s = Session::new(100, Vec::new(), None, None);
+        if net {
+            s.net = Some(warden::solver::net::embedded());
+        }
+        s.read_in_background(load_png(&frame).unwrap());
+        s.wait();
+        assert_eq!(s.rounds, 100);
+        assert!(!s.ranking.is_empty());
+        s.ranking
+    };
+    let (plain, net) = (ranking(false), ranking(true));
+    assert!(plain.iter().zip(&net).any(|(p, n)| p.mean != n.mean), "{plain:?}\n{net:?}");
+}
+
 /// A live frame of another 16:9 size reads as the reference size does; a
 /// window narrower than 16:9 is not read and says why, then keeps the
 /// reading on show with the same line.

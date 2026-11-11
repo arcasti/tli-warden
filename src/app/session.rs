@@ -19,6 +19,7 @@ use serde_json::json;
 use crate::engine::{Action, ChoiceId};
 use crate::engine::state::{Pending, State};
 use crate::solver::solve::{Rollouts, SolveOption, instant, instant_bite};
+use crate::solver::net::Net;
 use crate::engine::devour::{eats, offer_chain, start_options};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -29,6 +30,8 @@ use std::time::SystemTime;
 pub const ROUND: usize = 50;
 /// The seed of the board's hidden parts and of the playouts, as in `warden-cli solve`.
 const SEED: u32 = 1;
+/// The morning where the net values the app's playouts (see `solve::settle`).
+const NET_DEPTH: usize = 4;
 
 /// A correction to a cell the reader got wrong.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -526,6 +529,9 @@ pub struct Session {
     pub solving: bool,
     /// Playouts per option for a full solve.
     pub rollouts: usize,
+    /// The value net of the playouts: with one, a playout stops at its [`NET_DEPTH`]-th
+    /// morning and takes the net's value there; without, it plays the run to the end.
+    pub net: Option<&'static Net>,
     /// The state the running solve plays from.
     state: Option<State>,
     /// The stored read, its days replaced by the clock's count.
@@ -638,6 +644,7 @@ impl Session {
             rounds: 0,
             solving: false,
             rollouts: rollouts.max(1),
+            net: None,
             state: None,
             scene: None,
             size: (REF_W, REF_H),
@@ -1073,8 +1080,8 @@ impl Session {
         log.event("read", r.at, fields);
     }
 
-    /// Logs the advice of a finished solve: the pick and the picks about as
-    /// good.
+    /// Logs the advice of a finished solve: the pick, the picks about as
+    /// good, and the morning where the net valued the playouts (null without a net).
     fn log_advice(&self) {
         let (Some(log), Some(a)) = (&self.log, self.advice()) else { return };
         let fields = json!({
@@ -1082,6 +1089,7 @@ impl Session {
             "pick": a.label,
             "also_good": also_good(&self.ranking, a.option).into_iter().map(|k| self.ranking[k].label.as_str()).collect::<Vec<_>>(),
             "rounds": self.rounds,
+            "net_depth": self.net.map(|_| NET_DEPTH),
         });
         log.event("advice", SystemTime::now(), fields);
     }
@@ -1479,14 +1487,15 @@ impl Session {
         let (tx, rx) = channel();
         self.rx = Some(rx);
         self.solving = true;
-        let (notify, rollouts) = (self.notify.clone(), self.rollouts);
+        let (notify, rollouts, net) = (self.notify.clone(), self.rollouts, self.net);
         // The playouts use all cores but one, below normal priority so the
         // game keeps its frame rate.
         let threads = std::thread::available_parallelism().map_or(1, |n| n.get().saturating_sub(1).max(1));
         std::thread::spawn(move || {
             #[cfg(windows)]
             crate::solver::solve::set_priority(windows::Win32::System::Threading::THREAD_PRIORITY_BELOW_NORMAL.0);
-            let mut r = Rollouts::with(&st, SEED, &TUNED, first.then_some(&bites[..]));
+            let r = Rollouts::with(&st, SEED, &TUNED, first.then_some(&bites[..]));
+            let mut r = match net { Some(net) => r.net(net, NET_DEPTH), None => r };
             loop {
                 let ran = r.run_on(ROUND.min(rollouts - r.rounds()), threads);
                 let done = ran == 0 || r.rounds() >= rollouts;

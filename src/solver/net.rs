@@ -2,6 +2,8 @@
 //! samples of `sampling`, read from its weights file. It maps the inputs of
 //! `features::encode` to Riot loot in Chromatics.
 
+use std::sync::OnceLock;
+
 use super::features::INPUTS;
 
 /// Magic bytes at the start of a weights file.
@@ -77,6 +79,15 @@ impl Net {
     }
 }
 
+/// The net the app's playouts use, trained by tools/train_net.py and embedded at
+/// compile time.
+pub fn embedded() -> &'static Net {
+    static N: OnceLock<Net> = OnceLock::new();
+    N.get_or_init(|| {
+        Net::from_bytes(include_bytes!("../../assets/s16-net.bin")).expect("assets/s16-net.bin is a weights file")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,5 +133,10 @@ mod tests {
         let mut wrong = bytes;
         wrong[3] = b'X';
         assert!(Net::parse(&wrong, 3).is_err());
+    }
+
+    #[test]
+    fn embedded_net_parses() {
+        assert!(embedded().value(&[]).is_finite());
     }
 }

@@ -2,9 +2,9 @@
 //! runs played by the strategy or by a net's advice, each labelled with the
 //! mean Riot loot of playouts from it on re-rolled hidden information,
 //! and sibling groups: the next-morning states of the options of one decision
-//! under one hidden future, each labelled with the loot of one playout. The
-//! playouts that give the labels follow the strategy, or the net's advice when
-//! `Advice::label_rollouts` is set.
+//! under one hidden future, each labelled with the mean loot of playouts that
+//! share their futures across the group. The playouts that give the labels
+//! follow the strategy, or the net's advice when `Advice::label_rollouts` is set.
 
 use super::bench::{advised, each_game, solve_seed, start};
 use super::features::{INPUTS, Row, encode, is_morning};
@@ -45,7 +45,8 @@ pub struct Advice<'a> {
 /// uniformly random candidate instead. Each label is the mean loot of `label_playouts`
 /// playouts that follow the strategy, or `advice` when its `label_rollouts` is set. With odds
 /// `siblings`, a decision with two or more candidates also gives a sibling group (see
-/// `sibling_group`). Group ids are 0, 1, 2, ... in the order of the result, distinct across games.
+/// `sibling_group`), its labels also the mean of `label_playouts` playouts. Group ids are
+/// 0, 1, 2, ... in the order of the result, distinct across games.
 pub fn samples(
     games: u32,
     seed: u32,
@@ -84,7 +85,7 @@ fn game(seed: u32, k: u32, explore: f64, label_playouts: usize, advice: Option<A
         }
         let list = candidates(&st);
         if siblings > 0.0 && list.len() >= 2 && own.roll() < siblings {
-            let members = sibling_group(&st, &list, (own.roll() * 4294967296.0) as u32, labels);
+            let members = sibling_group(&st, &list, (own.roll() * 4294967296.0) as u32, label_playouts, labels);
             if members.len() >= 2 {
                 out.extend(members.into_iter().map(|(row, label)| Sample { row, label, group }));
                 group += 1;
@@ -114,13 +115,17 @@ fn game(seed: u32, k: u32, explore: f64, label_playouts: usize, advice: Option<A
 fn label(st: &State, playouts: usize, own: &mut Rng32, labels: Option<Advice>) -> f32 {
     let mut total = 0.0;
     for _ in 0..playouts {
-        let s = (own.roll() * 4294967296.0) as u32;
-        let mut clone = st.clone();
-        hide_future(&mut clone, s);
-        finish(&mut clone, &mut Rng32::new(s ^ 0x9e3779b9), labels, s ^ 0x85ebca6b);
-        total += clone.loot();
+        total += replay(st, (own.roll() * 4294967296.0) as u32, labels);
     }
     (total / playouts.max(1) as f64) as f32
+}
+
+/// Loot of one playout from `st` on hidden information re-rolled with seed `s` (see `finish`).
+fn replay(st: &State, s: u32, labels: Option<Advice>) -> f64 {
+    let mut clone = st.clone();
+    hide_future(&mut clone, s);
+    finish(&mut clone, &mut Rng32::new(s ^ 0x9e3779b9), labels, s ^ 0x85ebca6b);
+    clone.loot()
 }
 
 /// Plays `st` to the end of the run: a strategy playout drawing from `rng`, or, with `labels`,
@@ -148,11 +153,12 @@ fn finish(st: &mut State, rng: &mut Rng32, labels: Option<Advice>, seed: u32) {
 
 /// The sibling group of the decision at `st`: for each candidate of `list` that applies on
 /// `st` with its hidden future re-rolled by `h`, the next-morning state the strategy reaches
-/// and the loot of the rest of that run, as the advice's rounds with a net see them
-/// (`Rollouts::round` then `settle`). The rest of the run follows the strategy, or `labels`
-/// when given, with the same seeds for every member. A candidate whose run ends before a
-/// morning gives none.
-fn sibling_group(st: &State, list: &[Candidate], h: u32, labels: Option<Advice>) -> Vec<(Row, f32)> {
+/// and the mean loot of `playouts` playouts from that morning. The first continues the run
+/// under `h`, as the advice's rounds with a net see them (`Rollouts::round` then `settle`);
+/// playout `j` re-rolls the hidden information of the morning with a seed derived from `h`
+/// and `j`. The playouts follow the strategy, or `labels` when given, with the same seeds
+/// for every member. A candidate whose run ends before a morning gives none.
+fn sibling_group(st: &State, list: &[Candidate], h: u32, playouts: usize, labels: Option<Advice>) -> Vec<(Row, f32)> {
     let mut hidden = st.clone();
     hide_future(&mut hidden, h);
     let mut members = Vec::new();
@@ -166,8 +172,9 @@ fn sibling_group(st: &State, list: &[Candidate], h: u32, labels: Option<Advice>)
             continue;
         }
         let row = encode(&t);
+        let rest: f64 = (1..playouts).map(|j| replay(&t, h.wrapping_add((j as u32).wrapping_mul(0x9e3779b9)), labels)).sum();
         finish(&mut t, &mut roll, labels, h ^ 0x85ebca6b);
-        members.push((row, t.loot() as f32));
+        members.push((row, ((t.loot() + rest) / playouts.max(1) as f64) as f32));
     }
     members
 }
@@ -343,6 +350,24 @@ mod tests {
             assert!(s.label.is_finite() && s.label >= 0.0);
             assert!(s.row.windows(2).all(|w| w[0].0 < w[1].0) && s.row.iter().all(|&(i, _)| (i as usize) < INPUTS));
         }
+    }
+
+    #[test]
+    fn sibling_playouts_share_the_rows_and_average_the_loot() {
+        let (mut st, mut rng) = start(1, 0, &[]);
+        let mut list = candidates(&st);
+        while list.len() < 2 {
+            let action = decide(&st, &TUNED, &mut rng).expect("a decision with two candidates");
+            assert!(apply(&mut st, &action).is_ok());
+            list = candidates(&st);
+        }
+        let one = sibling_group(&st, &list, 12345, 1, None);
+        let many = sibling_group(&st, &list, 12345, 16, None);
+        assert!(one.len() >= 2 && one.len() == many.len());
+        assert!(one.iter().zip(&many).all(|(a, b)| a.0 == b.0));
+        assert_eq!(many, sibling_group(&st, &list, 12345, 16, None));
+        assert!(one.iter().chain(&many).all(|m| m.1.is_finite() && m.1 >= 0.0));
+        assert!(one.iter().zip(&many).any(|(a, b)| a.1 != b.1));
     }
 
     #[test]

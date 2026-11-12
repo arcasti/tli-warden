@@ -51,7 +51,7 @@ cargo test --profile fast-test
 ## How it works
 
 - `src/engine`: the board rules, from the game's client data (`data/warden-data.json`).
-- `src/solver`: the strategy and the playouts that rank the moves.
+- `src/solver`: the strategy and the playouts that rank the moves. A small value net (`assets/s16-net.bin`, trained with `tools/train_net.py`) rates each playout at its fourth morning.
 - `src/reader`: the screen reader. Pixel templates find cells, beasts, rarities and the warden; Windows OCR reads the text.
 - `src/app`: the window, the game capture (Windows Graphics Capture), auto read and the run log.
 

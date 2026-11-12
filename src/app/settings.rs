@@ -66,7 +66,7 @@ impl Default for Settings {
             read_hotkey: "F9".to_string(),
             auto_hotkey: "F8".to_string(),
             window_title: "Torchlight".to_string(),
-            rollouts: 400,
+            rollouts: 1600,
             tools: Vec::new(),
             tools_days: None,
             theme: None,
@@ -131,8 +131,8 @@ mod tests {
     fn saved_playouts_are_read_and_old_rollouts_are_not() {
         let playouts = |text: &str| serde_json::from_str::<Settings>(text).map(|s| s.rollouts).ok();
         assert_eq!(playouts(r#"{"playouts": 300}"#), Some(300));
-        assert_eq!(playouts(r#"{"rollouts": 1600}"#), Some(400));
-        assert_eq!(playouts("{}"), Some(400));
+        assert_eq!(playouts(r#"{"rollouts": 300}"#), Some(1600));
+        assert_eq!(playouts("{}"), Some(1600));
         assert_eq!(playouts("not json"), None);
         let saved = serde_json::to_string(&Settings { rollouts: 900, ..Settings::default() }).unwrap();
         assert_eq!(playouts(&saved), Some(900));

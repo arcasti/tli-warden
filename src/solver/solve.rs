@@ -34,8 +34,13 @@ pub fn playout(st: &mut State, p: &Params, roll: &mut Rng32) {
 
 /// `playout` up to the `depth`-th morning it meets, valued there by `net`; a
 /// run that ends first, or a move that fails with its End Day, is valued by
-/// its Riot loot. A state that is already a morning counts as the first.
+/// its Riot loot. A state that is already a morning counts as the first. With
+/// depth 0 `st` is valued as it stands, by `net` or by its loot once ended,
+/// without a move, so `net` has to read the day block of `features`.
 pub fn settle(st: &mut State, p: &Params, roll: &mut Rng32, net: &Net, depth: usize) -> f64 {
+    if depth == 0 {
+        return if st.phase == Phase::Ended { st.loot() } else { f64::from(net.value(&encode(st))) };
+    }
     if to_morning(st, p, roll, depth) { f64::from(net.value(&encode(st))) } else { st.loot() }
 }
 
@@ -292,11 +297,14 @@ pub struct Rollouts<'a> {
 }
 
 /// The advice that plays a playout's days: `rollouts` playouts per option,
-/// valued by `net` at the next morning (see [`Rollouts::inner`]).
+/// valued by `net` at the `depth`-th morning (see [`Rollouts::inner`]).
 #[derive(Clone, Copy)]
 pub struct Inner<'a> {
     pub net: &'a Net,
     pub rollouts: usize,
+    /// Where `net` values the inner playouts, as in [`settle`]: 1 at the next
+    /// morning, 0 right after the action.
+    pub depth: usize,
 }
 
 /// The first round count where racing drops trailing candidates.
@@ -352,7 +360,8 @@ impl<'a> Rollouts<'a> {
     }
 
     /// Plays the playouts' days with `inner` instead of the strategy up to
-    /// the morning the net values; without a net it has no effect.
+    /// the morning the net values; without a net, or with a net at depth 0,
+    /// it has no effect.
     pub fn inner(mut self, inner: Inner<'a>) -> Rollouts<'a> {
         self.inner = Some(inner);
         self
@@ -470,10 +479,10 @@ impl<'a> Rollouts<'a> {
                 }
                 let roll = &mut Rng32::new(seed ^ 0x9e3779b9);
                 let value = match (self.net, self.inner) {
-                    (Some((net, depth)), Some(inner)) => {
-                        if follow(&mut trial, roll, inner.rollouts, (inner.net, 1), seed ^ 0x85ebca6b, depth) { f64::from(net.value(&encode(&trial))) } else { trial.loot() }
+                    (Some((net, depth)), Some(inner)) if depth > 0 => {
+                        if follow(&mut trial, roll, inner.rollouts, (inner.net, inner.depth), seed ^ 0x85ebca6b, depth) { f64::from(net.value(&encode(&trial))) } else { trial.loot() }
                     }
-                    (Some((net, depth)), None) => settle(&mut trial, self.p, roll, net, depth),
+                    (Some((net, depth)), _) => settle(&mut trial, self.p, roll, net, depth),
                     (None, _) => {
                         playout(&mut trial, self.p, roll);
                         trial.loot()
@@ -750,6 +759,21 @@ pub(crate) mod tests {
         playout(&mut st, &TUNED, &mut Rng32::new(1));
         assert_eq!(st.phase, Phase::Ended);
         assert_eq!(settle(&mut st.clone(), &TUNED, &mut Rng32::new(1), &net, 1), st.loot());
+    }
+
+    #[test]
+    fn settle_at_depth_zero_values_the_state_as_it_stands() {
+        let net = zero_net();
+        // A fresh game waits on its starting instrument pick.
+        let st = new_game("1-0");
+        assert!(!is_morning(&st) && st.phase != Phase::Ended);
+        let mut now = st.clone();
+        assert_eq!(settle(&mut now, &TUNED, &mut Rng32::new(1), &net, 0), 2.5);
+        assert!(now == st, "a state at depth 0 is not played");
+        let mut ended = st.clone();
+        playout(&mut ended, &TUNED, &mut Rng32::new(1));
+        assert_eq!(ended.phase, Phase::Ended);
+        assert_eq!(settle(&mut ended.clone(), &TUNED, &mut Rng32::new(1), &net, 0), ended.loot());
     }
 
     #[test]

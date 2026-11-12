@@ -4,7 +4,7 @@
 
 use std::sync::OnceLock;
 
-use super::features::INPUTS;
+use super::features::{INPUTS, MORNING_INPUTS};
 
 /// Magic bytes at the start of a weights file.
 const MAGIC: &[u8; 4] = b"WNET";
@@ -28,20 +28,21 @@ pub struct Net {
 impl Net {
     /// Reads a weights file, little endian: magic `WNET`, u32 inputs, u32 h1, u32 h2,
     /// f32 w1[inputs*h1], b1[h1], w2[h1*h2], b2[h2], w3[h2], b3. `inputs` has to be
-    /// `features::INPUTS`.
+    /// `features::INPUTS`, or `features::MORNING_INPUTS` for a net that values mornings only.
     pub fn from_bytes(bytes: &[u8]) -> Result<Net, String> {
-        Self::parse(bytes, INPUTS)
+        Self::parse(bytes, &[INPUTS, MORNING_INPUTS])
     }
 
-    /// `from_bytes` for a net of `inputs_expected` inputs.
-    fn parse(bytes: &[u8], inputs_expected: usize) -> Result<Net, String> {
+    /// `from_bytes` for a net of one of the `accepted` input counts.
+    fn parse(bytes: &[u8], accepted: &[usize]) -> Result<Net, String> {
         if bytes.len() < 16 || &bytes[..4] != MAGIC {
             return Err("not a weights file".into());
         }
         let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let (inputs, h1, h2) = (word(4) as usize, word(8) as usize, word(12) as usize);
-        if inputs != inputs_expected {
-            return Err(format!("weights file has {inputs} inputs, expected {inputs_expected}"));
+        if !accepted.contains(&inputs) {
+            let counts: Vec<String> = accepted.iter().map(|n| n.to_string()).collect();
+            return Err(format!("weights file has {inputs} inputs, expected {}", counts.join(" or ")));
         }
         let floats = inputs * h1 + h1 + h1 * h2 + h2 + h2 + 1;
         if bytes.len() != 16 + floats * 4 {
@@ -56,6 +57,11 @@ impl Net {
         let (w1, b1, w2, b2, w3) = (take(inputs * h1), take(h1), take(h1 * h2), take(h2), take(h2));
         let b3 = take(1)[0];
         Ok(Net { inputs, h1, h2, w1, b1, w2, b2, w3, b3 })
+    }
+
+    /// The net's input count.
+    pub fn inputs(&self) -> usize {
+        self.inputs
     }
 
     /// The net's value of one row of active inputs, in Chromatics.
@@ -114,7 +120,7 @@ mod tests {
 
     #[test]
     fn value_is_the_forward_pass() {
-        let net = Net::parse(&small(), 3).unwrap();
+        let net = Net::parse(&small(), &[3]).unwrap();
         // Hidden 1: 0.2, 0.2. Hidden 2: 0.3, 0.5. Output 0.5 + 0.6 - 0.5.
         assert!((net.value(&[(1, 0.2)]) - 0.6).abs() < 1e-6);
         // Hidden 1: 1.3 clamped to 1, -0.4 clamped to 0. Hidden 2: 1, -0.9 clamped to 0.
@@ -126,13 +132,13 @@ mod tests {
     #[test]
     fn bad_weights_files_are_errors() {
         let bytes = small();
-        assert!(Net::parse(&bytes[..bytes.len() - 4], 3).is_err());
-        assert!(Net::parse(&[bytes.clone(), vec![0; 4]].concat(), 3).is_err());
-        assert!(Net::parse(&bytes, 4).is_err());
+        assert!(Net::parse(&bytes[..bytes.len() - 4], &[3]).is_err());
+        assert!(Net::parse(&[bytes.clone(), vec![0; 4]].concat(), &[3]).is_err());
+        assert!(Net::parse(&bytes, &[4]).is_err());
         assert!(Net::from_bytes(&bytes).is_err());
         let mut wrong = bytes;
         wrong[3] = b'X';
-        assert!(Net::parse(&wrong, 3).is_err());
+        assert!(Net::parse(&wrong, &[3]).is_err());
     }
 
     #[test]

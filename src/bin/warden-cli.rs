@@ -5,10 +5,10 @@
 //!   warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id]
 //!   warden-cli read <frame.png> [--tools id,id]
 //!   warden-cli capture [--frames N] <title text> <out.png>
-//!   warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] [--net FILE [--net-depth K] [--inner-rollouts N [--inner-net FILE]]]
+//!   warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] [--net FILE [--net-depth K] [--inner-rollouts N [--inner-net FILE] [--inner-depth K]]]
 //!   warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T]
 //!   warden-cli replay <log.jsonl | dir>... [--seeds N] [--out file]
-//!   warden-cli samples --out file [--games N] [--seed S] [--threads T] [--explore X] [--label-playouts N] [--net FILE [--rollouts N] [--net-depth K] [--label-rollouts N]] [--siblings X]
+//!   warden-cli samples --out file [--games N] [--seed S] [--threads T] [--explore X] [--label-playouts N] [--net FILE [--rollouts N] [--net-depth K] [--label-rollouts N]] [--siblings X [--siblings-depth K]]
 //!   warden-cli net <net file> <samples file>
 //!   warden-cli --version
 
@@ -19,6 +19,7 @@ use warden::engine::data::Tool;
 use warden::reader::read_model;
 use warden::replay::{Report, log_files, parse_log};
 use warden::solver::bench::{LOW, Solo, bench, is_low, mean_se, spread, strategy_bench, summarize};
+use warden::solver::features::INPUTS;
 use warden::solver::net::Net;
 use warden::solver::sampling::{Advice, Sample, read_samples, samples, write_samples};
 use warden::solver::{Params, TUNED};
@@ -33,7 +34,7 @@ macro_rules! out {
     }};
 }
 
-const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] [--net FILE [--net-depth K] [--inner-rollouts N [--inner-net FILE]]] | warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T] | warden-cli replay <log.jsonl | dir>... [--seeds N] [--out file] | warden-cli samples --out file [--games N] [--seed S] [--threads T] [--explore X] [--label-playouts N] [--net FILE [--rollouts N] [--net-depth K] [--label-rollouts N]] [--siblings X] | warden-cli net <net file> <samples file> | warden-cli --version";
+const USAGE: &str = "usage: warden-cli solve <board.json | frame.png> [--rollouts N] [--seed S] [--tools id,id] | warden-cli read <frame.png> [--tools id,id] | warden-cli capture [--frames N] <title text> <out.png> | warden-cli bench [--games N] [--rollouts R] [--seed S] [--threads T] [--rerolls N] [--net FILE [--net-depth K] [--inner-rollouts N [--inner-net FILE] [--inner-depth K]]] | warden-cli bench --strategy-only [--set name=value,...] [--hold id,id] [--rerolls N] [--save file] [--against file] [--games N] [--seed S] [--threads T] | warden-cli replay <log.jsonl | dir>... [--seeds N] [--out file] | warden-cli samples --out file [--games N] [--seed S] [--threads T] [--explore X] [--label-playouts N] [--net FILE [--rollouts N] [--net-depth K] [--label-rollouts N]] [--siblings X [--siblings-depth K]] | warden-cli net <net file> <samples file> | warden-cli --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -125,18 +126,21 @@ fn run_capture(args: &[String]) -> Result<ExitCode, String> {
 /// `bench`: Chromatics and loot per run for the strategy alone and following the
 /// advice, on the same seeds; see `warden::solver::bench`. With `--net`, the
 /// advice's playouts stop at the next morning and take the net's value there;
-/// `--net-depth K` plays on to the K-th morning they meet instead (default 1).
+/// `--net-depth K` plays on to the K-th morning they meet instead (default 1),
+/// and `--net-depth 0` values them right after the action.
 /// `--inner-rollouts N` plays the playouts' days up to that morning by the
 /// advice at N playouts per option valued at the next morning by the
 /// `--inner-net` file, or by the `--net` file without it, instead of the
-/// strategy. With `--strategy-only`, the strategy alone; see `run_strategy_bench`.
+/// strategy; `--inner-depth K` values them as `--net-depth K` does. A depth of 0
+/// needs a net trained on states after an action. With `--strategy-only`, the
+/// strategy alone; see `run_strategy_bench`.
 fn run_bench(args: &[String]) -> Result<ExitCode, String> {
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     let (mut games, mut rollouts, mut seed, mut threads) = (None, 400usize, 1u32, threads);
     let (mut strategy_only, mut changed, mut rerolls) = (false, None::<Params>, 0u8);
     let (mut held, mut save, mut against) = (Vec::new(), None::<&String>, None::<&String>);
     let (mut net_file, mut net_depth) = (None::<&String>, None::<usize>);
-    let (mut inner_rollouts, mut inner_file) = (None::<usize>, None::<&String>);
+    let (mut inner_rollouts, mut inner_file, mut inner_depth) = (None::<usize>, None::<&String>, None::<usize>);
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -154,6 +158,7 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
             "--net-depth" => net_depth = Some(number("--net-depth", it.next())?),
             "--inner-rollouts" => inner_rollouts = Some(number("--inner-rollouts", it.next())?),
             "--inner-net" => inner_file = Some(it.next().ok_or_else(|| format!("--inner-net needs a file; {USAGE}"))?),
+            "--inner-depth" => inner_depth = Some(number("--inner-depth", it.next())?),
             _ => return Err(format!("unexpected argument {arg}; {USAGE}")),
         }
     }
@@ -169,10 +174,10 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
     if inner_file.is_some() && inner_rollouts.is_none() {
         return Err(format!("--inner-net sets the net of the inner advice and needs --inner-rollouts; {USAGE}"));
     }
-    let net_depth = net_depth.unwrap_or(1);
-    if net_depth == 0 {
-        return Err(format!("--net-depth must be at least 1; {USAGE}"));
+    if inner_depth.is_some() && inner_rollouts.is_none() {
+        return Err(format!("--inner-depth sets where the inner advice's net values its playouts and needs --inner-rollouts; {USAGE}"));
     }
+    let (net_depth, inner_depth) = (net_depth.unwrap_or(1), inner_depth.unwrap_or(1));
     if !strategy_only && (changed.is_some() || !held.is_empty() || save.is_some() || against.is_some()) {
         return Err(format!("--set, --hold, --save and --against need --strategy-only; {USAGE}"));
     }
@@ -192,7 +197,22 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
     };
     let net = net_file.map(load).transpose()?;
     let inner_net = inner_file.map(load).transpose()?;
-    let inner = inner_rollouts.zip(inner_net.as_ref().or(net.as_ref())).map(|(rollouts, net)| Inner { net, rollouts });
+    // A net that values mornings only cannot read the state right after an action.
+    let any_state = |net: &Net, file: &String, depth: usize| -> Result<(), String> {
+        if depth == 0 && net.inputs() != INPUTS {
+            return Err(format!("net {file} values mornings only; depth 0 needs a net trained on states after an action"));
+        }
+        Ok(())
+    };
+    if let (Some(net), Some(file)) = (&net, net_file) {
+        any_state(net, file, net_depth)?;
+    }
+    if inner_rollouts.is_some()
+        && let (Some(net), Some(file)) = (inner_net.as_ref().or(net.as_ref()), inner_file.or(net_file))
+    {
+        any_state(net, file, inner_depth)?;
+    }
+    let inner = inner_rollouts.zip(inner_net.as_ref().or(net.as_ref())).map(|(rollouts, net)| Inner { net, rollouts, depth: inner_depth });
     let clock = std::time::Instant::now();
     let s = summarize(&bench(games, rollouts, seed, threads, rerolls, net.as_ref().map(|net| (net, net_depth)), inner));
     let secs = clock.elapsed().as_secs_f64();
@@ -207,7 +227,10 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
     out!("advice - strategy  {:+.3} +- {:.3} loot (paired)", s.gain.0, s.gain.1);
     out!("advice overruled the strategy at {} of {} decisions with 2+ options", s.overruled, s.decisions);
     let with_net = net_file.map_or(String::new(), |file| format!(", net {file} at depth {net_depth}"));
-    let with_inner = inner_rollouts.map_or(String::new(), |n| format!(", days played by the advice of net {} at {n} playouts", inner_file.or(net_file).map_or("", |f| f.as_str())));
+    let at_inner_depth = if inner_depth == 1 { String::new() } else { format!(" at depth {inner_depth}") };
+    let with_inner = inner_rollouts.map_or(String::new(), |n| {
+        format!(", days played by the advice of net {} at {n} playouts{at_inner_depth}", inner_file.or(net_file).map_or("", |f| f.as_str()))
+    });
     out!("{games} games, {rollouts} playouts per option, seed {seed}, {threads} threads, {rerolls} rerolls{with_net}{with_inner}, {secs:.1} s");
     Ok(ExitCode::SUCCESS)
 }
@@ -306,11 +329,12 @@ fn run_strategy_bench(
 }
 
 /// `samples --out file`: writes the labelled morning states of strategy runs for
-/// tools/train_net.py; see `warden::solver::sampling`.
+/// tools/train_net.py; see `warden::solver::sampling`. `--siblings-depth 0` puts the
+/// members of a sibling group right after the action instead of at the next morning.
 fn run_samples(args: &[String]) -> Result<ExitCode, String> {
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     let (mut games, mut seed, mut threads, mut explore, mut label_playouts) = (1000u32, 1u32, threads, 0.15f64, 1usize);
-    let mut siblings = 0.0f64;
+    let (mut siblings, mut siblings_depth) = (0.0f64, 1usize);
     let (mut out_file, mut net_file, mut rollouts) = (None::<&String>, None::<&String>, None::<usize>);
     let (mut net_depth, mut label_rollouts) = (None::<usize>, None::<usize>);
     let mut it = args.iter();
@@ -327,6 +351,7 @@ fn run_samples(args: &[String]) -> Result<ExitCode, String> {
             "--net-depth" => net_depth = Some(number("--net-depth", it.next())?),
             "--label-rollouts" => label_rollouts = Some(number("--label-rollouts", it.next())?),
             "--siblings" => siblings = number("--siblings", it.next())?,
+            "--siblings-depth" => siblings_depth = number("--siblings-depth", it.next())?,
             _ => return Err(format!("unexpected argument {arg}; {USAGE}")),
         }
     }
@@ -352,6 +377,9 @@ fn run_samples(args: &[String]) -> Result<ExitCode, String> {
     if !(0.0..=1.0).contains(&siblings) {
         return Err(format!("--siblings must be between 0 and 1; {USAGE}"));
     }
+    if siblings_depth > 1 {
+        return Err(format!("--siblings-depth must be 0 or 1; {USAGE}"));
+    }
     let net = match net_file {
         Some(file) => {
             let bytes = std::fs::read(file).map_err(|e| format!("{file}: {e}"))?;
@@ -361,7 +389,7 @@ fn run_samples(args: &[String]) -> Result<ExitCode, String> {
     };
     let advice = net.as_ref().map(|net| Advice { net, rollouts, depth: net_depth, label_rollouts });
     let clock = std::time::Instant::now();
-    let list = samples(games, seed, threads, explore, label_playouts, advice, siblings);
+    let list = samples(games, seed, threads, explore, label_playouts, advice, (siblings, siblings_depth));
     let secs = clock.elapsed().as_secs_f64();
     let mut bytes = Vec::new();
     write_samples(&list, &mut bytes).map_err(|e| format!("{out_file}: {e}"))?;
@@ -374,7 +402,8 @@ fn run_samples(args: &[String]) -> Result<ExitCode, String> {
     });
     let groups = if siblings > 0.0 {
         let sizes = group_sizes(&list);
-        format!(", {} sibling groups", sizes.iter().filter(|&&n| n >= 2).count())
+        let after = if siblings_depth == 0 { " right after the action" } else { "" };
+        format!(", {} sibling groups{after}", sizes.iter().filter(|&&n| n >= 2).count())
     } else {
         String::new()
     };
@@ -400,6 +429,9 @@ fn run_net(args: &[String]) -> Result<ExitCode, String> {
     let list = read_samples(&list).map_err(|e| format!("{samples_file}: {e}"))?;
     if list.is_empty() {
         return Err(format!("{samples_file}: no samples"));
+    }
+    if list.iter().any(|s| s.row.iter().any(|&(i, _)| i as usize >= net.inputs())) {
+        return Err(format!("{samples_file}: has states after an action, which net {net_file} cannot value"));
     }
     let values: Vec<f64> = list.iter().map(|s| net.value(&s.row) as f64).collect();
     let n = list.len() as f64;

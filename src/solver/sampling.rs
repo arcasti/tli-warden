@@ -3,11 +3,12 @@
 //! mean Riot loot of playouts from it on re-rolled hidden information,
 //! and sibling groups: the next-morning states of the options of one decision
 //! under one hidden future, each labelled with the mean loot of playouts that
-//! share their futures across the group. The playouts that give the labels
+//! share their futures across the group. A sibling group may hold the states
+//! right after each option's action instead. The playouts that give the labels
 //! follow the strategy, or the net's advice when `Advice::label_rollouts` is set.
 
 use super::bench::{advised, each_game, follow, solve_seed, start};
-use super::features::{INPUTS, Row, encode, is_morning};
+use super::features::{INPUTS, MORNING_INPUTS, Row, encode, is_morning};
 use super::net::Net;
 use super::solve::{Candidate, candidates, hide_future, playout, to_morning};
 use super::{Rng32, TUNED, decide};
@@ -44,8 +45,9 @@ pub struct Advice<'a> {
 /// `advice` when one is given. With odds `explore`, a move with two or more candidates is a
 /// uniformly random candidate instead. Each label is the mean loot of `label_playouts`
 /// playouts that follow the strategy, or `advice` when its `label_rollouts` is set. With odds
-/// `siblings`, a decision with two or more candidates also gives a sibling group (see
-/// `sibling_group`), its labels also the mean of `label_playouts` playouts. Group ids are
+/// `siblings.0`, a decision with two or more candidates also gives a sibling group (see
+/// `sibling_group`), its labels also the mean of `label_playouts` playouts, its members at
+/// depth `siblings.1` (1 = the next morning, 0 = right after the action). Group ids are
 /// 0, 1, 2, ... in the order of the result, distinct across games.
 pub fn samples(
     games: u32,
@@ -54,7 +56,7 @@ pub fn samples(
     explore: f64,
     label_playouts: usize,
     advice: Option<Advice>,
-    siblings: f64,
+    siblings: (f64, usize),
 ) -> Vec<Sample> {
     let mut out = Vec::new();
     let mut next = 0;
@@ -67,7 +69,8 @@ pub fn samples(
 }
 
 /// The samples of game `k` of `seed`, with group ids 0, 1, 2, ... within the game.
-fn game(seed: u32, k: u32, explore: f64, label_playouts: usize, advice: Option<Advice>, siblings: f64) -> Vec<Sample> {
+fn game(seed: u32, k: u32, explore: f64, label_playouts: usize, advice: Option<Advice>, siblings: (f64, usize)) -> Vec<Sample> {
+    let (siblings, sibling_depth) = siblings;
     let (mut st, mut rng) = start(seed, k, &[]);
     st.rerolls = (k % 3) as u8;
     let mut own = Rng32::new(seed.wrapping_mul(0x9e3779b9) ^ k.wrapping_mul(40503).wrapping_add(1));
@@ -85,7 +88,7 @@ fn game(seed: u32, k: u32, explore: f64, label_playouts: usize, advice: Option<A
         }
         let list = candidates(&st);
         if siblings > 0.0 && list.len() >= 2 && own.roll() < siblings {
-            let members = sibling_group(&st, &list, (own.roll() * 4294967296.0) as u32, label_playouts, labels);
+            let members = sibling_group(&st, &list, (own.roll() * 4294967296.0) as u32, label_playouts, labels, sibling_depth);
             if members.len() >= 2 {
                 out.extend(members.into_iter().map(|(row, label)| Sample { row, label, group }));
                 group += 1;
@@ -146,8 +149,10 @@ fn finish(st: &mut State, rng: &mut Rng32, labels: Option<Advice>, seed: u32) {
 /// under `h`, as the advice's rounds with a net see them (`Rollouts::round` then `settle`);
 /// playout `j` re-rolls the hidden information of the morning with a seed derived from `h`
 /// and `j`. The playouts follow the strategy, or `labels` when given, with the same seeds
-/// for every member. A candidate whose run ends before a morning gives none.
-fn sibling_group(st: &State, list: &[Candidate], h: u32, playouts: usize, labels: Option<Advice>) -> Vec<(Row, f32)> {
+/// for every member. A candidate whose run ends before a morning gives none. With `depth` 0
+/// each member is the state right after the candidate's action, and one whose run has ended
+/// there gives none.
+fn sibling_group(st: &State, list: &[Candidate], h: u32, playouts: usize, labels: Option<Advice>, depth: usize) -> Vec<(Row, f32)> {
     let mut hidden = st.clone();
     hide_future(&mut hidden, h);
     let mut members = Vec::new();
@@ -157,7 +162,8 @@ fn sibling_group(st: &State, list: &[Candidate], h: u32, playouts: usize, labels
             continue;
         }
         let mut roll = Rng32::new(h ^ 0x9e3779b9);
-        if !to_morning(&mut t, &TUNED, &mut roll, 1) {
+        let reached = if depth == 0 { t.phase != Phase::Ended } else { to_morning(&mut t, &TUNED, &mut roll, 1) };
+        if !reached {
             continue;
         }
         let row = encode(&t);
@@ -219,8 +225,8 @@ pub fn read_samples(bytes: &[u8]) -> Result<Vec<Sample>, String> {
     }
     let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
     let (inputs, count, nnz) = (word(4) as usize, word(8) as usize, word(12) as usize);
-    if inputs != INPUTS {
-        return Err(format!("samples file has {inputs} inputs, expected {INPUTS}"));
+    if inputs != INPUTS && inputs != MORNING_INPUTS {
+        return Err(format!("samples file has {inputs} inputs, expected {INPUTS} or {MORNING_INPUTS}"));
     }
     let (labels, groups, offsets) = (16, 16 + count * 4, 16 + count * 8);
     let indices = offsets + (count + 1) * 4;
@@ -255,15 +261,15 @@ mod tests {
 
     #[test]
     fn samples_do_not_depend_on_threads() {
-        assert_eq!(samples(6, 1, 1, 0.2, 2, None, 0.0), samples(6, 1, 3, 0.2, 2, None, 0.0));
+        assert_eq!(samples(6, 1, 1, 0.2, 2, None, (0.0, 1)), samples(6, 1, 3, 0.2, 2, None, (0.0, 1)));
     }
 
     #[test]
     fn advised_samples_do_not_depend_on_threads() {
         let zero = crate::solver::solve::tests::zero_net();
         let advice = Some(Advice { net: &zero, rollouts: 8, depth: 1, label_rollouts: None });
-        let one = samples(4, 1, 1, 0.0, 1, advice, 0.0);
-        assert_eq!(one, samples(4, 1, 3, 0.0, 1, advice, 0.0));
+        let one = samples(4, 1, 1, 0.0, 1, advice, (0.0, 1));
+        assert_eq!(one, samples(4, 1, 3, 0.0, 1, advice, (0.0, 1)));
         assert!(!one.is_empty() && one.iter().all(|s| s.label.is_finite()));
     }
 
@@ -271,8 +277,8 @@ mod tests {
     fn advised_labels_do_not_depend_on_threads() {
         let zero = crate::solver::solve::tests::zero_net();
         let advice = Some(Advice { net: &zero, rollouts: 4, depth: 2, label_rollouts: Some(2) });
-        let one = samples(2, 1, 1, 0.2, 1, advice, 0.3);
-        assert_eq!(one, samples(2, 1, 3, 0.2, 1, advice, 0.3));
+        let one = samples(2, 1, 1, 0.2, 1, advice, (0.3, 1));
+        assert_eq!(one, samples(2, 1, 3, 0.2, 1, advice, (0.3, 1)));
         assert!(one.windows(2).any(|w| w[0].group == w[1].group), "no sibling group");
         assert!(one.iter().all(|s| s.label.is_finite() && s.label >= 0.0));
     }
@@ -282,27 +288,27 @@ mod tests {
         let zero = crate::solver::solve::tests::zero_net();
         let strategy = Advice { net: &zero, rollouts: 4, depth: 1, label_rollouts: None };
         let advised = Advice { label_rollouts: Some(2), ..strategy };
-        let a = samples(2, 1, 2, 0.2, 1, Some(strategy), 0.3);
-        let b = samples(2, 1, 2, 0.2, 1, Some(advised), 0.3);
+        let a = samples(2, 1, 2, 0.2, 1, Some(strategy), (0.3, 1));
+        let b = samples(2, 1, 2, 0.2, 1, Some(advised), (0.3, 1));
         let shape = |l: &[Sample]| l.iter().map(|s| (s.row.clone(), s.group)).collect::<Vec<_>>();
         assert_eq!(shape(&a), shape(&b));
     }
 
     #[test]
     fn every_morning_gives_a_finite_label() {
-        let list = samples(4, 1, 2, 0.0, 2, None, 0.0);
+        let list = samples(4, 1, 2, 0.0, 2, None, (0.0, 1));
         assert!((4..=4 * 21).contains(&list.len()), "{} samples", list.len());
         assert!(list.iter().all(|s| s.label.is_finite() && s.label >= 0.0));
     }
 
     #[test]
     fn exploring_changes_the_samples() {
-        assert_ne!(samples(4, 1, 2, 0.5, 1, None, 0.0), samples(4, 1, 2, 0.0, 1, None, 0.0));
+        assert_ne!(samples(4, 1, 2, 0.5, 1, None, (0.0, 1)), samples(4, 1, 2, 0.0, 1, None, (0.0, 1)));
     }
 
     #[test]
     fn samples_file_round_trips() {
-        let list = samples(3, 1, 1, 0.2, 1, None, 0.5);
+        let list = samples(3, 1, 1, 0.2, 1, None, (0.5, 1));
         let mut bytes = Vec::new();
         write_samples(&list, &mut bytes).unwrap();
         assert_eq!(read_samples(&bytes).unwrap(), list);
@@ -311,7 +317,7 @@ mod tests {
     #[test]
     fn bad_samples_files_are_errors() {
         let mut bytes = Vec::new();
-        write_samples(&samples(1, 1, 1, 0.0, 1, None, 0.0), &mut bytes).unwrap();
+        write_samples(&samples(1, 1, 1, 0.0, 1, None, (0.0, 1)), &mut bytes).unwrap();
         assert!(read_samples(&bytes[..bytes.len() - 1]).is_err());
         assert!(read_samples(&bytes[..10]).is_err());
         bytes[0] = b'X';
@@ -320,15 +326,15 @@ mod tests {
 
     #[test]
     fn without_siblings_every_sample_is_alone() {
-        let list = samples(4, 1, 2, 0.2, 1, None, 0.0);
-        assert_eq!(list, samples(4, 1, 2, 0.2, 1, None, 0.0));
+        let list = samples(4, 1, 2, 0.2, 1, None, (0.0, 1));
+        assert_eq!(list, samples(4, 1, 2, 0.2, 1, None, (0.0, 1)));
         assert!(list.iter().enumerate().all(|(r, s)| s.group == r as u32));
     }
 
     #[test]
     fn siblings_form_groups() {
-        let list = samples(2, 1, 1, 0.2, 1, None, 1.0);
-        assert_eq!(list, samples(2, 1, 3, 0.2, 1, None, 1.0));
+        let list = samples(2, 1, 1, 0.2, 1, None, (1.0, 1));
+        assert_eq!(list, samples(2, 1, 3, 0.2, 1, None, (1.0, 1)));
         assert!(list.windows(2).all(|w| w[0].group <= w[1].group));
         let mut sizes = vec![0; list.last().map_or(0, |s| s.group as usize + 1)];
         for s in &list {
@@ -350,11 +356,11 @@ mod tests {
             assert!(apply(&mut st, &action).is_ok());
             list = candidates(&st);
         }
-        let one = sibling_group(&st, &list, 12345, 1, None);
-        let many = sibling_group(&st, &list, 12345, 16, None);
+        let one = sibling_group(&st, &list, 12345, 1, None, 1);
+        let many = sibling_group(&st, &list, 12345, 16, None, 1);
         assert!(one.len() >= 2 && one.len() == many.len());
         assert!(one.iter().zip(&many).all(|(a, b)| a.0 == b.0));
-        assert_eq!(many, sibling_group(&st, &list, 12345, 16, None));
+        assert_eq!(many, sibling_group(&st, &list, 12345, 16, None, 1));
         assert!(one.iter().zip(&many).any(|(a, b)| a.1 != b.1));
     }
 

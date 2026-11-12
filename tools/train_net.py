@@ -64,12 +64,10 @@ def read_samples(path):
 
 
 def join(sets):
-    """Several sample sets with the same inputs as one; each file's group ids come after the previous file's.
+    """Several sample sets as one, with the inputs of the widest; each file's group ids come after the
+    previous file's. A file with fewer inputs uses the first of them: inputs are only ever added at the end.
     Groups and offsets become int64; indices and values keep their types."""
-    inputs = sets[0][0]
-    for other in sets[1:]:
-        if other[0] != inputs:
-            raise SystemExit(f"the train files disagree on the inputs: {inputs} and {other[0]}")
+    inputs = max(s[0] for s in sets)
     labels = np.concatenate([s[1] for s in sets])
     shifts = np.cumsum([0] + [int(s[2][-1]) + 1 if len(s[2]) else 0 for s in sets[:-1]])
     groups = np.concatenate([s[2].astype(np.int64) + shift for s, shift in zip(sets, shifts)])
@@ -183,18 +181,17 @@ def main():
     torch.set_num_threads(args.threads)
     rng = np.random.default_rng(args.seed)
     # A pass over the labels alone gives the sample count and the mean for the output bias.
-    inputs, count, total = None, 0, 0.0
+    # The net takes the inputs of the widest train file (see `join`).
+    inputs, count, total = 0, 0, 0.0
     for path in args.train:
         file_inputs, labels = read_labels(path)
-        if inputs is not None and file_inputs != inputs:
-            raise SystemExit(f"the train files disagree on the inputs: {inputs} and {file_inputs}")
-        inputs, count, total = file_inputs, count + len(labels), total + float(labels.sum(dtype=np.float64))
+        inputs, count, total = max(inputs, file_inputs), count + len(labels), total + float(labels.sum(dtype=np.float64))
     del labels
     windowed = len(args.train) > args.window
     train = None if windowed else join([read_samples(path) for path in args.train])
     vals = [(path, read_samples(path)) for path in args.val]
     for path, val in vals:
-        if val[0] != inputs:
+        if val[0] > inputs:
             raise SystemExit(f"{path}: {val[0]} inputs, the train files have {inputs}")
     print(
         f"{count} train samples in {len(args.train)} files, window {args.window}"

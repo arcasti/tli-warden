@@ -1,11 +1,12 @@
-//! The inputs of a learned value function: a sparse encoding of a morning
-//! state (a Patrol with no pending choice and no incident to confirm) from
-//! what the player can see. It never reads the game's dice, the occupant
+//! The inputs of a learned value function: a sparse encoding of any state
+//! that has not ended, from what the player can see. A morning (a Patrol with
+//! no pending choice and no incident to confirm) uses only the first
+//! `MORNING_INPUTS` inputs. It never reads the game's dice, the occupant
 //! behind a door beyond what the door reveals, or which incident a marker
 //! holds.
 
-use crate::engine::data::{CAGE_FIGHT, IRON_LAW, OPULENCE, RAINBOW, TYRANNY, Tool, data};
-use crate::engine::state::{Phase, State};
+use crate::engine::data::{CAGE_FIGHT, Card, Gift, IRON_LAW, OPULENCE, RAINBOW, TYRANNY, Tool, data};
+use crate::engine::state::{Pending, Phase, State, ToolReason};
 
 /// The active inputs of one state: (input index, value), indices ascending, no duplicates.
 pub type Row = Vec<(u16, f32)>;
@@ -52,8 +53,31 @@ const G_DONE: usize = G_PROGRESS + 1;
 const G_THEME: usize = G_DONE + 1;
 const G_BOARD: usize = G_THEME + 1 + THEMES.len();
 
+/// Inputs a morning can use: the cell and global blocks.
+pub const MORNING_INPUTS: usize = G_BOARD + KINDS;
+
+/// Incidents in the data's incident list.
+const INCIDENTS: usize = 17;
+/// Kinds of pending choice: Tool for Start, Tool for Objective, Gift, Interrogation, Chain, Cell, Prey.
+const PENDING_KINDS: usize = 7;
+
+// Offsets of the day block, all zero on a morning.
+const D_MANAGE: usize = MORNING_INPUTS;
+const D_EVENT: usize = D_MANAGE + 1;
+const D_INCIDENT: usize = D_EVENT + 1;
+const D_CHAIN: usize = D_INCIDENT + INCIDENTS;
+const D_USED: usize = D_CHAIN + 1;
+const D_PENDING: usize = D_USED + 3;
+const D_MORE_PENDING: usize = D_PENDING + PENDING_KINDS;
+const D_TOOL_OPTIONS: usize = D_MORE_PENDING + 1;
+const D_GIFT_OPTIONS: usize = D_TOOL_OPTIONS + Tool::ALL.len();
+const D_GIFT_PICKS: usize = D_GIFT_OPTIONS + Gift::ALL.len();
+const D_CARD_OPTIONS: usize = D_GIFT_PICKS + 1;
+const D_CELL_OPTIONS: usize = D_CARD_OPTIONS + Card::ALL.len();
+const D_EATER: usize = D_CELL_OPTIONS + CELLS;
+
 /// Total input count.
-pub const INPUTS: usize = G_BOARD + KINDS;
+pub const INPUTS: usize = D_EATER + CELLS;
 
 /// Whether `st` is a morning: a Patrol with no pending choice and no incident to confirm.
 pub fn is_morning(st: &State) -> bool {
@@ -65,6 +89,7 @@ pub fn encode(st: &State) -> Row {
     let d = data();
     assert_eq!(d.cell_count, CELLS, "cell count");
     assert_eq!(d.objectives.len(), OBJECTIVES, "objective count");
+    assert_eq!(d.incidents.len(), INCIDENTS, "incident count");
     let mut row = Row::new();
     let mut put = |i: usize, v: f32| {
         if v != 0.0 {
@@ -134,6 +159,54 @@ pub fn encode(st: &State) -> Row {
     for (kind, &count) in board.iter().enumerate() {
         put(G_BOARD + kind, count as f32 / 4.0);
     }
+    put(D_MANAGE, f32::from(st.phase == Phase::Manage));
+    put(D_EVENT, f32::from(st.phase == Phase::Event));
+    if let Some(e) = st.event
+        && let Some(k) = d.incidents.iter().position(|x| x.id == e.id)
+    {
+        put(D_INCIDENT + k, 1.0);
+    }
+    // A Chain Reaction can wait into the next morning, where the morning inputs leave it out.
+    put(D_CHAIN, f32::from(st.chain && !is_morning(st)));
+    for (k, n) in [st.used.swap, st.used.devour, st.used.hunt].into_iter().enumerate() {
+        put(D_USED + k, n.min(3) as f32 / 3.0);
+    }
+    let Some(first) = st.pending.first() else {
+        return row;
+    };
+    let kind = match first {
+        Pending::Tool { reason: ToolReason::Start, .. } => 0,
+        Pending::Tool { reason: ToolReason::Objective, .. } => 1,
+        Pending::Gift { .. } => 2,
+        Pending::Interrogation { .. } => 3,
+        Pending::Chain { .. } => 4,
+        Pending::Cell { .. } => 5,
+        Pending::Prey { .. } => 6,
+    };
+    put(D_PENDING + kind, 1.0);
+    put(D_MORE_PENDING, (st.pending.len() - 1).min(3) as f32 / 3.0);
+    // Options as flags, so options in any order or repeated still give ascending indices.
+    let (at, len, options): (usize, usize, Vec<usize>) = match first {
+        Pending::Tool { options, .. } => (D_TOOL_OPTIONS, Tool::ALL.len(), options.iter().map(|&t| t as usize).collect()),
+        Pending::Gift { options, .. } => (D_GIFT_OPTIONS, Gift::ALL.len(), options.iter().map(|&g| g as usize).collect()),
+        Pending::Interrogation { options } => (D_CARD_OPTIONS, Card::ALL.len(), options.iter().map(|&c| c as usize).collect()),
+        Pending::Chain { options, .. } | Pending::Cell { options, .. } | Pending::Prey { options } => (D_CELL_OPTIONS, CELLS, options.clone()),
+    };
+    let mut on = vec![false; len];
+    for i in options.into_iter().filter(|&i| i < len) {
+        on[i] = true;
+    }
+    for (i, &o) in on.iter().enumerate() {
+        put(at + i, f32::from(o));
+    }
+    if let Pending::Gift { picks, .. } = first {
+        put(D_GIFT_PICKS, (*picks).min(3) as f32 / 3.0);
+    }
+    if let Pending::Chain { from, .. } = first
+        && *from < CELLS
+    {
+        put(D_EATER + from, 1.0);
+    }
     row
 }
 
@@ -147,6 +220,11 @@ mod tests {
 
     /// The morning states of games 0..8 of seed 1 played by the strategy.
     fn mornings() -> Vec<State> {
+        states().into_iter().filter(is_morning).collect()
+    }
+
+    /// Every state before the end of games 0..8 of seed 1 played by the strategy.
+    fn states() -> Vec<State> {
         let mut out = Vec::new();
         for k in 0..8 {
             let (mut st, mut rng) = start(1, k, &[]);
@@ -154,9 +232,7 @@ mod tests {
                 if st.phase == Phase::Ended {
                     break;
                 }
-                if is_morning(&st) {
-                    out.push(st.clone());
-                }
+                out.push(st.clone());
                 let Some(action) = decide(&st, &TUNED, &mut rng) else {
                     break;
                 };
@@ -170,8 +246,9 @@ mod tests {
 
     #[test]
     fn rows_are_sparse_ascending_and_in_range() {
-        let states = mornings();
-        assert!(states.len() >= 8);
+        let states = states();
+        assert!(states.iter().filter(|st| is_morning(st)).count() >= 8);
+        let mut day_block = false;
         for st in &states {
             let row = encode(st);
             assert!(row.windows(2).all(|w| w[0].0 < w[1].0), "ascending");
@@ -179,7 +256,13 @@ mod tests {
                 assert!((i as usize) < INPUTS);
                 assert!(v.is_finite() && v != 0.0);
             }
+            let beyond = row.iter().any(|&(i, _)| i as usize >= MORNING_INPUTS);
+            if is_morning(st) {
+                assert!(!beyond, "a morning uses the day block");
+            }
+            day_block |= beyond;
         }
+        assert!(day_block, "no state uses the day block");
     }
 
     #[test]

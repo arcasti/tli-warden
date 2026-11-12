@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn an_inner_advice_replays_and_leaves_the_strategy_side_alone() {
         let net = crate::solver::solve::tests::zero_net();
-        let inner = || play(1, 0, 8, 1, Some((&net, 2)), Some(Inner { net: &net, rollouts: 4 }));
+        let inner = || play(1, 0, 8, 1, Some((&net, 2)), Some(Inner { net: &net, rollouts: 4, depth: 1 }));
         let (with, again, plain) = (inner(), inner(), play(1, 0, 8, 1, None, None));
         assert_eq!(with, again);
         assert_eq!((with.strategy, with.strategy_loot), (plain.strategy, plain.strategy_loot));

@@ -185,26 +185,22 @@ pub fn encode(st: &State) -> Row {
     };
     put(D_PENDING + kind, 1.0);
     put(D_MORE_PENDING, (st.pending.len() - 1).min(3) as f32 / 3.0);
-    // Options as flags, so options in any order or repeated still give ascending indices.
-    let (at, len, options): (usize, usize, Vec<usize>) = match first {
-        Pending::Tool { options, .. } => (D_TOOL_OPTIONS, Tool::ALL.len(), options.iter().map(|&t| t as usize).collect()),
-        Pending::Gift { options, .. } => (D_GIFT_OPTIONS, Gift::ALL.len(), options.iter().map(|&g| g as usize).collect()),
-        Pending::Interrogation { options } => (D_CARD_OPTIONS, Card::ALL.len(), options.iter().map(|&c| c as usize).collect()),
-        Pending::Chain { options, .. } | Pending::Cell { options, .. } | Pending::Prey { options } => (D_CELL_OPTIONS, CELLS, options.clone()),
+    // Sorted and deduplicated, so options in any order or repeated still give ascending indices.
+    let (at, mut options): (usize, Vec<usize>) = match first {
+        Pending::Tool { options, .. } => (D_TOOL_OPTIONS, options.iter().map(|&t| t as usize).collect()),
+        Pending::Gift { options, .. } => (D_GIFT_OPTIONS, options.iter().map(|&g| g as usize).collect()),
+        Pending::Interrogation { options } => (D_CARD_OPTIONS, options.iter().map(|&c| c as usize).collect()),
+        Pending::Chain { options, .. } | Pending::Cell { options, .. } | Pending::Prey { options } => (D_CELL_OPTIONS, options.clone()),
     };
-    let mut on = vec![false; len];
-    for i in options.into_iter().filter(|&i| i < len) {
-        on[i] = true;
-    }
-    for (i, &o) in on.iter().enumerate() {
-        put(at + i, f32::from(o));
+    options.sort_unstable();
+    options.dedup();
+    for i in options {
+        put(at + i, 1.0);
     }
     if let Pending::Gift { picks, .. } = first {
         put(D_GIFT_PICKS, (*picks).min(3) as f32 / 3.0);
     }
-    if let Pending::Chain { from, .. } = first
-        && *from < CELLS
-    {
+    if let Pending::Chain { from, .. } = first {
         put(D_EATER + from, 1.0);
     }
     row

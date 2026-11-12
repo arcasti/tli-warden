@@ -47,7 +47,7 @@ pub struct Advice<'a> {
 /// playouts that follow the strategy, or `advice` when its `label_rollouts` is set. With odds
 /// `siblings.0`, a decision with two or more candidates also gives a sibling group (see
 /// `sibling_group`), its labels also the mean of `label_playouts` playouts, its members at
-/// depth `siblings.1` (1 = the next morning, 0 = right after the action). Group ids are
+/// the `siblings.1`-th morning (1 = the next morning, 0 = right after the action). Group ids are
 /// 0, 1, 2, ... in the order of the result, distinct across games.
 pub fn samples(
     games: u32,
@@ -144,9 +144,10 @@ fn finish(st: &mut State, rng: &mut Rng32, labels: Option<Advice>, seed: u32) {
 }
 
 /// The sibling group of the decision at `st`: for each candidate of `list` that applies on
-/// `st` with its hidden future re-rolled by `h`, the next-morning state the strategy reaches
-/// and the mean loot of `playouts` playouts from that morning. The first continues the run
-/// under `h`, as the advice's rounds with a net see them (`Rollouts::round` then `settle`);
+/// `st` with its hidden future re-rolled by `h`, the `depth`-th morning state the strategy
+/// reaches (1 = the next morning) and the mean loot of `playouts` playouts from that
+/// morning. The first continues the run under `h`, as the advice's rounds with a net see
+/// them (`Rollouts::round` then `settle`);
 /// playout `j` re-rolls the hidden information of the morning with a seed derived from `h`
 /// and `j`. The playouts follow the strategy, or `labels` when given, with the same seeds
 /// for every member. A candidate whose run ends before a morning gives none. With `depth` 0
@@ -162,7 +163,7 @@ fn sibling_group(st: &State, list: &[Candidate], h: u32, playouts: usize, labels
             continue;
         }
         let mut roll = Rng32::new(h ^ 0x9e3779b9);
-        let reached = if depth == 0 { t.phase != Phase::Ended } else { to_morning(&mut t, &TUNED, &mut roll, 1) };
+        let reached = if depth == 0 { t.phase != Phase::Ended } else { to_morning(&mut t, &TUNED, &mut roll, depth) };
         if !reached {
             continue;
         }

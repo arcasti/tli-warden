@@ -197,20 +197,16 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
     };
     let net = net_file.map(load).transpose()?;
     let inner_net = inner_file.map(load).transpose()?;
-    // A net that values mornings only cannot read the state right after an action.
-    let any_state = |net: &Net, file: &String, depth: usize| -> Result<(), String> {
-        if depth == 0 && net.inputs() != INPUTS {
-            return Err(format!("net {file} values mornings only; depth 0 needs a net trained on states after an action"));
-        }
-        Ok(())
-    };
-    if let (Some(net), Some(file)) = (&net, net_file) {
-        any_state(net, file, net_depth)?;
+    if net_depth == 0
+        && let (Some(net), Some(file)) = (&net, net_file)
+    {
+        any_state(net, file)?;
     }
     if inner_rollouts.is_some()
+        && inner_depth == 0
         && let (Some(net), Some(file)) = (inner_net.as_ref().or(net.as_ref()), inner_file.or(net_file))
     {
-        any_state(net, file, inner_depth)?;
+        any_state(net, file)?;
     }
     let inner = inner_rollouts.zip(inner_net.as_ref().or(net.as_ref())).map(|(rollouts, net)| Inner { net, rollouts, depth: inner_depth });
     let clock = std::time::Instant::now();
@@ -227,12 +223,19 @@ fn run_bench(args: &[String]) -> Result<ExitCode, String> {
     out!("advice - strategy  {:+.3} +- {:.3} loot (paired)", s.gain.0, s.gain.1);
     out!("advice overruled the strategy at {} of {} decisions with 2+ options", s.overruled, s.decisions);
     let with_net = net_file.map_or(String::new(), |file| format!(", net {file} at depth {net_depth}"));
-    let at_inner_depth = if inner_depth == 1 { String::new() } else { format!(" at depth {inner_depth}") };
     let with_inner = inner_rollouts.map_or(String::new(), |n| {
-        format!(", days played by the advice of net {} at {n} playouts{at_inner_depth}", inner_file.or(net_file).map_or("", |f| f.as_str()))
+        format!(", days played by the advice of net {} at {n} playouts at depth {inner_depth}", inner_file.or(net_file).map_or("", |f| f.as_str()))
     });
     out!("{games} games, {rollouts} playouts per option, seed {seed}, {threads} threads, {rerolls} rerolls{with_net}{with_inner}, {secs:.1} s");
     Ok(ExitCode::SUCCESS)
+}
+
+/// A net that values mornings only cannot read the state right after an action.
+fn any_state(net: &Net, file: &str) -> Result<(), String> {
+    if net.inputs() != INPUTS {
+        return Err(format!("net {file} values mornings only; depth 0 needs a net trained on states after an action"));
+    }
+    Ok(())
 }
 
 /// `--set name=value,...`: changes strategy weights, by `Params` field name.
@@ -329,8 +332,9 @@ fn run_strategy_bench(
 }
 
 /// `samples --out file`: writes the labelled morning states of strategy runs for
-/// tools/train_net.py; see `warden::solver::sampling`. `--siblings-depth 0` puts the
-/// members of a sibling group right after the action instead of at the next morning.
+/// tools/train_net.py; see `warden::solver::sampling`. `--siblings-depth K` puts the
+/// members of a sibling group at the K-th morning (default 1, the next morning), and
+/// `--siblings-depth 0` right after the action.
 fn run_samples(args: &[String]) -> Result<ExitCode, String> {
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     let (mut games, mut seed, mut threads, mut explore, mut label_playouts) = (1000u32, 1u32, threads, 0.15f64, 1usize);
@@ -366,19 +370,14 @@ fn run_samples(args: &[String]) -> Result<ExitCode, String> {
         return Err(format!("--label-rollouts sets the playouts of the advice that labels and needs --net; {USAGE}"));
     }
     let (rollouts, net_depth) = (rollouts.unwrap_or(16), net_depth.unwrap_or(1));
-    if games == 0 || threads == 0 || label_playouts == 0 || rollouts == 0 || net_depth == 0 || label_rollouts == Some(0) {
-        return Err(format!(
-            "--games, --threads, --label-playouts, --rollouts, --net-depth and --label-rollouts must be at least 1; {USAGE}"
-        ));
+    if games == 0 || threads == 0 || label_playouts == 0 || rollouts == 0 || label_rollouts == Some(0) {
+        return Err(format!("--games, --threads, --label-playouts, --rollouts and --label-rollouts must be at least 1; {USAGE}"));
     }
     if !(0.0..=1.0).contains(&explore) {
         return Err(format!("--explore must be between 0 and 1; {USAGE}"));
     }
     if !(0.0..=1.0).contains(&siblings) {
         return Err(format!("--siblings must be between 0 and 1; {USAGE}"));
-    }
-    if siblings_depth > 1 {
-        return Err(format!("--siblings-depth must be 0 or 1; {USAGE}"));
     }
     let net = match net_file {
         Some(file) => {
@@ -387,6 +386,11 @@ fn run_samples(args: &[String]) -> Result<ExitCode, String> {
         }
         None => None,
     };
+    if net_depth == 0
+        && let (Some(net), Some(file)) = (&net, net_file)
+    {
+        any_state(net, file)?;
+    }
     let advice = net.as_ref().map(|net| Advice { net, rollouts, depth: net_depth, label_rollouts });
     let clock = std::time::Instant::now();
     let list = samples(games, seed, threads, explore, label_playouts, advice, (siblings, siblings_depth));
@@ -396,7 +400,7 @@ fn run_samples(args: &[String]) -> Result<ExitCode, String> {
     std::fs::write(out_file, bytes).map_err(|e| format!("{out_file}: {e}"))?;
     let mean = list.iter().map(|s| s.label as f64).sum::<f64>() / list.len().max(1) as f64;
     let played = net_file.map_or(String::new(), |file| {
-        let depth = if net_depth > 1 { format!(" at depth {net_depth}") } else { String::new() };
+        let depth = if net_depth != 1 { format!(" at depth {net_depth}") } else { String::new() };
         let labels = label_rollouts.map_or(String::new(), |n| format!(", labels by that advice at {n} rollouts"));
         format!(", played by the advice with net {file} at {rollouts} rollouts{depth}{labels}")
     });

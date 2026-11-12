@@ -41,8 +41,7 @@ impl Net {
         let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let (inputs, h1, h2) = (word(4) as usize, word(8) as usize, word(12) as usize);
         if !accepted.contains(&inputs) {
-            let counts: Vec<String> = accepted.iter().map(|n| n.to_string()).collect();
-            return Err(format!("weights file has {inputs} inputs, expected {}", counts.join(" or ")));
+            return Err(format!("weights file has {inputs} inputs, expected one of {accepted:?}"));
         }
         let floats = inputs * h1 + h1 + h1 * h2 + h2 + h2 + 1;
         if bytes.len() != 16 + floats * 4 {

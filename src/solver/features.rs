@@ -185,7 +185,7 @@ pub fn encode(st: &State) -> Row {
     };
     put(D_PENDING + kind, 1.0);
     put(D_MORE_PENDING, (st.pending.len() - 1).min(3) as f32 / 3.0);
-    // Sorted and deduplicated, so options in any order or repeated still give ascending indices.
+    // Sorted, so tool options in draw order still give ascending indices.
     let (at, mut options): (usize, Vec<usize>) = match first {
         Pending::Tool { options, .. } => (D_TOOL_OPTIONS, options.iter().map(|&t| t as usize).collect()),
         Pending::Gift { options, .. } => (D_GIFT_OPTIONS, options.iter().map(|&g| g as usize).collect()),
@@ -193,7 +193,6 @@ pub fn encode(st: &State) -> Row {
         Pending::Chain { options, .. } | Pending::Cell { options, .. } | Pending::Prey { options } => (D_CELL_OPTIONS, options.clone()),
     };
     options.sort_unstable();
-    options.dedup();
     for i in options {
         put(at + i, 1.0);
     }
